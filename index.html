@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tally Room</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root{
+  --bg:#F5F3FA; --surface:#FFFFFF; --surface-2:#EDE9F6; --ink:#1E1838; --ink-2:#584F73; --muted:#8B849E;
+  --line:#E2DDEE; --line-2:#CFC8E2; --accent:#5A3BD6; --accent-ink:#FFFFFF; --accent-soft:#EAE4FB;
+  --good:#1F7A4D; --good-soft:#DFF3E7; --warn:#9A5B00; --warn-soft:#FBEBD0;
+  --shadow:0 1px 2px rgba(30,24,56,.06),0 8px 24px -12px rgba(30,24,56,.18);
+  --r1:#E6DEFB; --r2:#D2C5F7; --r3:#BBA9F2; --r4:#A28CEB; --r5:#8A6FE3; --r6:#7256DB; --r7:#5C3FD1; --r8:#4A30B4; --r9:#3B2594; --r10:#2C1B72;
+  --display:'Manrope',system-ui,sans-serif; --body:'Source Sans 3',system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#14111F; --surface:#1E192E; --surface-2:#282240; --ink:#F0ECF9; --ink-2:#B8B0CF; --muted:#7E7699;
+  --line:#2E2745; --line-2:#3E3660; --accent:#A48EF3; --accent-ink:#17122A; --accent-soft:#2A2247;
+  --good:#5ED39A; --good-soft:#173A2A; --warn:#F2B860; --warn-soft:#3A2A10;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 28px -14px rgba(0,0,0,.7);
+  --r1:#3A2F66; --r2:#493B80; --r3:#59489A; --r4:#6A57B3; --r5:#7C69C9; --r6:#8F7CDB; --r7:#A391E8; --r8:#B8A8F2; --r9:#CCC0F8; --r10:#E0D8FC;
+}}
+:root[data-theme="dark"]{
+  --bg:#14111F; --surface:#1E192E; --surface-2:#282240; --ink:#F0ECF9; --ink-2:#B8B0CF; --muted:#7E7699;
+  --line:#2E2745; --line-2:#3E3660; --accent:#A48EF3; --accent-ink:#17122A; --accent-soft:#2A2247;
+  --good:#5ED39A; --good-soft:#173A2A; --warn:#F2B860; --warn-soft:#3A2A10;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 28px -14px rgba(0,0,0,.7);
+  --r1:#3A2F66; --r2:#493B80; --r3:#59489A; --r4:#6A57B3; --r5:#7C69C9; --r6:#8F7CDB; --r7:#A391E8; --r8:#B8A8F2; --r9:#CCC0F8; --r10:#E0D8FC;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;line-height:1.15}
+.eyebrow{font-family:var(--display);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.wrap{max-width:1100px;margin:0 auto;padding:16px 16px 40px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-block:6px 14px}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:800;font-size:18px;letter-spacing:-.01em}
+.brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--r4),var(--r9));display:grid;place-items:center}
+.brand .mark i{display:block;width:4px;height:12px;background:var(--surface);border-radius:2px;box-shadow:-7px 3px 0 0 var(--surface),7px -3px 0 0 var(--surface)}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);font-size:14px;font-weight:600;font-family:var(--display)}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.pill.live .dot{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 25%,transparent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:12px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);font-family:var(--display);font-weight:700;font-size:15px;line-height:1;transition:transform .08s,background .15s}
+.btn:hover{background:var(--surface-2)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
+.btn.ghost:hover{background:var(--surface-2)}
+.btn.danger{color:#B4232C;border-color:transparent;background:transparent}
+.btn.sm{padding:7px 12px;font-size:14px;border-radius:10px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}
+.stage{display:grid;gap:16px}
+@media (min-width:900px){.stage.two{grid-template-columns:1fr 300px}}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.spacer{flex:1}
+.meta{color:var(--muted);font-size:14px}
+.qnum{font-family:var(--display);font-weight:800;font-size:13px;color:var(--accent);letter-spacing:.06em;text-transform:uppercase}
+.qtext{font-size:clamp(22px,3.2vw,34px);font-weight:700;letter-spacing:-.015em;margin-top:6px}
+.hidden-note{display:flex;align-items:center;gap:12px;padding:28px;border:1px dashed var(--line-2);border-radius:14px;color:var(--ink-2);background:var(--surface-2)}
+.progress{display:flex;align-items:center;gap:12px}
+.progress .bar{flex:1;height:8px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.progress .bar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .4s cubic-bezier(.2,.8,.2,1)}
+.progress b{font-family:var(--display);font-variant-numeric:tabular-nums;font-size:15px}
+
+/* chart */
+.chart{padding:22px 22px 18px}
+.chart-head{display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px}
+.hero{display:flex;align-items:baseline;gap:6px}
+.hero .num{font-family:var(--display);font-weight:800;font-size:56px;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums}
+.hero .den{font-family:var(--display);font-weight:600;font-size:20px;color:var(--muted)}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat .v{font-family:var(--display);font-weight:700;font-size:20px;font-variant-numeric:tabular-nums}
+.stat .l{font-size:13px;color:var(--muted)}
+.cols{display:grid;gap:8px;align-items:end;min-height:180px;position:relative;padding-top:24px}
+.col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;position:relative;min-height:170px}
+.col .count{font-family:var(--display);font-weight:700;font-size:14px;color:var(--ink-2);font-variant-numeric:tabular-nums;min-height:18px}
+.col .count small{color:var(--muted);font-weight:600}
+.dots{display:flex;flex-direction:column-reverse;gap:4px;align-items:center;width:100%}
+.dot-v{width:var(--d,22px);height:var(--d,22px);border-radius:50%;background:var(--c);box-shadow:0 0 0 2px var(--surface);animation:pop .35s cubic-bezier(.2,.9,.3,1.3) both;animation-delay:calc(var(--i)*40ms)}
+.bar-v{width:min(100%,64px);border-radius:6px 6px 2px 2px;background:var(--c);transform-origin:bottom;animation:grow .5s cubic-bezier(.2,.8,.2,1) both;min-height:3px}
+@keyframes pop{from{transform:scale(.2);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@media (prefers-reduced-motion:reduce){.dot-v,.bar-v,.mean-mark,.progress .bar i,.strip i{animation:none!important;transition:none!important}}
+.axis{display:grid;gap:8px;margin-top:8px;border-top:2px solid var(--line-2);padding-top:8px;position:relative}
+.axis .tick{text-align:center;font-family:var(--display);font-weight:700;font-size:15px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.axis .tick.hot{color:var(--ink)}
+.rail{position:relative;height:26px;margin-top:10px}.mean-mark.flip::after{left:auto;right:calc(100% + 8px)}
+.rail::before{content:"";position:absolute;left:0;right:0;top:50%;height:2px;background:var(--line);transform:translateY(-50%)}
+.mean-mark{position:absolute;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;z-index:1;border-radius:50%;background:var(--accent);border:3px solid var(--surface);box-shadow:0 0 0 2px var(--accent);transition:left .5s cubic-bezier(.2,.8,.2,1)}
+.mean-mark::after{content:attr(data-label);position:absolute;top:50%;left:calc(100% + 8px);transform:translateY(-50%);white-space:nowrap;background:var(--surface);padding:0 4px;font-family:var(--display);font-weight:800;font-size:12px;color:var(--accent);letter-spacing:.04em}
+.ends{display:flex;justify-content:space-between;gap:12px;margin-top:6px;font-size:14px;color:var(--muted);font-style:italic}
+.strip{display:flex;height:10px;border-radius:999px;overflow:hidden;gap:2px;margin-top:18px;background:var(--surface-2)}
+.strip i{display:block;height:100%;background:var(--c);transition:flex-grow .5s cubic-bezier(.2,.8,.2,1)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend span i{width:10px;height:10px;border-radius:3px;background:var(--c);display:inline-block}
+.empty{color:var(--muted);text-align:center;padding:40px 10px;font-style:italic}
+
+/* summary */
+.sum-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(140px,220px) 64px;gap:14px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.sum-row:first-of-type{border-top:0}
+.sum-row .t{font-weight:600;font-size:16px}
+.sum-row .t small{display:block;color:var(--muted);font-weight:400;font-size:13px}
+.sum-row .mini{display:flex;height:12px;gap:2px;border-radius:999px;overflow:hidden;background:var(--surface-2);position:relative}
+.sum-row .mini i{display:block;height:100%;background:var(--c)}
+.sum-row .m{font-family:var(--display);font-weight:800;font-size:20px;text-align:right;font-variant-numeric:tabular-nums}
+.sum-row .m small{font-size:12px;color:var(--muted);font-weight:600}
+@media (max-width:560px){.sum-row{grid-template-columns:1fr 56px}.sum-row .mini{grid-column:1/-1}}
+
+/* side */
+.side{padding:18px;align-self:start;display:flex;flex-direction:column;gap:14px}
+.qr{display:grid;place-items:center;padding:10px;background:#fff;border-radius:12px;border:1px solid var(--line)}
+.qr img,.qr canvas{display:block;max-width:100%}
+.link{font-size:13px;word-break:break-all;color:var(--ink-2);background:var(--surface-2);padding:8px 10px;border-radius:8px;user-select:all}
+.people{display:flex;flex-wrap:wrap;gap:6px}
+.people i{width:12px;height:12px;border-radius:50%;background:var(--line-2);display:inline-block;transition:background .3s}
+.people i.on{background:var(--good)}
+.people i.done{background:var(--accent)}
+
+/* participant */
+.p-wrap{max-width:560px;margin:0 auto;padding:16px 16px 40px;display:flex;flex-direction:column;gap:14px;min-height:100%}
+.p-q{padding:22px}
+.p-q .qtext{font-size:clamp(20px,5.5vw,26px)}
+.scale{display:grid;gap:8px;margin-top:18px}
+.scale button{aspect-ratio:1;border-radius:14px;border:2px solid var(--line-2);background:var(--surface);font-family:var(--display);font-weight:800;font-size:22px;color:var(--ink-2);transition:transform .1s,border-color .15s,background .15s}
+.scale button:hover{border-color:var(--accent)}
+.scale button.on{background:var(--c);border-color:var(--c);color:var(--sel-ink);transform:scale(1.04)}
+.scale-ends{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:8px;gap:12px}
+.toast{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;background:var(--good-soft);color:var(--good);font-weight:600;font-size:15px}
+.toast.wait{background:var(--surface-2);color:var(--ink-2)}
+.big-wait{padding:40px 24px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center}
+.pulse{width:14px;height:14px;border-radius:50%;background:var(--accent);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 40%,transparent)}50%{box-shadow:0 0 0 14px transparent}}
+
+/* config modal */
+.modal{position:fixed;inset:0;background:rgba(20,17,31,.55);display:grid;place-items:center;padding:16px;z-index:50;padding-top:calc(16px + env(safe-area-inset-top,0px))}
+.modal .card{width:min(820px,100%);max-height:100%;overflow:auto;padding:22px;display:flex;flex-direction:column;gap:16px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:13px;font-weight:600;color:var(--ink-2)}
+input[type=text],input[type=number],input[type=url],textarea,select{padding:9px 11px;border-radius:10px;border:1px solid var(--line-2);background:var(--surface);width:100%}
+textarea{resize:vertical;min-height:60px}
+.qcard{border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:10px;background:var(--bg)}
+.qcard .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.qcard .head{display:flex;align-items:center;gap:8px}
+.qcard .head .qnum{flex:1}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:12px;overflow:hidden}
+.seg button{padding:8px 14px;border:0;background:var(--surface);font-family:var(--display);font-weight:700;font-size:14px;color:var(--ink-2)}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+details summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
+.banner{padding:12px 14px;border-radius:12px;background:var(--warn-soft);color:var(--warn);font-size:14px;font-weight:600}
+</style>
+
+</head>
+<body>
+<div id="app"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+/* ======== YOUR SETTINGS (edit these three) ========
+   1. FIREBASE_CONFIG: paste the config object from your Firebase project (Project settings > Your apps > Web app).
+   2. POLL_ID: any word; change it to start a fresh, separate poll while keeping the old data.
+   3. HOST_KEY: a secret word. Open the page as  yourpage.html?host=YOURSECRET  once to become the presenter on that device. */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCN0pilBYUclgZI6kNQd4ns5N6VngWhLrw",
+  authDomain: "tallyroom-72b2d.firebaseapp.com",
+  databaseURL: "https://tallyroom-72b2d-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "tallyroom-72b2d",
+  storageBucket: "tallyroom-72b2d.firebasestorage.app",
+  messagingSenderId: "107998744016",
+  appId: "1:107998744016:web:72bcb2dbc4e702a0857dd5"
+};
+const POLL_ID = "workshop-1";
+const HOST_KEY = "paars-offsite";
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+(function(){
+"use strict";
+/* ============ defaults ============ */
+const DEFAULT_CONFIG = {
+  title: "Team self-assessment",
+  mode: "live",            // "live" = one question at a time, "batch" = answer all first, reveal one by one
+  joinUrl: "",
+  questions: [
+    q("Our strategy is clear enough that I could explain it to a new colleague in two minutes.",1,5,"Strongly disagree","Strongly agree"),
+    q("I know which three priorities matter most this quarter.",1,5,"Strongly disagree","Strongly agree"),
+    q("My day-to-day work visibly contributes to those priorities.",1,5,"Strongly disagree","Strongly agree"),
+    q("Decisions in our team are made at the right level, without unnecessary escalation.",1,5,"Strongly disagree","Strongly agree"),
+    q("When we agree on an action, it actually gets done.",1,5,"Never","Always"),
+    q("We regularly review progress and adjust course when needed.",1,5,"Never","Always"),
+    q("How confident are you that we will reach our goals this year?",1,10,"Not at all","Completely"),
+    q("How much energy does the current way of working give you?",1,5,"Drains me","Energises me")
+  ]
+};
+function q(text,min,max,lo,hi){ return {id:"q"+Math.random().toString(36).slice(2,8), text, min, max, lo, hi}; }
+const DEFAULT_SESSION = { phase:"lobby", current:0, revealed:[], round:1, showLive:false };
+
+/* ============ state ============ */
+const S = { cfg:null, ses:null, votes:{}, me:{id:null,isHost:false,canWrite:true}, ui:{view:null,configOpen:false,draft:null,readonly:false}, backend:null };
+const app = document.getElementById("app");
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ============ helpers ============ */
+const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function localId(){ try{ let id=localStorage.getItem("tr_pid"); if(!id){ id="p_"+Math.random().toString(36).slice(2,12); localStorage.setItem("tr_pid",id);} return id; }catch(e){ return "p_"+Math.random().toString(36).slice(2,12); } }
+function rampColor(idx,n){ // idx 0..n-1 -> --r1..--r10 spread evenly
+  if(n<=1) return "var(--r6)";
+  const step = 1 + Math.round(idx*(9/(n-1)));
+  return `var(--r${clamp(step,1,10)})`;
+}
+function selInk(idx,n){ const step=1+Math.round(idx*(9/(n-1||1))); return step>=5 ? "var(--surface)" : "var(--ink)"; }
+function fmt(x,d=1){ return Number.isFinite(x)? x.toFixed(d).replace(/\.0$/,"") : "–"; }
+const PRESENCE_MS = 150000; // a participant without answers counts as present for 2.5 min after their last heartbeat
+function hasAnswers(v){ return !!(v && v.answers && Object.keys(v.answers).length); }
+function currentRoundVotes(){ const r=S.ses?.round??1; const now=Date.now(); const out={};
+  for(const [pid,v] of Object.entries(S.votes)){ if(!v || v.round!==r) continue;
+    if(!hasAnswers(v)){ if(pid===S.me.id && S.me.isHost) continue; if(!v.t || now-v.t>PRESENCE_MS) continue; }
+    out[pid]=v; }
+  return out; }
+function answersFor(qid){ return Object.values(currentRoundVotes()).map(v=>v.answers?.[qid]).filter(x=>Number.isFinite(x)); }
+function joinedCount(){ return Object.keys(currentRoundVotes()).length; }
+function stats(vals,min,max){
+  const n=vals.length; if(!n) return {n:0};
+  const mean=vals.reduce((a,b)=>a+b,0)/n;
+  const sorted=[...vals].sort((a,b)=>a-b);
+  const median = n%2 ? sorted[(n-1)/2] : (sorted[n/2-1]+sorted[n/2])/2;
+  const sd=Math.sqrt(vals.reduce((a,b)=>a+(b-mean)**2,0)/n);
+  const counts={}; for(let v=min;v<=max;v++) counts[v]=0; vals.forEach(v=>{ if(counts[v]!=null) counts[v]++; });
+  let mode=min, best=-1; for(let v=min;v<=max;v++){ if(counts[v]>best){best=counts[v];mode=v;} }
+  return {n,mean,median,sd,counts,mode};
+}
+
+/* ============ chart ============ */
+function chartHTML(qu, vals, opts={}){
+  const n=vals.length, pts=qu.max-qu.min+1, st=stats(vals,qu.min,qu.max);
+  const useBars = n>40;
+  const maxCount = n? Math.max(...Object.values(st.counts)) : 0;
+  const cols = []; const ticks=[]; const strip=[]; const legend=[];
+  for(let v=qu.min, i=0; v<=qu.max; v++, i++){
+    const c = st.counts?.[v]||0; const color=rampColor(i,pts);
+    let marks="";
+    if(useBars){ const h=maxCount? Math.round(140*c/maxCount) : 0; marks=`<div class="bar-v" style="--c:${color};height:${h}px"></div>`; }
+    else { const d = pts>7 ? 16 : (n>16 ? 16 : 22); for(let k=0;k<c;k++) marks+=`<span class="dot-v" style="--c:${color};--d:${d}px;--i:${k}"></span>`; marks=`<div class="dots">${marks}</div>`; }
+    const pct = n? Math.round(100*c/n) : 0;
+    cols.push(`<div class="col">${c?`<div class="count">${c}<small> · ${pct}%</small></div>`:`<div class="count"></div>`}${marks}</div>`);
+    ticks.push(`<div class="tick ${c?"hot":""}">${v}</div>`);
+    if(c) strip.push(`<i style="--c:${color};flex-grow:${c}" title="${v}: ${c}"></i>`);
+    legend.push(`<span><i style="--c:${color}"></i>${v}</span>`);
+  }
+  const meanPos = n ? ((st.mean-qu.min)/(qu.max-qu.min))*100 : 0;
+  const cell = `calc((100% - ${(pts-1)*8}px)/${pts})`;
+  const meanLeft = n? `calc(${cell} * (${(st.mean-qu.min)} + 0.5) + ${8*(st.mean-qu.min)}px)` : "50%";
+  return `
+  <div class="chart-head">
+    <div class="hero"><span class="num">${n?fmt(st.mean):"–"}</span><span class="den">/ ${qu.max}</span></div>
+    <div class="stat"><span class="v">${n}</span><span class="l">${n===1?"answer":"answers"}</span></div>
+    <div class="stat"><span class="v">${n?fmt(st.median):"–"}</span><span class="l">median</span></div>
+    <div class="stat"><span class="v">${n?"±"+fmt(st.sd):"–"}</span><span class="l">spread</span></div>
+  </div>
+  ${n? `<div class="cols" style="grid-template-columns:repeat(${pts},minmax(0,1fr))">${cols.join("")}</div>
+  <div class="axis" style="grid-template-columns:repeat(${pts},minmax(0,1fr))">${ticks.join("")}</div>
+  <div class="ends"><span>${esc(qu.lo)}</span><span>${esc(qu.hi)}</span></div>
+  <div class="rail"><div data-label="mean ${fmt(st.mean)}" class="mean-mark ${(st.mean-qu.min)/(qu.max-qu.min)>0.78?"flip":""}" style="left:${meanLeft}"></div></div>`
+      : `<div class="empty">No answers yet.</div><div class="ends"><span>${esc(qu.lo)}</span><span>${esc(qu.hi)}</span></div>`}
+  <div class="strip">${strip.join("")}</div>`;
+}
+function miniStrip(qu, vals){
+  const pts=qu.max-qu.min+1, st=stats(vals,qu.min,qu.max); let s="";
+  for(let v=qu.min,i=0;v<=qu.max;v++,i++){ const c=st.counts?.[v]||0; if(c) s+=`<i style="--c:${rampColor(i,pts)};flex:${c}"></i>`; }
+  return `<div class="mini">${s}</div>`;
+}
+
+/* ============ rendering ============ */
+function render(){
+  if(!S.cfg||!S.ses){ app.innerHTML=`<div class="wrap"><div class="big-wait card"><div class="pulse"></div><div class="meta">Connecting…</div></div></div>`; return; }
+  const host = S.me.isHost && S.ui.view!=="participant";
+  app.innerHTML = host ? hostHTML() : participantHTML();
+  if(host) afterHost();
+  if(S.ui.configOpen) app.insertAdjacentHTML("beforeend", configHTML());
+}
+function topbar(rightHTML){
+  const ph=S.ses.phase; const live = ph!=="lobby";
+  return `<div class="topbar"><div class="brand"><span class="mark"><i></i></span>${esc(S.cfg.title)}</div>
+    <div class="controls">${rightHTML||""}<span class="pill ${live?"live":""}"><span class="dot"></span>${S.cfg.mode==="live"?"One at a time":"All first, then reveal"}</span></div></div>`;
+}
+
+/* ---- host ---- */
+function hostHTML(){
+  const ses=S.ses, cfg=S.cfg, Q=cfg.questions, ph=ses.phase; const joined=joinedCount();
+  const controls = `<button class="btn sm ghost" data-act="config">Edit questions</button><button class="btn sm ghost" data-act="asParticipant">View as participant</button>`;
+  let main="", side=sideHTML();
+  if(ph==="lobby"){
+    main=`<div class="card" style="padding:28px"><div class="eyebrow">Ready to start</div><h1 style="font-size:clamp(26px,4vw,40px);margin-top:8px">${esc(cfg.title)}</h1>
+      <p class="meta" style="margin:10px 0 22px">${Q.length} questions · ${joined} ${joined===1?"person has":"people have"} joined. Share the QR code or link on the right.</p>
+      <div class="controls"><div class="seg" role="group" aria-label="Mode"><button data-act="mode" data-v="live" class="${cfg.mode==="live"?"on":""}">One question at a time</button><button data-act="mode" data-v="batch" class="${cfg.mode==="batch"?"on":""}">Answer all first, then reveal</button></div></div>
+      <div class="controls" style="margin-top:22px"><button class="btn primary" data-act="start">${cfg.mode==="live"?"Start with question 1":"Open all questions"}</button>${Object.keys(S.votes).length?`<button class="btn ghost" data-act="reset">Clear previous answers</button>`:""}</div></div>`;
+  } else if(ph==="voting" && cfg.mode==="live"){
+    const qu=Q[ses.current]; const vals=answersFor(qu.id); const revealed=ses.revealed.includes(qu.id);
+    main=`<div class="card" style="padding:26px 26px 20px"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(qu.text)}</div>
+      <div class="progress" style="margin:20px 0 6px"><div class="bar"><i style="width:${joined?Math.round(100*vals.length/joined):0}%"></i></div><b>${vals.length} / ${joined} answered</b></div></div>
+      <div class="card chart">${revealed||ses.showLive ? chartHTML(qu,vals) : `<div class="hidden-note"><div class="pulse"></div><div>Answers are hidden until you reveal them. <span class="meta">${vals.length} in so far.</span></div></div>`}</div>
+      <div class="controls"><button class="btn" data-act="prev" ${ses.current===0?"disabled":""}>← Previous</button>
+        ${revealed?"":`<button class="btn primary" data-act="reveal">Reveal results</button>`}
+        ${ses.current<Q.length-1?`<button class="btn ${revealed?"primary":""}" data-act="next">Next question →</button>`:`<button class="btn ${revealed?"primary":""}" data-act="summary">Show summary</button>`}
+        <span class="spacer"></span><label class="meta" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="showLive" data-act="showLive" ${ses.showLive?"checked":""}> show answers as they come in</label></div>`;
+  } else if(ph==="voting" && cfg.mode==="batch"){
+    const done = Object.values(currentRoundVotes()).filter(v=>Q.every(qu=>Number.isFinite(v.answers?.[qu.id]))).length;
+    main=`<div class="card" style="padding:28px"><div class="eyebrow">Collecting answers</div><h2 style="font-size:28px;margin-top:8px">Everyone answers all ${Q.length} questions on their own device</h2>
+      <div class="progress" style="margin:22px 0 8px"><div class="bar"><i style="width:${joined?Math.round(100*done/joined):0}%"></i></div><b>${done} / ${joined} finished</b></div>
+      <p class="meta">Results stay hidden until you start revealing them, one question at a time.</p>
+      <div class="controls" style="margin-top:18px"><button class="btn primary" data-act="startReveal">Start revealing results</button><button class="btn ghost" data-act="lobby">Back to lobby</button></div></div>`;
+  } else if(ph==="results"){
+    const qu=Q[ses.current]; const vals=answersFor(qu.id);
+    main=`<div class="card" style="padding:26px 26px 20px"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(qu.text)}</div></div>
+      <div class="card chart">${chartHTML(qu,vals)}</div>
+      <div class="controls"><button class="btn" data-act="prev" ${ses.current===0?"disabled":""}>← Previous</button>
+        ${ses.current<Q.length-1?`<button class="btn primary" data-act="next">Next question →</button>`:`<button class="btn primary" data-act="summary">Show summary</button>`}</div>`;
+  } else if(ph==="summary"){
+    const rows = Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)}));
+    const sorted=[...rows].sort((a,b)=>((b.st.mean??-1)/b.qu.max)-((a.st.mean??-1)/a.qu.max));
+    main=`<div class="card" style="padding:26px"><div class="eyebrow">Summary</div><h2 style="font-size:28px;margin-top:6px">All ${Q.length} questions, highest average first</h2>
+      <div style="margin-top:14px">${sorted.map(r=>`<div class="sum-row"><div class="t">${esc(r.qu.text)}<small>Q${r.i+1} · ${r.st.n} answers · scale ${r.qu.min}–${r.qu.max}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${r.st.n?fmt(r.st.mean):"–"}<small> /${r.qu.max}</small></div></div>`).join("")}</div>
+      <div class="controls" style="margin-top:18px"><button class="btn" data-act="gotoResults" data-v="0">Back to question 1</button><button class="btn ghost" data-act="lobby">Back to lobby</button><span class="spacer"></span><button class="btn danger" data-act="reset">Clear all answers</button></div></div>`;
+  }
+  return `<div class="wrap">${topbar(controls)}${S.ui.readonly?`<div class="banner" style="margin-bottom:12px">You can see this session but this account is not allowed to change it.</div>`:""}<div class="stage two"><div class="stage">${main}</div>${side}</div></div>`;
+}
+function sideHTML(){
+  const url = S.cfg.joinUrl || location.href.split("#")[0].split("?")[0];
+  const rv=currentRoundVotes(); const Q=S.cfg.questions;
+  const dots = Object.values(rv).map(v=>{ const k=Q.filter(q=>Number.isFinite(v.answers?.[q.id])).length; return `<i class="${k===Q.length?"done":(k?"on":"on")}" title="${k}/${Q.length}"></i>`; }).join("");
+  return `<aside class="card side"><div><div class="eyebrow">Join</div><p class="meta" style="margin:4px 0 10px">Scan or open the link. No login needed on the self-hosted version.</p><div class="qr" id="qr"></div><div class="link" style="margin-top:8px">${esc(url)}</div></div>
+    <div><div class="eyebrow">In the room</div><p class="meta" style="margin:4px 0 8px">${Object.keys(rv).length} joined · round ${S.ses.round}</p><div class="people">${dots||'<span class="meta">Nobody yet</span>'}</div></div></aside>`;
+}
+let qrCache={};
+function afterHost(){
+  const el=document.getElementById("qr"); if(!el) return;
+  const url = S.cfg.joinUrl || location.href.split("#")[0].split("?")[0];
+  try{ if(window.QRCode){ el.innerHTML=""; new QRCode(el,{text:url,width:180,height:180,colorDark:"#1E1838",colorLight:"#ffffff",correctLevel:QRCode.CorrectLevel.M}); } else el.innerHTML=`<div class="meta">QR unavailable</div>`; }catch(e){ el.innerHTML=`<div class="meta">QR unavailable</div>`; }
+}
+
+/* ---- participant ---- */
+function myVotes(){ const v=S.votes[S.me.id]; return (v && v.round===S.ses.round) ? v : {round:S.ses.round, answers:{}}; }
+function scaleHTML(qu, chosen){
+  const pts=qu.max-qu.min+1; let b="";
+  for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${qu.id}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${rampColor(i,pts)};--sel-ink:${selInk(i,pts)}" aria-pressed="${chosen===v}">${v}</button>`; }
+  const cols = pts>6 ? Math.ceil(pts/2) : pts;
+  return `<div class="scale" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${b}</div><div class="scale-ends"><span>${esc(qu.lo)}</span><span>${esc(qu.hi)}</span></div>`;
+}
+function participantHTML(){
+  const ses=S.ses, cfg=S.cfg, Q=cfg.questions, ph=ses.phase, mine=myVotes();
+  const back = S.me.isHost ? `<button class="btn sm ghost" data-act="asHost">Back to presenter view</button>` : "";
+  let body="";
+  const ro = S.ui.readonly ? `<div class="banner">This account can watch but not vote (view-only access).</div>` : "";
+  if(ph==="lobby"){
+    body=`<div class="card big-wait"><div class="pulse"></div><h2 style="font-size:24px">You're in</h2><p class="meta">Waiting for the presenter to start. ${Q.length} questions coming up.</p></div>`;
+  } else if(ph==="voting" && cfg.mode==="live"){
+    const qu=Q[ses.current]; const chosen=mine.answers[qu.id]; const revealed=ses.revealed.includes(qu.id);
+    body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(qu.text)}</div>${revealed?"":scaleHTML(qu,chosen)}</div>
+      ${revealed ? `<div class="card chart">${chartHTML(qu,answersFor(qu.id))}</div>` : (Number.isFinite(chosen)?`<div class="toast">✓ Answer recorded: ${chosen}. You can change it until results are revealed.</div>`:`<div class="toast wait">Tap a number to answer.</div>`)}`;
+  } else if(ph==="voting" && cfg.mode==="batch"){
+    const done=Q.filter(q=>Number.isFinite(mine.answers[q.id])).length;
+    body=`<div class="progress card" style="padding:14px 18px"><div class="bar"><i style="width:${Math.round(100*done/Q.length)}%"></i></div><b>${done} / ${Q.length}</b></div>
+      ${Q.map((qu,i)=>`<div class="card p-q"><div class="qnum">Question ${i+1}</div><div class="qtext" style="font-size:20px">${esc(qu.text)}</div>${scaleHTML(qu,mine.answers[qu.id])}</div>`).join("")}
+      ${done===Q.length?`<div class="toast">✓ All ${Q.length} answered. Your answers are saved; you can still change them until the reveal starts.</div>`:`<div class="toast wait">${Q.length-done} to go. Answers save automatically.</div>`}`;
+  } else if(ph==="results"){
+    const qu=Q[ses.current];
+    body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(qu.text)}</div></div><div class="card chart">${chartHTML(qu,answersFor(qu.id))}</div>${Number.isFinite(mine.answers[qu.id])?`<div class="toast wait">You answered ${mine.answers[qu.id]}.</div>`:""}`;
+  } else if(ph==="summary"){
+    const rows=Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)})).sort((a,b)=>((b.st.mean??-1)/b.qu.max)-((a.st.mean??-1)/a.qu.max));
+    body=`<div class="card" style="padding:20px"><div class="eyebrow">Summary</div>${rows.map(r=>`<div class="sum-row"><div class="t">${esc(r.qu.text)}<small>Q${r.i+1} · ${r.st.n} answers</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${r.st.n?fmt(r.st.mean):"–"}<small> /${r.qu.max}</small></div></div>`).join("")}</div>`;
+  }
+  return `<div class="p-wrap"><div class="topbar"><div class="brand"><span class="mark"><i></i></span>${esc(cfg.title)}</div>${back}</div>${ro}${body}</div>`;
+}
+
+/* ---- config ---- */
+function configHTML(){
+  const d=S.ui.draft;
+  return `<div class="modal" id="modal"><div class="card" role="dialog" aria-label="Edit questions">
+    <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:22px;flex:1">Questions and settings</h2><button class="btn sm ghost" data-act="cfgClose">Close</button></div>
+    <div class="field"><label for="cfgTitle">Title</label><input type="text" id="cfgTitle" data-cfg="title" value="${esc(d.title)}"></div>
+    <div class="field"><label>Mode</label><div class="seg"><button data-act="cfgMode" data-v="live" class="${d.mode==="live"?"on":""}">One question at a time</button><button data-act="cfgMode" data-v="batch" class="${d.mode==="batch"?"on":""}">Answer all first, then reveal</button></div></div>
+    <div class="field"><label for="cfgJoin">Join link shown to participants (leave empty to use this page's address)</label><input type="url" id="cfgJoin" data-cfg="joinUrl" value="${esc(d.joinUrl||"")}" placeholder="https://…"></div>
+    <div style="display:grid;gap:12px">${d.questions.map((qu,i)=>`<div class="qcard" data-i="${i}">
+      <div class="head"><span class="qnum">Question ${i+1}</span><button class="btn sm ghost" data-act="qUp" data-i="${i}" ${i===0?"disabled":""} title="Move up">↑</button><button class="btn sm ghost" data-act="qDown" data-i="${i}" ${i===d.questions.length-1?"disabled":""} title="Move down">↓</button><button class="btn sm danger" data-act="qDel" data-i="${i}">Remove</button></div>
+      <textarea data-q="${i}" data-k="text" id="qt${i}" placeholder="Statement or question">${esc(qu.text)}</textarea>
+      <div class="row"><div class="field"><label for="qmin${i}">Scale from</label><input type="number" id="qmin${i}" data-q="${i}" data-k="min" value="${qu.min}" min="0" max="10"></div><div class="field"><label for="qmax${i}">to</label><input type="number" id="qmax${i}" data-q="${i}" data-k="max" value="${qu.max}" min="2" max="11"></div>
+      <div class="field"><label for="qlo${i}">Low end label</label><input type="text" id="qlo${i}" data-q="${i}" data-k="lo" value="${esc(qu.lo)}"></div><div class="field"><label for="qhi${i}">High end label</label><input type="text" id="qhi${i}" data-q="${i}" data-k="hi" value="${esc(qu.hi)}"></div></div></div>`).join("")}</div>
+    <div class="controls"><button class="btn" data-act="qAdd">+ Add question</button><button class="btn ghost" data-act="qAdd5">+ Add five (1–5, agree scale)</button></div>
+    <details><summary>Import / export as JSON</summary><div class="field" style="margin-top:10px"><textarea id="cfgJson" rows="6" style="font-family:ui-monospace,monospace;font-size:13px">${esc(JSON.stringify(d.questions.map(({text,min,max,lo,hi})=>({text,min,max,lo,hi})),null,1))}</textarea><div class="controls"><button class="btn sm" data-act="cfgImport">Replace questions with this JSON</button></div></div></details>
+    <div class="meta">Changing a question's scale after people answered keeps their answers; removing a question drops its answers.</div>
+    <div class="controls"><button class="btn primary" data-act="cfgSave">Save</button><button class="btn ghost" data-act="cfgClose">Cancel</button></div>
+  </div></div>`;
+}
+function readDraftFromDOM(){
+  const d=S.ui.draft; const t=document.getElementById("cfgTitle"); if(t) d.title=t.value.trim()||"Untitled";
+  const j=document.getElementById("cfgJoin"); if(j) d.joinUrl=j.value.trim();
+  document.querySelectorAll("[data-q][data-k]").forEach(el=>{ const qu=d.questions[+el.dataset.q]; if(!qu) return; const k=el.dataset.k; qu[k] = (k==="min"||k==="max") ? +el.value : el.value; });
+  d.questions.forEach(qu=>{ qu.min=clamp(Math.round(qu.min||1),0,10); qu.max=clamp(Math.round(qu.max||5),qu.min+1,11); qu.text=(qu.text||"").trim()||"Untitled question"; });
+}
+
+/* ============ actions ============ */
+let writeChain=Promise.resolve();
+function write(fn){ writeChain = writeChain.then(fn).catch(e=>{ console.warn("write failed",e); if(e&&e.code==="invalid_argument"){ S.ui.readonly=true; render(); } }); return writeChain; }
+function setSession(patch){ const next={...S.ses,...patch}; S.ses=next; render(); return write(()=>S.backend.setSession(next)); }
+function setConfig(next){ S.cfg=next; render(); return write(()=>S.backend.setConfig(next)); }
+
+app.addEventListener("click", e=>{
+  const b=e.target.closest("[data-act]"); if(!b) return;
+  const act=b.dataset.act, v=b.dataset.v, ses=S.ses, Q=S.cfg.questions;
+  switch(act){
+    case "mode": setConfig({...S.cfg, mode:v}); break;
+    case "start": setSession({phase:"voting", current:0, revealed:[], showLive:false}); break;
+    case "startReveal": setSession({phase:"results", current:0, revealed:Q.map(q=>q.id)}); break;
+    case "reveal": setSession({revealed:[...new Set([...ses.revealed, Q[ses.current].id])]}); break;
+    case "next": { const c=Math.min(Q.length-1, ses.current+1); setSession({current:c, phase: ses.phase==="results"?"results":"voting"}); break; }
+    case "prev": { const c=Math.max(0, ses.current-1); setSession({current:c}); break; }
+    case "gotoResults": setSession({phase:"results", current:+v||0}); break;
+    case "summary": setSession({phase:"summary"}); break;
+    case "lobby": setSession({phase:"lobby", current:0}); break;
+    case "showLive": setSession({showLive: b.checked}); break;
+    case "reset": if(confirm("Clear all answers and start a new round?")){ const r=(ses.round||1)+1; setSession({phase:"lobby", current:0, revealed:[], round:r}); write(()=>S.backend.clearVotes()); } break;
+    case "asParticipant": S.ui.view="participant"; render(); break;
+    case "asHost": S.ui.view=null; render(); break;
+    case "vote": {
+      const qid=b.dataset.q, val=+b.dataset.v; const mine=myVotes(); const next={round:S.ses.round, answers:{...mine.answers,[qid]:val}, t:Date.now()};
+      S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next)); break; }
+    case "config": S.ui.draft=JSON.parse(JSON.stringify(S.cfg)); S.ui.configOpen=true; render(); break;
+    case "cfgClose": S.ui.configOpen=false; S.ui.draft=null; render(); break;
+    case "cfgMode": readDraftFromDOM(); S.ui.draft.mode=v; render(); break;
+    case "qUp": case "qDown": { readDraftFromDOM(); const i=+b.dataset.i, j=act==="qUp"?i-1:i+1; const a=S.ui.draft.questions; [a[i],a[j]]=[a[j],a[i]]; render(); break; }
+    case "qDel": readDraftFromDOM(); S.ui.draft.questions.splice(+b.dataset.i,1); render(); break;
+    case "qAdd": readDraftFromDOM(); S.ui.draft.questions.push(q("",1,5,"Strongly disagree","Strongly agree")); render(); setTimeout(()=>document.getElementById("qt"+(S.ui.draft.questions.length-1))?.focus(),0); break;
+    case "qAdd5": readDraftFromDOM(); for(let k=0;k<5;k++) S.ui.draft.questions.push(q("",1,5,"Strongly disagree","Strongly agree")); render(); break;
+    case "cfgImport": { readDraftFromDOM(); try{ const arr=JSON.parse(document.getElementById("cfgJson").value); if(!Array.isArray(arr)) throw 0; S.ui.draft.questions=arr.map(x=>q(x.text||"",+x.min||1,+x.max||5,x.lo||"",x.hi||"")); render(); }catch(err){ alert("That JSON could not be read. Expected a list like [{\"text\":\"…\",\"min\":1,\"max\":5,\"lo\":\"…\",\"hi\":\"…\"}]"); } break; }
+    case "cfgSave": { readDraftFromDOM(); const d=S.ui.draft; if(!d.questions.length){ alert("Add at least one question."); break; } S.ui.configOpen=false; S.ui.draft=null; const cur=Math.min(S.ses.current, d.questions.length-1); setConfig(d); if(cur!==S.ses.current) setSession({current:cur}); break; }
+  }
+});
+app.addEventListener("keydown", e=>{ if(e.key==="Escape" && S.ui.configOpen){ S.ui.configOpen=false; render(); } });
+document.addEventListener("keydown", e=>{ if(!S.me.isHost||S.ui.configOpen||S.ui.view==="participant") return; if(e.target.matches("input,textarea")) return;
+  if(e.key==="ArrowRight"){ document.querySelector('[data-act="next"]:not([disabled])')?.click(); }
+  if(e.key==="ArrowLeft"){ document.querySelector('[data-act="prev"]:not([disabled])')?.click(); }
+  if(e.key===" " ){ const r=document.querySelector('[data-act="reveal"]'); if(r){ e.preventDefault(); r.click(); } } });
+
+/* ============ boot ============ */
+async function boot(){
+  render();
+  const be = await makeBackend();
+  S.backend=be; S.me.id=be.id; S.me.isHost=be.isHost; S.ui.readonly = be.canWrite===false;
+  let gotCfg=false, gotSes=false;
+  be.onConfig(c=>{ if(c && Array.isArray(c.questions) && c.questions.length){ S.cfg=c; } else if(!gotCfg){ S.cfg=JSON.parse(JSON.stringify(DEFAULT_CONFIG)); if(be.isHost) write(()=>be.setConfig(S.cfg)); } gotCfg=true; render(); });
+  be.onSession(s=>{ if(s && s.phase){ S.ses={...DEFAULT_SESSION,...s}; } else if(!gotSes){ S.ses={...DEFAULT_SESSION}; if(be.isHost) write(()=>be.setSession(S.ses)); } gotSes=true; render(); });
+  be.onVotes(v=>{ S.votes=v||{}; render(); });
+  // announce presence so the host sees who joined (a vote doc with no answers)
+  function heartbeat(){ if(!S.ses || be.canWrite===false) return; const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
+    const cur=S.votes[be.id]; const doc = (cur && cur.round===S.ses.round) ? {...cur, t:Date.now()} : {round:S.ses.round, answers:{}, t:Date.now()};
+    S.votes[be.id]=doc; write(()=>be.setVotes(be.id,doc)); }
+  setTimeout(heartbeat, 800);
+  setInterval(heartbeat, 60000);
+  if(be.isHost) setInterval(render, 30000);
+  document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") heartbeat(); });
+}
+
+/* ============ backends ============ */
+async function makeBackend(){
+  if(window.firebase && FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.databaseURL){ return makeFirebaseBackend(); }
+  console.warn("Firebase not configured: running in single-browser demo mode.");
+  return makeDemoBackend();
+}
+
+/* Demo backend: no network, one browser, 8 simulated participants (for previewing the design) */
+function makeDemoBackend(){
+  const listeners={cfg:[],ses:[],votes:[]}; let cfg=null, ses=null; const votes={};
+  const emit=(k,v)=>listeners[k].forEach(f=>f(v));
+  const id=localId();
+  const be={ id, isHost:true, canWrite:true,
+    onConfig:f=>{listeners.cfg.push(f); f(cfg);}, onSession:f=>{listeners.ses.push(f); f(ses);}, onVotes:f=>{listeners.votes.push(f); f({...votes});},
+    setConfig:async c=>{cfg=c; emit("cfg",cfg);}, setSession:async s=>{ses=s; emit("ses",ses); simulate();}, setVotes:async(pid,v)=>{votes[pid]=v; emit("votes",{...votes});},
+    clearVotes:async()=>{ for(const k of Object.keys(votes)) delete votes[k]; emit("votes",{}); } };
+  const names=["a","b","c","d","e","f","g","h"];
+  function simulate(){ if(!ses||!cfg) return; if(ses.phase==="lobby"){ names.forEach((n,i)=>setTimeout(()=>{ if(!votes["demo_"+n]||votes["demo_"+n].round!==ses.round){ votes["demo_"+n]={round:ses.round,answers:{},t:Date.now()}; emit("votes",{...votes}); } }, 300*i)); return; }
+    if(ses.phase==="voting"){ const qs = cfg.mode==="live" ? [cfg.questions[ses.current]] : cfg.questions; names.forEach((n,i)=>qs.forEach((qu,j)=>setTimeout(()=>{ const v=votes["demo_"+n]||{round:ses.round,answers:{}}; if(v.answers[qu.id]!=null) return; const bias=(j%3===0?0.75:j%3===1?0.55:0.4); const r=(Math.random()+Math.random()+Math.random())/3; const val=Math.round(qu.min+(qu.max-qu.min)*clamp(r*1.1+bias*0.5-0.3,0,1)); v.answers[qu.id]=val; v.round=ses.round; votes["demo_"+n]=v; emit("votes",{...votes}); }, 500+400*i+150*j))); } }
+  return be;
+}
+/* Firebase Realtime Database backend (self-hosted version, open to anyone with the link) */
+function makeFirebaseBackend(){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  const root = firebase.database().ref("polls/"+POLL_ID);
+  const params = new URLSearchParams(location.search);
+  let isHost=false;
+  try{
+    if(params.get("host")===HOST_KEY && HOST_KEY){ localStorage.setItem("tr_host_"+POLL_ID,"1"); }
+    if(params.get("host")==="off"){ localStorage.removeItem("tr_host_"+POLL_ID); }
+    isHost = localStorage.getItem("tr_host_"+POLL_ID)==="1";
+  }catch(e){ isHost = params.get("host")===HOST_KEY; }
+  return { id: localId(), isHost, canWrite:true,
+    onConfig: f => root.child("config").on("value", s=>{ const v=s.val(); if(v && v.questions && !Array.isArray(v.questions)) v.questions=Object.values(v.questions); f(v); }),
+    onSession: f => root.child("session").on("value", s=>{ const v=s.val(); if(v && v.revealed && !Array.isArray(v.revealed)) v.revealed=Object.values(v.revealed); if(v && !v.revealed) v.revealed=[]; f(v); }),
+    onVotes: f => root.child("votes").on("value", s=>f(s.val()||{})),
+    setConfig: c => root.child("config").set(c),
+    setSession: s => root.child("session").set(s),
+    setVotes: (pid,v) => root.child("votes/"+pid).set(v),
+    clearVotes: () => root.child("votes").remove()
+  };
+}
+
+
+boot();
+})();
+</script>
+
+</body>
+</html>
