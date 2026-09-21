@@ -131,6 +131,11 @@ h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;line-height:1.15}
 .scale button{aspect-ratio:1;border-radius:14px;border:2px solid var(--line-2);background:var(--surface);font-family:var(--display);font-weight:800;font-size:22px;color:var(--ink-2);transition:transform .1s,border-color .15s,background .15s}
 .scale button:hover{border-color:var(--accent)}
 .scale button.on{background:var(--c);border-color:var(--c);color:var(--sel-ink);transform:scale(1.04)}
+.scale.opts button{aspect-ratio:auto;text-align:left;padding:12px 14px;display:flex;gap:12px;align-items:center;font-family:var(--body);font-weight:600;font-size:16px;line-height:1.3;color:var(--ink)}
+.scale.opts button b{font-family:var(--display);font-weight:800;font-size:14px;min-width:24px;color:var(--muted)}
+.scale.opts button.on b{color:inherit;opacity:.8}
+.axis .tick.lab{font-size:12px;line-height:1.2;font-weight:600;padding:0 2px;overflow-wrap:anywhere}
+.axis .tick.lab b{display:block;font-size:14px;font-weight:800}
 .scale-ends{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:8px;gap:12px}
 .toast{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;background:var(--good-soft);color:var(--good);font-weight:600;font-size:15px}
 .toast.wait{background:var(--surface-2);color:var(--ink-2)}
@@ -199,7 +204,13 @@ const DEFAULT_CONFIG = {
     q("How much energy does the current way of working give you?",1,5,"Drains me","Energises me")
   ]
 };
-function q(text,min,max,lo,hi){ return {id:"q"+Math.random().toString(36).slice(2,8), text, min, max, lo, hi}; }
+function normOptions(x){ if(!x) return []; if(typeof x==="string") x=x.split(/\r?\n/); if(!Array.isArray(x)) x=Object.values(x); return x.map(o=>String((o&&typeof o==="object")?(o.label??o.text??""):o??"").trim()).filter(Boolean).slice(0,11); }
+function q(text,min,max,lo,hi,options){ const id="q"+Math.random().toString(36).slice(2,8); const o=normOptions(options);
+  if(o.length>=2) return {id, text, kind:"options", options:o, min:1, max:o.length, lo:"", hi:""};
+  return {id, text, min, max, lo, hi}; }
+const isOpt = qu => qu && qu.kind==="options" && Array.isArray(qu.options) && qu.options.length>=2;
+const optLabel = (qu,v) => isOpt(qu) ? (qu.options[v-1] ?? String(v)) : String(v);
+function exportQ(qu){ return isOpt(qu) ? {text:qu.text, options:[...qu.options]} : {text:qu.text,min:qu.min,max:qu.max,lo:qu.lo,hi:qu.hi}; }
 const DEFAULT_SESSION = { phase:"lobby", current:0, revealed:[], round:1, showLive:false };
 
 /* ============ state ============ */
@@ -251,13 +262,29 @@ function chartHTML(qu, vals, opts={}){
     else { const d = pts>7 ? 16 : (n>16 ? 16 : 22); for(let k=0;k<c;k++) marks+=`<span class="dot-v" style="--c:${color};--d:${d}px;--i:${k}"></span>`; marks=`<div class="dots">${marks}</div>`; }
     const pct = n? Math.round(100*c/n) : 0;
     cols.push(`<div class="col">${c?`<div class="count">${c}<small> · ${pct}%</small></div>`:`<div class="count"></div>`}${marks}</div>`);
-    ticks.push(`<div class="tick ${c?"hot":""}">${v}</div>`);
-    if(c) strip.push(`<i style="--c:${color};flex-grow:${c}" title="${v}: ${c}"></i>`);
-    legend.push(`<span><i style="--c:${color}"></i>${v}</span>`);
+    ticks.push(isOpt(qu) ? `<div class="tick lab ${c?"hot":""}"><b>${v}</b>${esc(qu.options[i])}</div>` : `<div class="tick ${c?"hot":""}">${v}</div>`);
+    if(c) strip.push(`<i style="--c:${color};flex-grow:${c}" title="${esc(optLabel(qu,v))}: ${c}"></i>`);
+    legend.push(`<span><i style="--c:${color}"></i>${esc(optLabel(qu,v))}</span>`);
   }
   const meanPos = n ? ((st.mean-qu.min)/(qu.max-qu.min))*100 : 0;
   const cell = `calc((100% - ${(pts-1)*8}px)/${pts})`;
   const meanLeft = n? `calc(${cell} * (${(st.mean-qu.min)} + 0.5) + ${8*(st.mean-qu.min)}px)` : "50%";
+  if(isOpt(qu)){
+    const distinct = n? Object.values(st.counts).filter(c=>c>0).length : 0;
+    const top = n? st.counts[st.mode] : 0;
+    const modes = n? Object.keys(st.counts).filter(k=>st.counts[k]===top).map(k=>optLabel(qu,+k)) : [];
+    const modeTxt = modes.length>1 ? "Tie: "+modes.join(" · ") : (modes[0]||"–");
+    return `
+  <div class="chart-head">
+    <div class="hero"><span class="num">${n?top:"–"}</span><span class="den">/ ${n||"–"} ${n?"chose":""}</span></div>
+    <div class="stat"><span class="v" style="font-size:17px;max-width:360px">${n?esc(modeTxt):"–"}</span><span class="l">most chosen</span></div>
+    <div class="stat"><span class="v">${n?distinct:"–"}<small style="font-size:13px;color:var(--muted)"> / ${pts}</small></span><span class="l">options chosen</span></div>
+  </div>
+  ${n? `<div class="cols" style="grid-template-columns:repeat(${pts},minmax(0,1fr))">${cols.join("")}</div>
+  <div class="axis" style="grid-template-columns:repeat(${pts},minmax(0,1fr))">${ticks.join("")}</div>`
+      : `<div class="empty">No answers yet.</div><div class="axis" style="grid-template-columns:repeat(${pts},minmax(0,1fr))">${ticks.join("")}</div>`}
+  <div class="strip">${strip.join("")}</div>`;
+  }
   return `
   <div class="chart-head">
     <div class="hero"><span class="num">${n?fmt(st.mean):"–"}</span><span class="den">/ ${qu.max}</span></div>
@@ -272,6 +299,8 @@ function chartHTML(qu, vals, opts={}){
       : `<div class="empty">No answers yet.</div><div class="ends"><span>${esc(qu.lo)}</span><span>${esc(qu.hi)}</span></div>`}
   <div class="strip">${strip.join("")}</div>`;
 }
+function sumScore(r){ if(!r.st.n) return -1; return isOpt(r.qu) ? r.st.counts[r.st.mode]/r.st.n : r.st.mean/r.qu.max; }
+function sumMetric(r){ if(!r.st.n) return "–"; return isOpt(r.qu) ? `${r.st.counts[r.st.mode]}<small> /${r.st.n}</small>` : `${fmt(r.st.mean)}<small> /${r.qu.max}</small>`; }
 function miniStrip(qu, vals){
   const pts=qu.max-qu.min+1, st=stats(vals,qu.min,qu.max); let s="";
   for(let v=qu.min,i=0;v<=qu.max;v++,i++){ const c=st.counts?.[v]||0; if(c) s+=`<i style="--c:${rampColor(i,pts)};flex:${c}"></i>`; }
@@ -285,6 +314,7 @@ function render(){
   app.innerHTML = host ? hostHTML() : participantHTML();
   if(host) afterHost();
   if(S.ui.configOpen) app.insertAdjacentHTML("beforeend", configHTML());
+  if(S.ui.configOpen) app.querySelector("#modal")?.addEventListener("input", ()=>{ try{ readDraftFromDOM(); }catch(e){} }, {passive:true});
 }
 function topbar(rightHTML){
   const ph=S.ses.phase; const live = ph!=="lobby";
@@ -325,9 +355,9 @@ function hostHTML(){
         ${ses.current<Q.length-1?`<button class="btn primary" data-act="next">Next question →</button>`:`<button class="btn primary" data-act="summary">Show summary</button>`}</div>`;
   } else if(ph==="summary"){
     const rows = Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)}));
-    const sorted=[...rows].sort((a,b)=>((b.st.mean??-1)/b.qu.max)-((a.st.mean??-1)/a.qu.max));
-    main=`<div class="card" style="padding:26px"><div class="eyebrow">Summary</div><h2 style="font-size:28px;margin-top:6px">All ${Q.length} questions, highest average first</h2>
-      <div style="margin-top:14px">${sorted.map(r=>`<div class="sum-row"><div class="t">${esc(r.qu.text)}<small>Q${r.i+1} · ${r.st.n} answers · scale ${r.qu.min}–${r.qu.max}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${r.st.n?fmt(r.st.mean):"–"}<small> /${r.qu.max}</small></div></div>`).join("")}</div>
+    const sorted=[...rows].sort((a,b)=>sumScore(b)-sumScore(a));
+    main=`<div class="card" style="padding:26px"><div class="eyebrow">Summary</div><h2 style="font-size:28px;margin-top:6px">All ${Q.length} questions, highest average or agreement first</h2>
+      <div style="margin-top:14px">${sorted.map(r=>`<div class="sum-row"><div class="t">${esc(r.qu.text)}<small>Q${r.i+1} · ${r.st.n} answers · ${isOpt(r.qu)?`${r.qu.options.length} options${r.st.n?` · most chosen: ${esc(optLabel(r.qu,r.st.mode))}`:""}`:`scale ${r.qu.min}–${r.qu.max}`}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${sumMetric(r)}</div></div>`).join("")}</div>
       <div class="controls" style="margin-top:18px"><button class="btn" data-act="gotoResults" data-v="0">Back to question 1</button><button class="btn ghost" data-act="lobby">Back to lobby</button><span class="spacer"></span><button class="btn danger" data-act="reset">Clear all answers</button></div></div>`;
   }
   return `<div class="wrap">${topbar(controls)}${S.ui.readonly?`<div class="banner" style="margin-bottom:12px">You can see this session but this account is not allowed to change it.</div>`:""}<div class="stage two"><div class="stage">${main}</div>${side}</div></div>`;
@@ -350,6 +380,10 @@ function afterHost(){
 function myVotes(){ const v=S.votes[S.me.id]; return (v && v.round===S.ses.round) ? v : {round:S.ses.round, answers:{}}; }
 function scaleHTML(qu, chosen){
   const pts=qu.max-qu.min+1; let b="";
+  if(isOpt(qu)){
+    for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${qu.id}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${rampColor(i,pts)};--sel-ink:${selInk(i,pts)}" aria-pressed="${chosen===v}"><b>${v}</b><span>${esc(qu.options[i])}</span></button>`; }
+    return `<div class="scale opts" style="grid-template-columns:1fr">${b}</div>`;
+  }
   for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${qu.id}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${rampColor(i,pts)};--sel-ink:${selInk(i,pts)}" aria-pressed="${chosen===v}">${v}</button>`; }
   const cols = pts>6 ? Math.ceil(pts/2) : pts;
   return `<div class="scale" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${b}</div><div class="scale-ends"><span>${esc(qu.lo)}</span><span>${esc(qu.hi)}</span></div>`;
@@ -364,7 +398,7 @@ function participantHTML(){
   } else if(ph==="voting" && cfg.mode==="live"){
     const qu=Q[ses.current]; const chosen=mine.answers[qu.id]; const revealed=ses.revealed.includes(qu.id);
     body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(qu.text)}</div>${revealed?"":scaleHTML(qu,chosen)}</div>
-      ${revealed ? `<div class="card chart">${chartHTML(qu,answersFor(qu.id))}</div>` : (Number.isFinite(chosen)?`<div class="toast">✓ Answer recorded: ${chosen}. You can change it until results are revealed.</div>`:`<div class="toast wait">Tap a number to answer.</div>`)}`;
+      ${revealed ? `<div class="card chart">${chartHTML(qu,answersFor(qu.id))}</div>` : (Number.isFinite(chosen)?`<div class="toast">✓ Answer recorded: ${esc(optLabel(qu,chosen))}. You can change it until results are revealed.</div>`:`<div class="toast wait">${isOpt(qu)?"Tap an option to answer.":"Tap a number to answer."}</div>`)}`;
   } else if(ph==="voting" && cfg.mode==="batch"){
     const done=Q.filter(q=>Number.isFinite(mine.answers[q.id])).length;
     body=`<div class="progress card" style="padding:14px 18px"><div class="bar"><i style="width:${Math.round(100*done/Q.length)}%"></i></div><b>${done} / ${Q.length}</b></div>
@@ -372,10 +406,10 @@ function participantHTML(){
       ${done===Q.length?`<div class="toast">✓ All ${Q.length} answered. Your answers are saved; you can still change them until the reveal starts.</div>`:`<div class="toast wait">${Q.length-done} to go. Answers save automatically.</div>`}`;
   } else if(ph==="results"){
     const qu=Q[ses.current];
-    body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(qu.text)}</div></div><div class="card chart">${chartHTML(qu,answersFor(qu.id))}</div>${Number.isFinite(mine.answers[qu.id])?`<div class="toast wait">You answered ${mine.answers[qu.id]}.</div>`:""}`;
+    body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(qu.text)}</div></div><div class="card chart">${chartHTML(qu,answersFor(qu.id))}</div>${Number.isFinite(mine.answers[qu.id])?`<div class="toast wait">You answered ${esc(optLabel(qu,mine.answers[qu.id]))}.</div>`:""}`;
   } else if(ph==="summary"){
-    const rows=Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)})).sort((a,b)=>((b.st.mean??-1)/b.qu.max)-((a.st.mean??-1)/a.qu.max));
-    body=`<div class="card" style="padding:20px"><div class="eyebrow">Summary</div>${rows.map(r=>`<div class="sum-row"><div class="t">${esc(r.qu.text)}<small>Q${r.i+1} · ${r.st.n} answers</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${r.st.n?fmt(r.st.mean):"–"}<small> /${r.qu.max}</small></div></div>`).join("")}</div>`;
+    const rows=Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)})).sort((a,b)=>sumScore(b)-sumScore(a));
+    body=`<div class="card" style="padding:20px"><div class="eyebrow">Summary</div>${rows.map(r=>`<div class="sum-row"><div class="t">${esc(r.qu.text)}<small>Q${r.i+1} · ${r.st.n} answers${isOpt(r.qu)&&r.st.n?` · most chosen: ${esc(optLabel(r.qu,r.st.mode))}`:""}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${sumMetric(r)}</div></div>`).join("")}</div>`;
   }
   return `<div class="p-wrap"><div class="topbar"><div class="brand"><span class="mark"><i></i></span>${esc(cfg.title)}</div>${back}</div>${ro}${body}</div>`;
 }
@@ -391,19 +425,22 @@ function configHTML(){
     <div style="display:grid;gap:12px">${d.questions.map((qu,i)=>`<div class="qcard" data-i="${i}">
       <div class="head"><span class="qnum">Question ${i+1}</span><button class="btn sm ghost" data-act="qUp" data-i="${i}" ${i===0?"disabled":""} title="Move up">↑</button><button class="btn sm ghost" data-act="qDown" data-i="${i}" ${i===d.questions.length-1?"disabled":""} title="Move down">↓</button><button class="btn sm danger" data-act="qDel" data-i="${i}">Remove</button></div>
       <textarea data-q="${i}" data-k="text" id="qt${i}" placeholder="Statement or question">${esc(qu.text)}</textarea>
-      <div class="row"><div class="field"><label for="qmin${i}">Scale from</label><input type="number" id="qmin${i}" data-q="${i}" data-k="min" value="${qu.min}" min="0" max="10"></div><div class="field"><label for="qmax${i}">to</label><input type="number" id="qmax${i}" data-q="${i}" data-k="max" value="${qu.max}" min="2" max="11"></div>
+      <div class="field"><label for="qopt${i}">Named options, one per line (leave empty for a numeric scale)</label><textarea data-q="${i}" data-k="options" id="qopt${i}" rows="${isOpt(qu)?Math.min(qu.options.length+1,8):2}" placeholder="Option A&#10;Option B&#10;Option C">${esc(isOpt(qu)?qu.options.join("\n"):"")}</textarea></div>
+      <div class="row" style="${isOpt(qu)?"display:none":""}"><div class="field"><label for="qmin${i}">Scale from</label><input type="number" id="qmin${i}" data-q="${i}" data-k="min" value="${qu.min}" min="0" max="10"></div><div class="field"><label for="qmax${i}">to</label><input type="number" id="qmax${i}" data-q="${i}" data-k="max" value="${qu.max}" min="2" max="11"></div>
       <div class="field"><label for="qlo${i}">Low end label</label><input type="text" id="qlo${i}" data-q="${i}" data-k="lo" value="${esc(qu.lo)}"></div><div class="field"><label for="qhi${i}">High end label</label><input type="text" id="qhi${i}" data-q="${i}" data-k="hi" value="${esc(qu.hi)}"></div></div></div>`).join("")}</div>
     <div class="controls"><button class="btn" data-act="qAdd">+ Add question</button><button class="btn ghost" data-act="qAdd5">+ Add five (1–5, agree scale)</button></div>
-    <details><summary>Import / export as JSON</summary><div class="field" style="margin-top:10px"><textarea id="cfgJson" rows="6" style="font-family:ui-monospace,monospace;font-size:13px">${esc(JSON.stringify(d.questions.map(({text,min,max,lo,hi})=>({text,min,max,lo,hi})),null,1))}</textarea><div class="controls"><button class="btn sm" data-act="cfgImport">Replace questions with this JSON</button></div></div></details>
+    <details id="cfgJsonBox" ${S.ui.jsonOpen?"open":""}><summary>Import / export as JSON</summary><div class="field" style="margin-top:10px"><textarea id="cfgJson" rows="8" style="font-family:ui-monospace,monospace;font-size:13px">${esc(S.ui.jsonText ?? JSON.stringify(d.questions.map(exportQ),null,1))}</textarea><div class="meta">Numeric: {"text","min","max","lo","hi"}. Named options: {"text","options":["…","…"]}.</div><div class="controls"><button class="btn sm" data-act="cfgImport">Replace questions with this JSON</button></div></div></details>
     <div class="meta">Changing a question's scale after people answered keeps their answers; removing a question drops its answers.</div>
     <div class="controls"><button class="btn primary" data-act="cfgSave">Save</button><button class="btn ghost" data-act="cfgClose">Cancel</button></div>
   </div></div>`;
 }
 function readDraftFromDOM(){
-  const d=S.ui.draft; const t=document.getElementById("cfgTitle"); if(t) d.title=t.value.trim()||"Untitled";
+  const d=S.ui.draft; const jb=document.getElementById("cfgJsonBox"); if(jb) S.ui.jsonOpen=jb.open; const jt=document.getElementById("cfgJson"); if(jt && jb && jb.open) S.ui.jsonText=jt.value; const t=document.getElementById("cfgTitle"); if(t) d.title=t.value.trim()||"Untitled";
   const j=document.getElementById("cfgJoin"); if(j) d.joinUrl=j.value.trim();
-  document.querySelectorAll("[data-q][data-k]").forEach(el=>{ const qu=d.questions[+el.dataset.q]; if(!qu) return; const k=el.dataset.k; qu[k] = (k==="min"||k==="max") ? +el.value : el.value; });
-  d.questions.forEach(qu=>{ qu.min=clamp(Math.round(qu.min||1),0,10); qu.max=clamp(Math.round(qu.max||5),qu.min+1,11); qu.text=(qu.text||"").trim()||"Untitled question"; });
+  document.querySelectorAll("[data-q][data-k]").forEach(el=>{ const qu=d.questions[+el.dataset.q]; if(!qu) return; const k=el.dataset.k; if(k==="options"){ qu.options=normOptions(el.value); return; } qu[k] = (k==="min"||k==="max") ? +el.value : el.value; });
+  d.questions.forEach(qu=>{ qu.text=(qu.text||"").trim()||"Untitled question";
+    if(qu.options && qu.options.length>=2){ qu.kind="options"; qu.min=1; qu.max=qu.options.length; qu.lo=""; qu.hi=""; }
+    else { delete qu.kind; delete qu.options; qu.min=clamp(Math.round(qu.min||1),0,10); qu.max=clamp(Math.round(qu.max||5),qu.min+1,11); } });
 }
 
 /* ============ actions ============ */
@@ -433,17 +470,18 @@ app.addEventListener("click", e=>{
       const qid=b.dataset.q, val=+b.dataset.v; const mine=myVotes(); const next={round:S.ses.round, answers:{...mine.answers,[qid]:val}, t:Date.now()};
       S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next)); break; }
     case "config": S.ui.draft=JSON.parse(JSON.stringify(S.cfg)); S.ui.configOpen=true; render(); break;
-    case "cfgClose": S.ui.configOpen=false; S.ui.draft=null; render(); break;
+    case "cfgClose": S.ui.configOpen=false; S.ui.draft=null; S.ui.jsonText=null; S.ui.jsonOpen=false; render(); break;
     case "cfgMode": readDraftFromDOM(); S.ui.draft.mode=v; render(); break;
     case "qUp": case "qDown": { readDraftFromDOM(); const i=+b.dataset.i, j=act==="qUp"?i-1:i+1; const a=S.ui.draft.questions; [a[i],a[j]]=[a[j],a[i]]; render(); break; }
     case "qDel": readDraftFromDOM(); S.ui.draft.questions.splice(+b.dataset.i,1); render(); break;
     case "qAdd": readDraftFromDOM(); S.ui.draft.questions.push(q("",1,5,"Strongly disagree","Strongly agree")); render(); setTimeout(()=>document.getElementById("qt"+(S.ui.draft.questions.length-1))?.focus(),0); break;
     case "qAdd5": readDraftFromDOM(); for(let k=0;k<5;k++) S.ui.draft.questions.push(q("",1,5,"Strongly disagree","Strongly agree")); render(); break;
-    case "cfgImport": { readDraftFromDOM(); try{ const arr=JSON.parse(document.getElementById("cfgJson").value); if(!Array.isArray(arr)) throw 0; S.ui.draft.questions=arr.map(x=>q(x.text||"",+x.min||1,+x.max||5,x.lo||"",x.hi||"")); render(); }catch(err){ alert("That JSON could not be read. Expected a list like [{\"text\":\"…\",\"min\":1,\"max\":5,\"lo\":\"…\",\"hi\":\"…\"}]"); } break; }
-    case "cfgSave": { readDraftFromDOM(); const d=S.ui.draft; if(!d.questions.length){ alert("Add at least one question."); break; } S.ui.configOpen=false; S.ui.draft=null; const cur=Math.min(S.ses.current, d.questions.length-1); setConfig(d); if(cur!==S.ses.current) setSession({current:cur}); break; }
+    case "cfgImport": { readDraftFromDOM(); try{ const arr=JSON.parse(document.getElementById("cfgJson").value); if(!Array.isArray(arr)) throw 0; S.ui.draft.questions=arr.map(x=>q(x.text||"",+x.min||1,+x.max||5,x.lo||"",x.hi||"",x.options)); S.ui.jsonText=null; render(); }catch(err){ alert("That JSON could not be read. Expected a list like [{\"text\":\"…\",\"min\":1,\"max\":5,\"lo\":\"…\",\"hi\":\"…\"}] or [{\"text\":\"…\",\"options\":[\"…\",\"…\"]}]"); } break; }
+    case "cfgSave": { readDraftFromDOM(); const d=S.ui.draft; if(!d.questions.length){ alert("Add at least one question."); break; } S.ui.configOpen=false; S.ui.draft=null; S.ui.jsonText=null; S.ui.jsonOpen=false; const cur=Math.min(S.ses.current, d.questions.length-1); setConfig(d); if(cur!==S.ses.current) setSession({current:cur}); break; }
   }
 });
-app.addEventListener("keydown", e=>{ if(e.key==="Escape" && S.ui.configOpen){ S.ui.configOpen=false; render(); } });
+app.addEventListener("keydown", e=>{ if(e.key==="Escape" && S.ui.configOpen){ S.ui.configOpen=false; S.ui.jsonText=null; render(); } });
+app.addEventListener("toggle", e=>{ if(e.target && e.target.id==="cfgJsonBox") S.ui.jsonOpen=e.target.open; }, true);
 document.addEventListener("keydown", e=>{ if(!S.me.isHost||S.ui.configOpen||S.ui.view==="participant") return; if(e.target.matches("input,textarea")) return;
   if(e.key==="ArrowRight"){ document.querySelector('[data-act="next"]:not([disabled])')?.click(); }
   if(e.key==="ArrowLeft"){ document.querySelector('[data-act="prev"]:not([disabled])')?.click(); }
@@ -501,7 +539,7 @@ function makeFirebaseBackend(){
     isHost = localStorage.getItem("tr_host_"+POLL_ID)==="1";
   }catch(e){ isHost = params.get("host")===HOST_KEY; }
   return { id: localId(), isHost, canWrite:true,
-    onConfig: f => root.child("config").on("value", s=>{ const v=s.val(); if(v && v.questions && !Array.isArray(v.questions)) v.questions=Object.values(v.questions); f(v); }),
+    onConfig: f => root.child("config").on("value", s=>{ const v=s.val(); if(v && v.questions && !Array.isArray(v.questions)) v.questions=Object.values(v.questions); if(v && v.questions) v.questions.forEach(qu=>{ if(qu && qu.options && !Array.isArray(qu.options)) qu.options=Object.values(qu.options); }); f(v); }),
     onSession: f => root.child("session").on("value", s=>{ const v=s.val(); if(v && v.revealed && !Array.isArray(v.revealed)) v.revealed=Object.values(v.revealed); if(v && !v.revealed) v.revealed=[]; f(v); }),
     onVotes: f => root.child("votes").on("value", s=>f(s.val()||{})),
     setConfig: c => root.child("config").set(c),
