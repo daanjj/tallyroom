@@ -56,6 +56,7 @@ To update the questions later you do not need to re-upload: edit them inside the
 - **Presenter**: open `https://your-link/?host=paars2026` once on your laptop (your own HOST_KEY). That browser is now the presenter for this poll; from then on the plain link also opens the presenter view on that device. `?host=off` switches it back.
 - In the lobby choose the mode: *one question at a time* or *answer all first, then reveal*. Click **Edit questions** to change texts, scales and labels; the JSON import lets you paste a whole list at once.
 - **Participants**: scan the QR code or open the plain link on their phone. Each device counts as one participant. Nothing to install, no login.
+- **Back to lobby** sits in the top bar of the presenter view in every phase, so you can break off and restart at any moment. Answers are kept, so the lobby then also offers **Clear previous answers**.
 - Keyboard on the presenter laptop: → next, ← previous, space = reveal.
 - **Clear all answers** starts a new round with the same questions. For a completely separate session, change `POLL_ID` in the file and re-upload, or just clear and reuse.
 

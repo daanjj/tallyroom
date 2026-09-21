@@ -325,7 +325,7 @@ function topbar(rightHTML){
 /* ---- host ---- */
 function hostHTML(){
   const ses=S.ses, cfg=S.cfg, Q=cfg.questions, ph=ses.phase; const joined=joinedCount();
-  const controls = `<button class="btn sm ghost" data-act="config">Edit questions</button><button class="btn sm ghost" data-act="asParticipant">View as participant</button>`;
+  const controls = `${ph!=="lobby"?`<button class="btn sm ghost" data-act="lobby">Back to lobby</button>`:""}<button class="btn sm ghost" data-act="config">Edit questions</button><button class="btn sm ghost" data-act="asParticipant">View as participant</button>`;
   let main="", side=sideHTML();
   if(ph==="lobby"){
     main=`<div class="card" style="padding:28px"><div class="eyebrow">Ready to start</div><h1 style="font-size:clamp(26px,4vw,40px);margin-top:8px">${esc(cfg.title)}</h1>
