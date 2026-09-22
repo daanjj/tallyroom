@@ -192,7 +192,7 @@ const HOST_KEY = "paars-offsite";
 "use strict";
 /* ============ defaults ============ */
 const DEFAULT_CONFIG = {
-  title: "Team self-assessment",
+  title: "Domein Cloud Mission Critical poll",
   mode: "live",            // "live" = one question at a time, "batch" = answer all first, reveal one by one
   joinUrl: "",
   questions: [
@@ -213,10 +213,10 @@ function q(text,min,max,lo,hi,options){ const id="q"+Math.random().toString(36).
 const isOpt = qu => qu && qu.kind==="options" && Array.isArray(qu.options) && qu.options.length>=2;
 const optLabel = (qu,v) => isOpt(qu) ? (qu.options[v-1] ?? String(v)) : String(v);
 function exportQ(qu){ return isOpt(qu) ? {text:qu.text, options:[...qu.options]} : {text:qu.text,min:qu.min,max:qu.max,lo:qu.lo,hi:qu.hi}; }
-const DEFAULT_SESSION = { phase:"lobby", current:0, revealed:[], round:1, showLive:false };
+const DEFAULT_SESSION = { phase:"lobby", current:0, revealed:[], round:1, showLive:false, resetAt:0 };
 
 /* ============ state ============ */
-const S = { cfg:null, ses:null, votes:{}, me:{id:null,isHost:false,canWrite:true}, ui:{view:null,configOpen:false,draft:null,readonly:false}, backend:null };
+const S = { cfg:null, ses:null, votes:{}, me:{id:null,isHost:false,canWrite:true,ackReset:null}, ui:{view:null,configOpen:false,draft:null,readonly:false}, backend:null };
 const app = document.getElementById("app");
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -233,6 +233,8 @@ function selInk(idx,n){ const step=1+Math.round(idx*(9/(n-1||1))); return step>=
 function fmt(x,d=1){ return Number.isFinite(x)? x.toFixed(d).replace(/\.0$/,"") : "–"; }
 const PRESENCE_MS = 150000; // a participant without answers counts as present for 2.5 min after their last heartbeat
 function hasAnswers(v){ return !!(v && v.answers && Object.keys(v.answers).length); }
+function isKicked(){ return S.me.ackReset!=null && !!S.ses && (S.ses.resetAt||0) > S.me.ackReset; }
+function noteReset(s){ if(S.me.ackReset==null && s && s.phase) S.me.ackReset = s.resetAt||0; }
 function currentRoundVotes(){ const r=S.ses?.round??1; const now=Date.now(); const out={};
   for(const [pid,v] of Object.entries(S.votes)){ if(!v || v.round!==r) continue;
     if(!hasAnswers(v)){ if(pid===S.me.id && S.me.isHost) continue; if(!v.t || now-v.t>PRESENCE_MS) continue; }
@@ -339,7 +341,7 @@ function hostHTML(){
     main=`<div class="card" style="padding:28px"><div class="eyebrow">Ready to start</div><h1 style="font-size:clamp(26px,4vw,40px);margin-top:8px">${esc(cfg.title)}</h1>
       <p class="meta" style="margin:10px 0 22px">${Q.length} questions · ${joined} ${joined===1?"person has":"people have"} joined. Share the QR code or link on the right.</p>
       <div class="controls"><div class="seg" role="group" aria-label="Mode"><button data-act="mode" data-v="live" class="${cfg.mode==="live"?"on":""}">One question at a time</button><button data-act="mode" data-v="batch" class="${cfg.mode==="batch"?"on":""}">Answer all first, then reveal</button></div></div>
-      <div class="controls" style="margin-top:22px"><button class="btn primary" data-act="start">${cfg.mode==="live"?"Start with question 1":"Open all questions"}</button>${Object.keys(S.votes).length?`<button class="btn ghost" data-act="reset">Clear previous answers</button>`:""}</div></div>`;
+      <div class="controls" style="margin-top:22px"><button class="btn primary" data-act="start">${cfg.mode==="live"?"Start with question 1":"Open all questions"}</button>${Object.keys(S.votes).length?`<button class="btn ghost" data-act="reset">Clear previous answers</button>`:""}<span class="spacer"></span><button class="btn danger" data-act="hardReset">Reset session</button></div></div>`;
   } else if(ph==="voting" && cfg.mode==="live"){
     const qu=Q[ses.current]; const vals=answersFor(qu.id); const revealed=ses.revealed.includes(qu.id);
     main=`<div class="card" style="padding:26px 26px 20px"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(qu.text)}</div>
@@ -401,7 +403,10 @@ function participantHTML(){
   const back = S.me.isHost ? `<button class="btn sm ghost" data-act="asHost">Back to presenter view</button>` : "";
   let body="";
   const ro = S.ui.readonly ? `<div class="banner">This account can watch but not vote (view-only access).</div>` : "";
-  if(ph==="lobby"){
+  if(isKicked()){
+    body=`<div class="card big-wait"><div class="pulse"></div><h2 style="font-size:24px">Session was reset</h2><p class="meta">The presenter cleared the room and started over. Tap to join again.</p>
+      <div class="controls" style="margin-top:16px;justify-content:center"><button class="btn primary" data-act="rejoin">Join again</button></div></div>`;
+  } else if(ph==="lobby"){
     body=`<div class="card big-wait"><div class="pulse"></div><h2 style="font-size:24px">You're in</h2><p class="meta">Waiting for the presenter to start. ${Q.length} questions coming up.</p></div>`;
   } else if(ph==="voting" && cfg.mode==="live"){
     const qu=Q[ses.current]; const chosen=mine.answers[qu.id]; const revealed=ses.revealed.includes(qu.id);
@@ -471,6 +476,13 @@ app.addEventListener("click", e=>{
     case "summary": setSession({phase:"summary"}); break;
     case "lobby": setSession({phase:"lobby", current:0}); break;
     case "showLive": setSession({showLive: b.checked}); break;
+    case "hardReset": if(confirm("Reset the session? All answers are cleared, the round counter goes back to 1 and every device has to tap to rejoin.")){
+      S.votes={};
+      setSession({phase:"lobby", current:0, revealed:[], showLive:false, round:1, resetAt:Date.now()});
+      write(()=>S.backend.clearVotes());
+      setTimeout(()=>write(()=>S.backend.clearVotes()), 2500); // sweep answers that were already in flight
+    } break;
+    case "rejoin": S.me.ackReset=(S.ses.resetAt||0); render(); if(S.heartbeat) S.heartbeat(); break;
     case "reset": if(confirm("Clear all answers and start a new round?")){ const r=(ses.round||1)+1; setSession({phase:"lobby", current:0, revealed:[], round:r}); write(()=>S.backend.clearVotes()); } break;
     case "asParticipant": S.ui.view="participant"; render(); break;
     case "asHost": S.ui.view=null; render(); break;
@@ -502,12 +514,13 @@ async function boot(){
   S.backend=be; S.me.id=be.id; S.me.isHost=be.isHost; S.ui.readonly = be.canWrite===false;
   let gotCfg=false, gotSes=false;
   be.onConfig(c=>{ if(c && Array.isArray(c.questions) && c.questions.length){ S.cfg=c; } else if(!gotCfg){ S.cfg=JSON.parse(JSON.stringify(DEFAULT_CONFIG)); if(be.isHost) write(()=>be.setConfig(S.cfg)); } gotCfg=true; render(); });
-  be.onSession(s=>{ if(s && s.phase){ S.ses={...DEFAULT_SESSION,...s}; } else if(!gotSes){ S.ses={...DEFAULT_SESSION}; if(be.isHost) write(()=>be.setSession(S.ses)); } gotSes=true; render(); });
+  be.onSession(s=>{ noteReset(s); if(s && s.phase){ S.ses={...DEFAULT_SESSION,...s}; } else if(!gotSes){ S.ses={...DEFAULT_SESSION}; if(be.isHost) write(()=>be.setSession(S.ses)); } gotSes=true; render(); });
   be.onVotes(v=>{ S.votes=v||{}; render(); });
   // announce presence so the host sees who joined (a vote doc with no answers)
-  function heartbeat(){ if(!S.ses || be.canWrite===false) return; const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
+  function heartbeat(){ if(!S.ses || be.canWrite===false || isKicked()) return; const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
     const cur=S.votes[be.id]; const doc = (cur && cur.round===S.ses.round) ? {...cur, t:Date.now()} : {round:S.ses.round, answers:{}, t:Date.now()};
     S.votes[be.id]=doc; write(()=>be.setVotes(be.id,doc)); }
+  S.heartbeat=heartbeat;
   setTimeout(heartbeat, 800);
   setInterval(heartbeat, 60000);
   if(be.isHost) setInterval(render, 30000);
@@ -518,7 +531,7 @@ async function boot(){
   if(be.onConn) be.onConn(ok=>{ clearTimeout(offTimer); if(ok) setOffline(false); else offTimer=setTimeout(()=>setOffline(true), 6000); });
   function applyPull(d){ if(!d) return;
     const c=normConfig(d.config); if(c && c.questions && c.questions.length) S.cfg=c;
-    const ss=normSession(d.session); if(ss && ss.phase) S.ses={...DEFAULT_SESSION,...ss};
+    const ss=normSession(d.session); noteReset(ss); if(ss && ss.phase) S.ses={...DEFAULT_SESSION,...ss};
     const mine=S.votes[S.me.id]; S.votes=d.votes||{}; if(mine && mine.round===S.ses.round) S.votes[S.me.id]=mine;
     render(); }
   let pulling=false, lastPull=0;
