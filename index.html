@@ -311,6 +311,37 @@ function miniStrip(qu, vals){
   return `<div class="mini">${s}</div>`;
 }
 
+/* ============ export ============ */
+function resultsPayload(){
+  const cfg=S.cfg, ses=S.ses, rv=currentRoundVotes();
+  const ids=Object.keys(rv).filter(k=>hasAnswers(rv[k])).sort((a,b)=>(rv[a].t||0)-(rv[b].t||0));
+  return { pollId:POLL_ID, title:cfg.title, mode:cfg.mode, round:ses.round||1,
+    exportedAt:new Date().toISOString(), respondents:ids.length,
+    questions: cfg.questions.map((qu,i)=>{
+      const vals=ids.map(k=>rv[k].answers[qu.id]).filter(v=>Number.isFinite(v));
+      const st=stats(vals,qu.min,qu.max); const num=!isOpt(qu)&&st.n;
+      return { n:i+1, id:qu.id, text:qu.text, kind:isOpt(qu)?"options":"scale",
+        options:isOpt(qu)?[...qu.options]:null, min:qu.min, max:qu.max, lo:qu.lo||"", hi:qu.hi||"",
+        answers:st.n||0, counts:st.counts||{}, mostChosen:st.n?optLabel(qu,st.mode):null,
+        mean:num?+st.mean.toFixed(2):null, median:num?st.median:null, sd:num?+st.sd.toFixed(2):null }; }),
+    answers: ids.map((k,i)=>({ respondent:"R"+String(i+1).padStart(2,"0"), at:new Date(rv[k].t||0).toISOString(),
+      answers:Object.fromEntries(cfg.questions.map(qu=>[qu.id, Number.isFinite(rv[k].answers[qu.id])?rv[k].answers[qu.id]:null])) })) };
+}
+function stamp(){ const d=new Date(), p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; }
+function download(name, text, type){ try{
+  const url=URL.createObjectURL(new Blob([text],{type})); const a=document.createElement("a");
+  a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+}catch(e){ alert("Saving failed: "+e.message); } }
+function exportJSON(){ download(`tallyroom-${POLL_ID}-${stamp()}.json`, JSON.stringify(resultsPayload(),null,2), "application/json"); }
+function exportCSV(){ const p=resultsPayload(), qq=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`;
+  const rows=[["respondent","question_nr","question","value","label"].join(",")];
+  p.answers.forEach(r=>p.questions.forEach(q=>{ const v=r.answers[q.id]; if(!Number.isFinite(v)) return;
+    rows.push([qq(r.respondent), q.n, qq(q.text), v, qq(q.options?(q.options[v-1]||v):v)].join(",")); }));
+  download(`tallyroom-${POLL_ID}-${stamp()}.csv`, "\ufeff"+rows.join("\r\n"), "text/csv;charset=utf-8"); }
+function exportBtns(){ return Object.values(currentRoundVotes()).some(hasAnswers)
+  ? `<button class="btn ghost" data-act="expJSON">Save results (JSON)</button><button class="btn ghost" data-act="expCSV">CSV</button>` : ""; }
+
 /* ============ live data helpers ============ */
 function normConfig(v){ if(v && v.questions && !Array.isArray(v.questions)) v.questions=Object.values(v.questions);
   if(v && v.questions) v.questions.forEach(qu=>{ if(qu && qu.options && !Array.isArray(qu.options)) qu.options=Object.values(qu.options); }); return v; }
@@ -341,7 +372,7 @@ function hostHTML(){
     main=`<div class="card" style="padding:28px"><div class="eyebrow">Ready to start</div><h1 style="font-size:clamp(26px,4vw,40px);margin-top:8px">${esc(cfg.title)}</h1>
       <p class="meta" style="margin:10px 0 22px">${Q.length} questions · ${joined} ${joined===1?"person has":"people have"} joined. Share the QR code or link on the right.</p>
       <div class="controls"><div class="seg" role="group" aria-label="Mode"><button data-act="mode" data-v="live" class="${cfg.mode==="live"?"on":""}">One question at a time</button><button data-act="mode" data-v="batch" class="${cfg.mode==="batch"?"on":""}">Answer all first, then reveal</button></div></div>
-      <div class="controls" style="margin-top:22px"><button class="btn primary" data-act="start">${cfg.mode==="live"?"Start with question 1":"Open all questions"}</button>${Object.keys(S.votes).length?`<button class="btn ghost" data-act="reset">Clear previous answers</button>`:""}<span class="spacer"></span><button class="btn danger" data-act="hardReset">Reset session</button></div></div>`;
+      <div class="controls" style="margin-top:22px"><button class="btn primary" data-act="start">${cfg.mode==="live"?"Start with question 1":"Open all questions"}</button>${Object.keys(S.votes).length?`<button class="btn ghost" data-act="reset">Clear previous answers</button>`:""}${exportBtns()}<span class="spacer"></span><button class="btn danger" data-act="hardReset">Reset session</button></div></div>`;
   } else if(ph==="voting" && cfg.mode==="live"){
     const qu=Q[ses.current]; const vals=answersFor(qu.id); const revealed=ses.revealed.includes(qu.id);
     main=`<div class="card" style="padding:26px 26px 20px"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(qu.text)}</div>
@@ -368,7 +399,7 @@ function hostHTML(){
     const sorted=[...rows].sort((a,b)=>sumScore(b)-sumScore(a));
     main=`<div class="card" style="padding:26px"><div class="eyebrow">Summary</div><h2 style="font-size:28px;margin-top:6px">All ${Q.length} questions, highest average or agreement first</h2>
       <div style="margin-top:14px">${sorted.map(r=>`<div class="sum-row"><div class="t">${esc(r.qu.text)}<small>Q${r.i+1} · ${r.st.n} answers · ${isOpt(r.qu)?`${r.qu.options.length} options${r.st.n?` · most chosen: ${esc(optLabel(r.qu,r.st.mode))}`:""}`:`scale ${r.qu.min}–${r.qu.max}`}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${sumMetric(r)}</div></div>`).join("")}</div>
-      <div class="controls" style="margin-top:18px"><button class="btn" data-act="gotoResults" data-v="0">Back to question 1</button><button class="btn ghost" data-act="lobby">Back to lobby</button><span class="spacer"></span><button class="btn danger" data-act="reset">Clear all answers</button></div></div>`;
+      <div class="controls" style="margin-top:18px"><button class="btn" data-act="gotoResults" data-v="0">Back to question 1</button><button class="btn ghost" data-act="lobby">Back to lobby</button>${exportBtns()}<span class="spacer"></span><button class="btn danger" data-act="reset">Clear all answers</button></div></div>`;
   }
   return `<div class="wrap">${topbar(controls)}${S.ui.readonly?`<div class="banner" style="margin-bottom:12px">You can see this session but this account is not allowed to change it.</div>`:""}<div class="stage two"><div class="stage">${main}</div>${side}</div></div>`;
 }
@@ -476,6 +507,8 @@ app.addEventListener("click", e=>{
     case "summary": setSession({phase:"summary"}); break;
     case "lobby": setSession({phase:"lobby", current:0}); break;
     case "showLive": setSession({showLive: b.checked}); break;
+    case "expJSON": exportJSON(); break;
+    case "expCSV": exportCSV(); break;
     case "hardReset": if(confirm("Reset the session? All answers are cleared, the round counter goes back to 1 and every device has to tap to rejoin.")){
       S.votes={};
       setSession({phase:"lobby", current:0, revealed:[], showLive:false, round:1, resetAt:Date.now()});
