@@ -67,5 +67,6 @@ Firebase Spark plan: free, no credit card, 1 GB storage and 100 simultaneous con
 ## Troubleshooting
 
 - Page shows "Connecting…" forever: `databaseURL` missing or wrong in the settings block, or rules not published.
+- A phone stays on "Waiting for the presenter to start" after you open question 1: the page reconnects by itself (it forces a new connection when the screen comes back on and reads the session over plain HTTPS while waiting in the lobby), so give it a few seconds. A **Reconnecting…** pill in the top bar means the link is still down; refreshing always works.
 - Votes do not appear on the presenter screen: participants are on a different `POLL_ID` (old cached version) or the rules block writes. Check the Rules tab.
 - Everybody sees the presenter view: someone opened the `?host=` link on a shared device. Open `?host=off` on that device.
