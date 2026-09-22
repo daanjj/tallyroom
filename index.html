@@ -44,6 +44,8 @@ h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;line-height:1.15}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);font-size:14px;font-weight:600;font-family:var(--display)}
 .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 .pill.live .dot{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 25%,transparent)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.warn .dot{background:var(--warn)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:12px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);font-family:var(--display);font-weight:700;font-size:15px;line-height:1;transition:transform .08s,background .15s}
 .btn:hover{background:var(--surface-2)}
 .btn:active{transform:translateY(1px)}
@@ -307,6 +309,12 @@ function miniStrip(qu, vals){
   return `<div class="mini">${s}</div>`;
 }
 
+/* ============ live data helpers ============ */
+function normConfig(v){ if(v && v.questions && !Array.isArray(v.questions)) v.questions=Object.values(v.questions);
+  if(v && v.questions) v.questions.forEach(qu=>{ if(qu && qu.options && !Array.isArray(qu.options)) qu.options=Object.values(qu.options); }); return v; }
+function normSession(v){ if(v && v.revealed && !Array.isArray(v.revealed)) v.revealed=Object.values(v.revealed); if(v && !v.revealed) v.revealed=[]; return v; }
+function connPill(){ return S.ui.offline ? `<span class="pill warn" title="Trying to reconnect"><span class="dot"></span>Reconnecting…</span>` : ""; }
+
 /* ============ rendering ============ */
 function render(){
   if(!S.cfg||!S.ses){ app.innerHTML=`<div class="wrap"><div class="big-wait card"><div class="pulse"></div><div class="meta">Connecting…</div></div></div>`; return; }
@@ -319,7 +327,7 @@ function render(){
 function topbar(rightHTML){
   const ph=S.ses.phase; const live = ph!=="lobby";
   return `<div class="topbar"><div class="brand"><span class="mark"><i></i></span>${esc(S.cfg.title)}</div>
-    <div class="controls">${rightHTML||""}<span class="pill ${live?"live":""}"><span class="dot"></span>${S.cfg.mode==="live"?"One at a time":"All first, then reveal"}</span></div></div>`;
+    <div class="controls">${rightHTML||""}${connPill()}<span class="pill ${live?"live":""}"><span class="dot"></span>${S.cfg.mode==="live"?"One at a time":"All first, then reveal"}</span></div></div>`;
 }
 
 /* ---- host ---- */
@@ -411,7 +419,7 @@ function participantHTML(){
     const rows=Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)})).sort((a,b)=>sumScore(b)-sumScore(a));
     body=`<div class="card" style="padding:20px"><div class="eyebrow">Summary</div>${rows.map(r=>`<div class="sum-row"><div class="t">${esc(r.qu.text)}<small>Q${r.i+1} · ${r.st.n} answers${isOpt(r.qu)&&r.st.n?` · most chosen: ${esc(optLabel(r.qu,r.st.mode))}`:""}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${sumMetric(r)}</div></div>`).join("")}</div>`;
   }
-  return `<div class="p-wrap"><div class="topbar"><div class="brand"><span class="mark"><i></i></span>${esc(cfg.title)}</div>${back}</div>${ro}${body}</div>`;
+  return `<div class="p-wrap"><div class="topbar"><div class="brand"><span class="mark"><i></i></span>${esc(cfg.title)}</div>${connPill()}${back}</div>${ro}${body}</div>`;
 }
 
 /* ---- config ---- */
@@ -503,7 +511,36 @@ async function boot(){
   setTimeout(heartbeat, 800);
   setInterval(heartbeat, 60000);
   if(be.isHost) setInterval(render, 30000);
-  document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") heartbeat(); });
+
+  /* ---- staying in sync after the screen has been off ---- */
+  let offTimer=null;
+  function setOffline(off){ if(off===!!S.ui.offline) return; S.ui.offline=off; if(S.cfg&&S.ses) render(); }
+  if(be.onConn) be.onConn(ok=>{ clearTimeout(offTimer); if(ok) setOffline(false); else offTimer=setTimeout(()=>setOffline(true), 6000); });
+  function applyPull(d){ if(!d) return;
+    const c=normConfig(d.config); if(c && c.questions && c.questions.length) S.cfg=c;
+    const ss=normSession(d.session); if(ss && ss.phase) S.ses={...DEFAULT_SESSION,...ss};
+    const mine=S.votes[S.me.id]; S.votes=d.votes||{}; if(mine && mine.round===S.ses.round) S.votes[S.me.id]=mine;
+    render(); }
+  let pulling=false, lastPull=0;
+  async function pullNow(){ if(!be.pull || pulling) return; pulling=true; lastPull=Date.now();
+    try{ applyPull(await be.pull()); }catch(e){} finally{ pulling=false; } }
+  async function watchdog(){
+    if(document.visibilityState!=="visible") return;
+    const down = !!(be.isConnected && !be.isConnected());
+    if(down && be.nudge) be.nudge();
+    // while waiting in the lobby the socket may sit idle for a long time, so read over plain
+    // HTTPS now and then as well: that is the window in which the start would be missed
+    const waiting = S.ses && S.ses.phase==="lobby" && !(S.me.isHost && S.ui.view!=="participant");
+    const stale = down ? ((be.downFor?be.downFor():9e9)>=6000 && Date.now()-lastPull>4000)
+                       : (waiting && Date.now()-lastPull>20000);
+    if(stale) pullNow();
+  }
+  function wake(){ heartbeat(); watchdog(); }
+  setInterval(watchdog, 5000);
+  document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") wake(); });
+  window.addEventListener("pageshow", wake);
+  window.addEventListener("focus", wake);
+  window.addEventListener("online", wake);
 }
 
 /* ============ backends ============ */
@@ -519,6 +556,7 @@ function makeDemoBackend(){
   const emit=(k,v)=>listeners[k].forEach(f=>f(v));
   const id=localId();
   const be={ id, isHost:true, canWrite:true,
+    isConnected:()=>true, onConn:f=>f(true), downFor:()=>0, nudge:()=>{}, pull:null,
     onConfig:f=>{listeners.cfg.push(f); f(cfg);}, onSession:f=>{listeners.ses.push(f); f(ses);}, onVotes:f=>{listeners.votes.push(f); f({...votes});},
     setConfig:async c=>{cfg=c; emit("cfg",cfg);}, setSession:async s=>{ses=s; emit("ses",ses); simulate();}, setVotes:async(pid,v)=>{votes[pid]=v; emit("votes",{...votes});},
     clearVotes:async()=>{ for(const k of Object.keys(votes)) delete votes[k]; emit("votes",{}); } };
@@ -538,9 +576,20 @@ function makeFirebaseBackend(){
     if(params.get("host")==="off"){ localStorage.removeItem("tr_host_"+POLL_ID); }
     isHost = localStorage.getItem("tr_host_"+POLL_ID)==="1";
   }catch(e){ isHost = params.get("host")===HOST_KEY; }
+  /* a phone that was locked or backgrounded comes back with a dead socket: watch the link,
+     force a reconnect, and fall back to plain HTTPS reads so a stalled socket never strands anyone */
+  const db = firebase.database();
+  const REST = String(FIREBASE_CONFIG.databaseURL).replace(/\/+$/,"") + "/polls/" + POLL_ID;
+  let connected=false, downSince=Date.now(), lastNudge=0; const connFns=[];
+  db.ref(".info/connected").on("value", s=>{ const now=s.val()===true; if(now===connected) return; connected=now; if(!now) downSince=Date.now(); connFns.forEach(f=>f(now)); });
   return { id: localId(), isHost, canWrite:true,
-    onConfig: f => root.child("config").on("value", s=>{ const v=s.val(); if(v && v.questions && !Array.isArray(v.questions)) v.questions=Object.values(v.questions); if(v && v.questions) v.questions.forEach(qu=>{ if(qu && qu.options && !Array.isArray(qu.options)) qu.options=Object.values(qu.options); }); f(v); }),
-    onSession: f => root.child("session").on("value", s=>{ const v=s.val(); if(v && v.revealed && !Array.isArray(v.revealed)) v.revealed=Object.values(v.revealed); if(v && !v.revealed) v.revealed=[]; f(v); }),
+    isConnected: () => connected,
+    onConn: f => { connFns.push(f); f(connected); },
+    downFor: () => connected ? 0 : Date.now()-downSince,
+    nudge: () => { const t=Date.now(); if(connected || t-downSince<8000 || t-lastNudge<10000) return; lastNudge=t; try{ db.goOffline(); db.goOnline(); }catch(e){} },
+    pull: async () => { const r = await fetch(REST+".json?_="+Date.now(), {cache:"no-store"}); if(!r.ok) throw new Error("rest "+r.status); return (await r.json())||{}; },
+    onConfig: f => root.child("config").on("value", s=>f(normConfig(s.val()))),
+    onSession: f => root.child("session").on("value", s=>f(normSession(s.val()))),
     onVotes: f => root.child("votes").on("value", s=>f(s.val()||{})),
     setConfig: c => root.child("config").set(c),
     setSession: s => root.child("session").set(s),
