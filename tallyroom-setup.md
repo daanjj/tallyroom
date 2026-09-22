@@ -58,7 +58,8 @@ To update the questions later you do not need to re-upload: edit them inside the
 - **Participants**: scan the QR code or open the plain link on their phone. Each device counts as one participant. Nothing to install, no login.
 - **Back to lobby** sits in the top bar of the presenter view in every phase, so you can break off and restart at any moment. Answers are kept, so the lobby then also offers **Clear previous answers**.
 - Keyboard on the presenter laptop: → next, ← previous, space = reveal.
-- **Clear all answers** starts a new round with the same questions. For a completely separate session, change `POLL_ID` in the file and re-upload, or just clear and reuse.
+- **Clear all answers** starts a new round with the same questions, keeping everyone connected.
+- **Reset session** (lobby, right-hand side) is the hard one: answers cleared, round counter back to 1, and every device is shown a *Session was reset* screen with a **Join again** button. Until someone taps it that device stops counting, so the room fills up with the people actually present. A second sweep two seconds later catches answers that were already in flight. For a completely separate session, change `POLL_ID` in the file and re-upload, or just clear and reuse.
 
 ## Costs and limits
 
