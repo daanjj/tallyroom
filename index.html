@@ -532,7 +532,7 @@ let qrCache={};
 function afterHost(){
   const el=document.getElementById("qr"); if(!el) return;
   const url = S.cfg.joinUrl || location.href.split("#")[0].split("?")[0];
-  try{ if(qrCache[url]){ el.innerHTML=qrCache[url]; return; } if(window.QRCode){ el.innerHTML=""; new QRCode(el,{text:url,width:180,height:180,colorDark:"#1E1838",colorLight:"#ffffff",correctLevel:QRCode.CorrectLevel.M}); qrCache[url]=el.innerHTML; } else el.innerHTML=`<div class="meta">QR unavailable</div>`; }catch(e){ el.innerHTML=`<div class="meta">QR unavailable</div>`; }
+  try{ if(qrCache[url]){ el.innerHTML=`<img src="${qrCache[url]}" width="180" height="180" alt="QR code">`; return; } if(window.QRCode){ el.innerHTML=""; new QRCode(el,{text:url,width:180,height:180,colorDark:"#1E1838",colorLight:"#ffffff",correctLevel:QRCode.CorrectLevel.M}); const cv=el.querySelector("canvas"); try{ if(cv) qrCache[url]=cv.toDataURL("image/png"); }catch(e){} } else el.innerHTML=`<div class="meta">QR unavailable</div>`; }catch(e){ el.innerHTML=`<div class="meta">QR unavailable</div>`; }
 }
 
 /* ---- participant ---- */
