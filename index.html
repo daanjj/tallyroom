@@ -220,7 +220,7 @@ const HOST_KEY = "paars-offsite";
 /* ============ defaults ============ */
 
 function normOptions(x){ if(!x) return []; if(typeof x==="string") x=x.split(/\r?\n/); if(!Array.isArray(x)) x=Object.values(x); return x.map(o=>String((o&&typeof o==="object")?(o.label??o.text??""):o??"").trim()).filter(Boolean).slice(0,11); }
-const TL_LABELS=["Green","Yellow","Red"], TL_COLORS=["#2E9E5B","#F2B705","#D64541"];
+const TL_LABELS=["Consent","Zorg","Bezwaar"], TL_COLORS=["#2E9E5B","#F2B705","#D64541"];
 const TL_Q_YELLOW="Welke zorg heb je en wat stel je voor om te doen?", TL_Q_RED="Welk bezwaar heb je en wat is je voorstel om dat bezwaar te adresseren?";
 const tlPrompt = v => v===2 ? (S.cfg&&S.cfg.tlYellow||TL_Q_YELLOW) : v===3 ? (S.cfg&&S.cfg.tlRed||TL_Q_RED) : "";
 const isTraffic = qu => !!qu && qu.kind==="traffic";
@@ -359,7 +359,7 @@ function trafficTable(Q, curId, allShown, pick){
     else cell=`<div class="tl-bar">${[1,2,3].map(v=>st.counts[v]?`<i style="--c:${TL_COLORS[v-1]};flex-grow:${st.counts[v]}"></i>`:"").join("")}</div>
       <div class="tl-cnt">${[1,2,3].map(v=>`<span style="--c:${TL_COLORS[v-1]}" title="${esc(qu.options[v-1])}">${st.counts[v]||0}</span>`).join("")}${n?`<small class="meta">${n} answers</small>`:""}</div>`;
     return `<tr class="${qu.id===curId?"cur":""}${pick?" pick":""}"${pick?` data-act="tlSel" data-q="${qu.id}" title="Show details"`:""}><td class="n">${i+1}</td><td>${esc(qu.text)}</td><td class="r">${cell}</td></tr>`; }).join("");
-  return `<div class="card" style="padding:18px 20px"><table class="tl-table"><thead><tr><th>#</th><th>Statement</th><th>Green / Yellow / Red</th></tr></thead><tbody>${body}</tbody></table><div class="tl-pager" hidden></div></div>`;
+  return `<div class="card" style="padding:18px 20px"><table class="tl-table"><thead><tr><th>#</th><th>Statement</th><th>${esc(((Q.find(isTraffic)||{}).options||TL_LABELS).join(" / "))}</th></tr></thead><tbody>${body}</tbody></table><div class="tl-pager" hidden></div></div>`;
 }
 function miniStrip(qu, vals){
   const pts=qu.max-qu.min+1, st=stats(vals,qu.min,qu.max); let s="";
@@ -554,7 +554,7 @@ function needsText(qu,chosen){ return isTraffic(qu) && (chosen===2||chosen===3) 
 function followUpHTML(qu, chosen){
   if(chosen!==2 && chosen!==3) return "";
   const k=txKey(qu.id), val = S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : (myVotes().texts?.[qu.id]||"");
-  return `<div class="tl-fu"><label for="fu_${qu.id}">${esc(tlPrompt(chosen))}</label><textarea class="tl-fu-in" id="fu_${qu.id}" data-q="${qu.id}" maxlength="600" rows="3" placeholder="Required">${esc(val)}</textarea><small>Required. Saved automatically, anonymous.</small></div>`;
+  return `<div class="tl-fu"><label for="fu_${qu.id}">${esc(tlPrompt(chosen))}</label><textarea class="tl-fu-in" id="fu_${qu.id}" data-q="${qu.id}" maxlength="600" rows="3" placeholder="Type your answer here">${esc(val)}</textarea>${val.trim()?`<small>Saved automatically, anonymous.</small>`:`<small style="color:var(--warn);font-weight:700">Required: fill this in to continue to the next question.</small>`}</div>`;
 }
 function saveText(qid){ const val=(S.ui.tx||{})[txKey(qid)]; if(val==null || S.review) return; const mine=myVotes();
   if(!Number.isFinite(mine.answers[qid]) || (mine.texts&&mine.texts[qid])===val) return;
@@ -615,8 +615,8 @@ function configHTML(){
     <div style="display:grid;gap:12px">${d.questions.map((qu,i)=>`<div class="qcard" data-i="${i}">
       <div class="head"><span class="qnum">Question ${i+1}</span><button class="btn sm ghost" data-act="qUp" data-i="${i}" ${i===0?"disabled":""} title="Move up">↑</button><button class="btn sm ghost" data-act="qDown" data-i="${i}" ${i===d.questions.length-1?"disabled":""} title="Move down">↓</button><button class="btn sm danger" data-act="qDel" data-i="${i}">Remove</button></div>
       <textarea data-q="${i}" data-k="text" id="qt${i}" placeholder="Statement or question">${esc(qu.text)}</textarea>
-      <label class="meta" style="display:flex;gap:8px;align-items:center;margin:2px 0 8px"><input type="checkbox" data-act="qTL" data-q="${i}" data-k="tl" ${isTraffic(qu)?"checked":""}> Traffic light: green (1), yellow (2), red (3)</label>
-      <div class="field"><label for="qopt${i}">${isTraffic(qu)?"Labels for green, yellow, red (3 lines, optional)":"Named options, one per line (leave empty for a numeric scale)"}</label><textarea data-q="${i}" data-k="options" id="qopt${i}" rows="${isOpt(qu)?Math.min(qu.options.length+1,8):2}" placeholder="Option A&#10;Option B&#10;Option C">${esc(isOpt(qu)?qu.options.join("\n"):"")}</textarea></div>
+      <label class="meta" style="display:flex;gap:8px;align-items:center;margin:2px 0 8px"><input type="checkbox" data-act="qTL" data-q="${i}" data-k="tl" ${isTraffic(qu)?"checked":""}> Traffic light: ${esc(TL_LABELS.join(" / "))} (green, yellow, red)</label>
+      <div class="field"><label for="qopt${i}">${isTraffic(qu)?"Button labels for green, yellow, red (3 lines, optional)":"Named options, one per line (leave empty for a numeric scale)"}</label><textarea data-q="${i}" data-k="options" id="qopt${i}" rows="${isOpt(qu)?Math.min(qu.options.length+1,8):2}" placeholder="Option A&#10;Option B&#10;Option C">${esc(isOpt(qu)?qu.options.join("\n"):"")}</textarea></div>
       <div class="row" style="${isOpt(qu)?"display:none":""}"><div class="field"><label for="qmin${i}">Scale from</label><input type="number" id="qmin${i}" data-q="${i}" data-k="min" value="${qu.min}" min="0" max="10"></div><div class="field"><label for="qmax${i}">to</label><input type="number" id="qmax${i}" data-q="${i}" data-k="max" value="${qu.max}" min="2" max="11"></div>
       <div class="field"><label for="qlo${i}">Low end label</label><input type="text" id="qlo${i}" data-q="${i}" data-k="lo" value="${esc(qu.lo)}"></div><div class="field"><label for="qhi${i}">High end label</label><input type="text" id="qhi${i}" data-q="${i}" data-k="hi" value="${esc(qu.hi)}"></div></div></div>`).join("")}</div>
     <div class="controls"><button class="btn" data-act="qAdd">+ Add question</button><button class="btn ghost" data-act="qAdd5">+ Add five (1–5, agree scale)</button><button class="btn ghost" data-act="qAddTL">+ Add traffic-light row</button><button class="btn ghost" data-act="csvPick">Import questions from CSV</button><input type="file" id="cfgCsv" accept=".csv,.txt,text/csv,text/plain" style="display:none"></div><div class="meta">CSV: one question per row, appended to the list. First column is the statement; with no other columns every row becomes a 1–5 scale question. Optional header columns: <b>text, type</b> (scale (default), traffic or options), <b>options</b> (separated by |), <b>min, max, lo, hi</b>. Comma or semicolon both work.</div>
@@ -685,7 +685,9 @@ app.addEventListener("click", e=>{
     case "vote": {
       const qid=b.dataset.q, val=+b.dataset.v; const mine=myVotes(); const texts={...(mine.texts||{})}; if(mine.answers[qid]!==val){ delete texts[qid]; if(S.ui.tx) delete S.ui.tx[txKey(qid)]; }
       const next={round:S.ses.round, answers:{...mine.answers,[qid]:val}, texts, t:Date.now()};
-      S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next)); break; }
+      S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next));
+      if(mine.answers[qid]!==val && isTraffic(Q.find(x=>x.id===qid)) && val!==1){ const box=document.getElementById("fu_"+qid); if(box){ box.scrollIntoView({block:"center",behavior:reduced?"auto":"smooth"}); try{ box.focus({preventScroll:true}); }catch(e){} } }
+      break; }
     case "config": S.ui.draft=JSON.parse(JSON.stringify(S.cfg)); S.ui.configOpen=true; render(); break;
     case "cfgClose": S.ui.configOpen=false; S.ui.draft=null; S.ui.jsonText=null; S.ui.jsonOpen=false; render(); break;
     case "cfgMode": readDraftFromDOM(); S.ui.draft.mode=v; render(); break;
