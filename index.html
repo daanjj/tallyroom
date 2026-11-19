@@ -536,7 +536,8 @@ function afterHost(){
 }
 
 /* ---- participant ---- */
-function myVotes(){ const v=S.votes[S.me.id]; return (v && v.round===S.ses.round) ? v : {round:S.ses.round, answers:{}}; }
+function myVotes(){ const v=S.votes[S.me.id]; /* Firebase drops empty objects, so a vote doc from the lobby comes back without answers/texts */
+  return (v && v.round===S.ses.round) ? {...v, answers:v.answers||{}, texts:v.texts||{}} : {round:S.ses.round, answers:{}, texts:{}}; }
 function scaleHTML(qu, chosen){
   const pts=qu.max-qu.min+1; let b="";
   if(isOpt(qu)){
