@@ -580,6 +580,7 @@ function setRowHTML(id, meta, now){
         <button data-act="setSettings" data-id="${eid}">Settings</button>
         <button data-act="setSettings" data-id="${eid}" data-focus="dlgExp">Other expiry date…</button>${isExp?"":`
         <button data-act="setExpire" data-id="${eid}">Expire now</button>`}
+        <button data-act="setLink" data-id="${eid}">Change link…</button>
         <button data-act="setDup" data-id="${eid}">Duplicate</button>
         <button data-act="setExpQ" data-id="${eid}">Export questions</button>
         <button data-act="setExpJSON" data-id="${eid}">Export responses (JSON)</button>
@@ -590,7 +591,8 @@ let statsBusy=false;
 async function loadStats(){ if(S.route!=="home" || !S.sets || statsBusy || document.visibilityState==="hidden") return; statsBusy=true;
   try{ await Promise.all(Object.keys(S.sets).map(async id=>{ try{ S.polls[id]=C.pollStats(await S.be.readPoll(id)); }catch(e){} })); } finally { statsBusy=false; }
   renderBg(); }
-function freshSetId(){ let id; do{ id=C.newSetId(); }while(S.sets && S.sets[id]); return id; }
+/* read fresh, so a set made on another device in the meantime is not overwritten */
+async function freshSetId(name){ const sets=await S.be.getSets(); return C.setIdFor(name, id=>!!sets[id]); }
 
 /* ============ dialogs: set settings, QR code, delete ============ */
 function toLocalInput(ts){ const d=new Date(ts), p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
@@ -600,7 +602,7 @@ function openSetDlg(id, focus){ const m=id?metaOf(id):null; if(id && !m) return;
     f: m ? {...m} : {name:"", header:"", accent:C.DEFAULT_ACCENT, category:"generic", named:"no", expiresAt:C.extendedExpiry(Date.now()), joinUrl:""} };
   render(); }
 function dlgHTML(){ const d=S.ui.dlg; if(!d) return "";
-  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : "";
+  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="link" ? linkDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : "";
   return `<div class="modal" id="dlg"><div class="card dlg${d.type==="edit"?" wide":""}" role="dialog" aria-modal="true" aria-label="${esc(d.title)}">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:22px;flex:1">${esc(d.title)}</h2><button class="btn sm ghost" data-act="dlgClose">Close</button></div>${body}</div></div>`; }
 function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEFAULT_ACCENT;
@@ -632,7 +634,7 @@ async function saveSetDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id)
                                            : `${n} ${n===1?"person has":"people have"} answered already. They get a name (or are asked for one) the next time their screen changes; until then they show as "unnamed". Continue?`)) return;
       if(fields.named==="no" && Object.values(votes).some(v=>v && v.name)){ const clean={}; Object.entries(votes).forEach(([pid,v])=>{ if(!v) return; const c={...v}; delete c.name; delete c.nameAt; clean[pid]=c; }); await S.be.poll(d.id).setAllVotes(clean); } }
     if(d.id){ await S.be.patchMeta(d.id, {...fields, joinUrl:g("dlgJoin")?g("dlgJoin").value.trim():"", updatedAt:now}); closeDlg(); return; }
-    const id=freshSetId(), imp=d.imported, cfg=C.emptyConfig();
+    const id=await freshSetId(name), imp=d.imported, cfg=C.emptyConfig();
     if(imp){ const f=C.filterForCategory(fields.category, imp.questions), msg=C.skippedMessage(fields.category, f.skipped);
       if(msg && !confirm(msg+"\n\nCreate the set without them?")) return;
       cfg.questions=f.kept; cfg.tlYellow=imp.tlYellow; cfg.tlRed=imp.tlRed; if(imp.set && imp.set.mode) cfg.mode=imp.set.mode; }
@@ -671,8 +673,23 @@ async function openDelDlg(id){ if(!metaOf(id)) return; const st=S.polls[id];
 function delDlgHTML(d){ const m=metaOf(d.id)||{}, st=d.st;
   return `<p style="margin:0"><b>${esc(tx(m.name))}</b> is removed from the database, with ${st?`its ${st.questions} ${st.questions===1?"question":"questions"} and the answers of ${st.respondents} ${st.respondents===1?"respondent":"respondents"}`:"its questions and all answers"}. Its link and QR code stop working. This cannot be undone.</p>
     <div class="controls"><button class="btn" data-act="setExpJSON" data-id="${esc(d.id)}">Export responses first</button><span class="spacer"></span><button class="btn ghost" data-act="dlgClose">Cancel</button><button class="btn danger-solid" data-act="delConfirm">Delete permanently</button></div>`; }
+/* a set under another id, so under another link: for sets from before links followed the name, or after a rename */
+function openLinkDlg(id){ const m=metaOf(id); if(!m) return; const sets=S.sets||{};
+  S.ui.dlg={type:"link", id, title:"Change the link of this question set", focus:"dlgLink", v:C.setIdFor(tx(m.name), x=>x!==id && !!sets[x])}; render(); }
+function linkDlgHTML(d){ const m=metaOf(d.id)||{}, st=S.polls[d.id], live=st && st.phase && st.phase!=="lobby";
+  return `<p class="meta" style="margin:0">Now: <span style="word-break:break-all">${esc(urlFor({set:d.id}))}</span></p>
+    <div class="field"><label for="dlgLink">New last part of the link</label><input type="text" id="dlgLink" maxlength="40" value="${esc(d.v)}" autocapitalize="none" spellcheck="false">
+      <div class="meta">Lowercase letters, digits and dashes. Anything else is converted, so you can also type a title.</div></div>
+    <div class="banner"><b>${esc(tx(m.name))}</b> keeps its questions and answers, but the old link and QR code stop working. Anyone who has the set open has to join again through the new link.${live?" A session is running in this set right now.":""}${m.joinUrl?" This set shows its own join link to participants; check that it still points to the right place.":""}</div>
+    <div class="controls"><button class="btn primary" data-act="dlgSave">Change link</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
+async function saveLinkDlg(){ const d=S.ui.dlg, el=document.getElementById("dlgLink"), raw=el?el.value.trim():"";
+  if(!raw || !/[a-z0-9]/i.test(raw.normalize("NFKD"))){ alert("Type the new last part of the link."); if(el) el.focus(); return; }
+  const nid=C.slug(raw); if(nid===d.id){ closeDlg(); return; }
+  try{ await S.be.moveSet(d.id, nid); if(S.polls[d.id]){ S.polls[nid]=S.polls[d.id]; delete S.polls[d.id]; }
+    if(S.route==="set") location.href=urlFor({set:nid}); else closeDlg();
+  }catch(e){ alert("Changing the link failed: "+(e&&e.message||e)); } }
 async function duplicateSet(id){ const meta=metaOf(id); if(!meta) return;
-  try{ const poll=await S.be.readPoll(id), d=C.duplicateSet(meta, poll.config, Date.now()), nid=freshSetId();
+  try{ const poll=await S.be.readPoll(id), d=C.duplicateSet(meta, poll.config, Date.now()), nid=await freshSetId(d.meta.name);
     await S.be.writePoll(nid, {config:d.config, session:{...DEFAULT_SESSION}}); await S.be.setMeta(nid, d.meta); loadStats();
   }catch(e){ alert("Duplicating failed: "+(e&&e.message||e)); } }
 function extendSet(id){ const now=Date.now(); return S.be.patchMeta(id, {expiresAt:C.extendedExpiry(now), updatedAt:now}).catch(e=>alert("Extending failed: "+(e&&e.message||e))); }
@@ -784,6 +801,7 @@ app.addEventListener("click", e=>{
     case "setExtend": extendSet(id); break;
     case "setExpire": { const now=Date.now(); S.be.patchMeta(id, {expiresAt:now-1000, updatedAt:now}).catch(e=>alert("Expiring failed: "+(e&&e.message||e))); break; } // undone with Extend
     case "setQR": S.ui.dlg={type:"qr", id, title:"QR code: "+tx((metaOf(id)||{}).name)}; render(); break;
+    case "setLink": openLinkDlg(id); break;
     case "setDup": duplicateSet(id); break;
     case "setExpQ": exportSet(id,"questions"); break;
     case "setExpJSON": exportSet(id,"json"); break;
@@ -792,7 +810,7 @@ app.addEventListener("click", e=>{
     case "delConfirm": { const d=S.ui.dlg; if(!d || d.type!=="del") break;
       S.be.removeSet(d.id).then(()=>{ delete S.polls[d.id]; if(S.route==="set") location.href=urlFor(); else closeDlg(); }).catch(e=>alert("Deleting failed: "+(e&&e.message||e))); break; }
     case "dlgClose": closeDlg(); break;
-    case "dlgSave": if(S.ui.dlg && S.ui.dlg.type==="edit") saveEditDlg(); else saveSetDlg(); break;
+    case "dlgSave": if(S.ui.dlg && S.ui.dlg.type==="edit") saveEditDlg(); else if(S.ui.dlg && S.ui.dlg.type==="link") saveLinkDlg(); else saveSetDlg(); break;
     /* ---- consent workflow ---- */
     case "qEdit": { const i=Q.findIndex(x=>x.id===b.dataset.q); if(i<0) break; S.ui.dlg={type:"edit", qid:Q[i].id, title:`Edit proposal ${i+1}`, focus:"dlgText"}; render(); break; }
     case "closeTab": S.ui.closeTab=v; S.ui.tlPage=0; render(); break;

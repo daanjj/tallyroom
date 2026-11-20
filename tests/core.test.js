@@ -10,10 +10,19 @@ const tl = (text) => ({ ...C.q(text, 1, 3, "", "", null, true) });
 const vote = (round, answers, texts, t) => ({ round, answers, texts: texts || {}, t: t || NOW });
 
 /* ---------- question sets (A1, A3) ---------- */
-test("set id: 8 characters from a-z0-9, valid as ?set= value", () => {
-  for (let i = 0; i < 200; i++) { const id = C.newSetId(); assert.match(id, /^[a-z0-9]{8}$/); assert.ok(C.SET_ID_RE.test(id)); }
-  assert.equal(C.newSetId(() => 0), "aaaaaaaa");
-  assert.equal(C.newSetId(() => 0.999999), "99999999");
+test("set id: the name as a slug, valid as ?set= value", () => {
+  assert.equal(C.setIdFor("MT offsite, team B!"), "mt-offsite-team-b");
+  assert.equal(C.setIdFor("  "), "set");
+  for (const n of ["Café Zürich", "x".repeat(60), "!!!", "Top 10 besluiten"]) assert.ok(C.SET_ID_RE.test(C.setIdFor(n)), n);
+});
+test("set id: a taken slug gets -2, -3 and stays within 40 characters", () => {
+  const taken = (...ids) => (id) => ids.includes(id);
+  assert.equal(C.setIdFor("Team B", taken("team-b")), "team-b-2");
+  assert.equal(C.setIdFor("Team B", taken("team-b", "team-b-2")), "team-b-3");
+  assert.equal(C.setIdFor("Team B", taken("other")), "team-b");
+  const long = "x".repeat(40), id = C.setIdFor(long, taken(long));
+  assert.equal(id, "x".repeat(38) + "-2"); assert.ok(C.SET_ID_RE.test(id));
+  assert.equal(C.setIdFor("a".repeat(37) + " b c", taken("a".repeat(37) + "-b")), "a".repeat(37) + "-2");
 });
 test("set id pattern refuses characters that break a database path", () => {
   for (const bad of ["a/b", "a.b", "a b", "", "a#b", "x".repeat(41)]) assert.equal(C.SET_ID_RE.test(bad), false, bad);

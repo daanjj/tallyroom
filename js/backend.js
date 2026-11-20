@@ -1,7 +1,7 @@
 /* Tally Room backends: where the data lives.
    Both backends offer the same interface:
      global   id, isHost, canWrite, demo, isConnected(), onConn(f), downFor(), nudge()
-     sets     onSets(f(map|null, err)), getSets(), setMeta(id, meta), patchMeta(id, patch), removeSet(id)
+     sets     onSets(f(map|null, err)), getSets(), setMeta(id, meta), patchMeta(id, patch), removeSet(id), moveSet(id, newId)
      polls    readPoll(id), writePoll(id, {config, session}), poll(id) -> live access to one set
    Data layout: sets/{id} = attributes of a set, polls/{id}/config|session|votes = its questions, state and answers,
    polls/{id}/actions = follow-up actions the presenter records for concerns and objections. */
@@ -73,6 +73,8 @@ function makeDemoBackend(isHost){
     setMeta:async(id,m)=>{ db.sets[id]=copy(m); save(); emitSets(); emit(id,"meta"); },
     patchMeta:async(id,p)=>{ db.sets[id]={...(db.sets[id]||{}),...copy(p)}; save(); emitSets(); emit(id,"meta"); },
     removeSet:async id=>{ delete db.sets[id]; delete db.polls[id]; save(); emitSets(); emit(id); },
+    moveSet:async(id,nid)=>{ if(!db.sets[id]) throw new Error("This set does not exist any more."); if(db.sets[nid] || db.polls[nid]) throw new Error("That link is already in use.");
+      db.sets[nid]=db.sets[id]; if(db.polls[id]) db.polls[nid]=db.polls[id]; delete db.sets[id]; delete db.polls[id]; save(); emitSets(); emit(id); emit(nid); },
     readPoll:async id=>copy(db.polls[id])||{},
     writePoll:async(id,p)=>{ db.polls[id]=copy(p)||{}; save(); emit(id); },
     poll:id=>{ const l=pl(id); return { pull:null,
@@ -109,6 +111,11 @@ function makeFirebaseBackend(config, isHost){
     setMeta:(id,m)=>db.ref("sets/"+id).set(m),
     patchMeta:(id,p)=>db.ref("sets/"+id).update(p),
     removeSet:id=>Promise.all([db.ref("sets/"+id).remove(), db.ref("polls/"+id).remove()]),
+    /* the set under another id: everything is copied and the old id removed in one write, so it is never half moved */
+    moveSet:async(id,nid)=>{ const val=async p=>(await db.ref(p).once("value")).val();
+      const [meta,poll,m2,p2]=await Promise.all([val("sets/"+id), val("polls/"+id), val("sets/"+nid), val("polls/"+nid)]);
+      if(!meta) throw new Error("This set does not exist any more."); if(m2 || p2) throw new Error("That link is already in use.");
+      await db.ref().update({["sets/"+nid]:meta, ["polls/"+nid]:poll, ["sets/"+id]:null, ["polls/"+id]:null}); },
     readPoll:async id=>{ try{ return await rest("polls/"+id); }catch(e){ return (await db.ref("polls/"+id).once("value")).val()||{}; } },
     writePoll:(id,p)=>db.ref("polls/"+id).set(p),
     poll:id=>{ const node=db.ref("polls/"+id); return {

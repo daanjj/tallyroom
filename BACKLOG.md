@@ -59,7 +59,7 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 **Specification**
 
 - The set is chosen by the URL: `?set={setId}`. `POLL_ID` as a constant disappears.
-- `setId`: 8 random characters from `a-z0-9`, generated on creation, never changes (the QR code depends on it).
+- `setId`: the name of the set as a slug (`MT offsite, team B` gives `mt-offsite-team-b`, with `-2`, `-3`… when taken), generated on creation. It does not follow a later rename; **More → Change link** moves the set to another id, after which the old link and QR code stop working. (Originally: 8 random characters that never change.)
 - Storage:
   - `sets/{setId}` = the set's attributes (the "meta" record): `{name, header, accent, category, named, expiresAt, createdAt, updatedAt}`. This node is the index for the overview in A2, so it stays small.
   - `polls/{setId}/config|session|votes` = unchanged from today.

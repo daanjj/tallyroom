@@ -11,7 +11,7 @@ function fmt(x,d=1){ return Number.isFinite(x)? x.toFixed(d).replace(/\.0$/,"") 
 /* Every content text (header, question text, option and scale labels, prompts) is read through tx().
    Today it returns the string; multi-language sets (backlog E1) only have to change this helper. */
 function tx(v){ if(v==null) return ""; if(typeof v==="object"){ const f=Object.values(v)[0]; return f==null?"":String(f); } return String(v); }
-function slug(s){ return String(s||"").normalize("NFKD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40) || "set"; }
+function slug(s){ return String(s||"").normalize("NFKD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+/,"").slice(0,40).replace(/-+$/,"") || "set"; }
 function stamp(now){ const d=new Date(now), p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; }
 
 /* ============ questions ============ */
@@ -266,7 +266,9 @@ function csvToQuestions(text){
 const DAY=864e5, DEFAULT_EXPIRY_DAYS=3, DEFAULT_ACCENT="#5A3BD6";
 const CATEGORIES=["generic","consent","dilemma"], NAMED=["no","yes","random"];
 const SET_ID_RE=/^[A-Za-z0-9_-]{1,40}$/;
-function newSetId(rnd){ rnd=rnd||Math.random; const a="abcdefghijklmnopqrstuvwxyz0123456789"; let s=""; for(let i=0;i<8;i++) s+=a[Math.min(35,Math.floor(rnd()*36))]; return s; }
+/* the id is the name as a slug, so the link reads like the set; -2, -3… when that id is taken */
+function setIdFor(name, taken){ const base=slug(name); if(!taken || !taken(base)) return base;
+  for(let n=2;;n++){ const suf="-"+n, id=base.slice(0,40-suf.length).replace(/-+$/,"")+suf; if(!taken(id)) return id; } }
 function normHex(v){ let s=String(v||"").trim(); if(/^#?[0-9a-fA-F]{3}$/.test(s)){ s=s.replace("#",""); s="#"+s[0]+s[0]+s[1]+s[1]+s[2]+s[2]; } if(/^[0-9a-fA-F]{6}$/.test(s)) s="#"+s; return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toUpperCase() : null; }
 /* the record at sets/{id}: always complete, never undefined (Firebase refuses undefined) */
 function normMeta(m){ if(!m || typeof m!=="object") return null;
@@ -406,7 +408,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   CATEGORY_RULES, catRules, catName, kindAllowed, filterForCategory, skippedMessage, categoryBlockers, blockerMessage, dilemmaStats,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, validAns, roundVotes, stats, parseCSV, csvToQuestions,
-  DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, SET_ID_RE, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
+  DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, SET_ID_RE, setIdFor, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,
