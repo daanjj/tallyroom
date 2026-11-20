@@ -633,3 +633,19 @@ test("dilemma: exactly two options, more is refused when saving or creating from
   assert.deepEqual(three.options, ["Left", "Right", "Wait"], "a file is not changed in silence");
   assert.deepEqual(C.questionProblems([ok, three, one, C.q("Pick", 1, 5, "", "", ["A", "B", "C"])]), ["Question 2: a dilemma has exactly two options (this one has 3).", "Question 3: a dilemma has exactly two options."]);
 });
+
+/* ---------- forged answers (backlog G) ---------- */
+test("an answer outside the scale or the options does not count, so one forged vote cannot move a mean", () => {
+  const sc = C.q("Scale", 1, 5, "lo", "hi"), mc = C.q("Pick", 1, 3, "", "", ["A", "B", "C"]);
+  assert.equal(C.validAns({ answers: { [sc.id]: 5 } }, sc), 5);
+  for (const bad of [0, 6, -1000, 999, 2.5]) assert.equal(C.validAns({ answers: { [sc.id]: bad } }, sc), null, String(bad));
+  assert.equal(C.validAns({ answers: { [mc.id]: 4 } }, mc), null); assert.equal(C.validAns({ answers: { [mc.id]: 3 } }, mc), 3);
+  const vals = [{ answers: { [sc.id]: 5 } }, { answers: { [sc.id]: 5 } }, { answers: { [sc.id]: -1000 } }].map((v) => C.validAns(v, sc)).filter(Number.isFinite);
+  assert.equal(C.stats(vals, 1, 5).mean, 5);
+});
+test("qidMap lists the question ids that can be database keys; withQids adds it without touching the input", () => {
+  const cfg = { mode: "batch", questions: [{ id: "q1a2b3" }, { id: "x.y" }, { id: "" }, null, { id: "imported_7" }] };
+  assert.deepEqual(C.qidMap(cfg), { q1a2b3: true, imported_7: true });
+  const out = C.withQids(cfg); assert.deepEqual(out.qids, { q1a2b3: true, imported_7: true }); assert.equal(cfg.qids, undefined);
+  assert.deepEqual(C.qidMap(null), {}); assert.equal(C.withQids(null), null);
+});

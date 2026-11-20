@@ -76,3 +76,13 @@ test("a question from the database or a file has numbers where the screens expec
   assert.equal(r.rev, 3); assert.equal(r.history[0].rev, 1); assert.equal(r.history[0].counts.r, 0);
   assert.deepEqual(C.reviveOutcome({ questions: [{ id: "q", kind: "traffic", status: "red", lights: { g: IMG, r: 2 } }] }).q.counts, { g: 0, y: 0, r: 2 });
 });
+test("the rules in tallyroom-setup.md are the same as database.rules.json", () => {
+  const md = fs.readFileSync(path.join(root, "tallyroom-setup.md"), "utf8"), m = md.match(/```json\n([\s\S]*?)\n```/);
+  assert.ok(m, "no rules block in tallyroom-setup.md");
+  assert.deepEqual(JSON.parse(m[1]), JSON.parse(fs.readFileSync(path.join(root, "database.rules.json"), "utf8")));
+});
+test("the rules check every per-question answer key against the question list of the set", () => {
+  const v = JSON.parse(fs.readFileSync(path.join(root, "database.rules.json"), "utf8")).rules.polls.$set.votes.$uid;
+  for (const k of ["answers", "conf", "revs", "texts", "typing"]) assert.match(v[k].$q[".validate"], /child\('qids'\)\.child\(\$q\)/, k);
+  for (const k of ["answers", "conf"]) assert.match(v[k].$q[".validate"], /newData\.val\(\) >= 0 && newData\.val\(\) <= 11/, k);
+});

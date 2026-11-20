@@ -41,27 +41,27 @@
             },
             "answers": {
               "$q": {
-                ".validate": "newData.isNumber()"
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 11 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "conf": {
               "$q": {
-                ".validate": "newData.isNumber()"
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 11 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "revs": {
               "$q": {
-                ".validate": "newData.isNumber()"
+                ".validate": "newData.isNumber() && newData.val() >= 0 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "texts": {
               "$q": {
-                ".validate": "newData.isString() && newData.val().length <= 2000"
+                ".validate": "newData.isString() && newData.val().length <= 2000 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "typing": {
               "$q": {
-                ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+                ".validate": "newData.isNumber() && newData.val() <= now + 60000 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "$other": {

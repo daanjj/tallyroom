@@ -123,6 +123,9 @@ function randomName(taken, rnd){ rnd=rnd||Math.random; const has=n=>taken instan
 
 /* ============ consent workflow (backlog C): versions of a proposal and its final light ============ */
 /* an answer only counts for the version of the proposal it was given on (version 1 when nothing is recorded) */
+/* the ids of the questions as a map, written next to them in the config: the database rules accept answers only for these (backlog G) */
+function qidMap(cfg){ const m={}; ((cfg&&cfg.questions)||[]).forEach(qu=>{ const id=qu&&qu.id!=null?String(qu.id):""; if(/^[A-Za-z0-9_-]{1,40}$/.test(id)) m[id]=true; }); return m; }
+function withQids(cfg){ return cfg && typeof cfg==="object" ? {...cfg, qids:qidMap(cfg)} : cfg; }
 function answerIsCurrent(vote, qid, rev){ const r=vote&&vote.revs?vote.revs[qid]:undefined; return (Number.isFinite(r)?r:1)===(Number.isFinite(rev)?rev:1); }
 function trafficCounts(votes, qu, rev){ const c={g:0,y:0,r:0}, q2={...qu, rev};
   Object.values(votes||{}).forEach(v=>{ const a=validAns(v,q2); if(a===1) c.g++; else if(a===2) c.y++; else if(a===3) c.r++; }); return c; }
@@ -239,6 +242,7 @@ function presenceDoc(cur, round, now){ if(!cur || cur.round!==round) return {rou
 function validAns(v,qu){
   if(isOpen(qu)) return String((v&&v.texts&&v.texts[qu.id])||"").trim() ? 1 : null; // an open answer is its text
   const a=v&&v.answers?v.answers[qu.id]:undefined; if(!Number.isFinite(a)) return null;
+  if(!Number.isInteger(a) || a<qu.min || a>qu.max) return null; // outside the scale or the list of options: a forged or stale vote
   if(isTraffic(qu) && !answerIsCurrent(v,qu.id,qu.rev)) return null; // given on an earlier version of the proposal (backlog C1)
   if(isDilemma(qu)){ const c=v.conf?v.conf[qu.id]:undefined, cf=qu.conf||DEFAULT_CONF; if(!Number.isFinite(c) || c<cf.min || c>cf.max) return null; } // choice and confidence, or nothing
   if(isTraffic(qu) && a!==1 && !String(v.texts?.[qu.id]||"").trim()) return null; return a; } // yellow/red only count once the follow-up is filled in
@@ -447,7 +451,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   optLabel, q, qOpen, qDilemma, qNew, qFromObj, shapeQuestion, questionProblems, reviveQuestion, exportQ, followUp,
   CATEGORY_RULES, catRules, catName, kindAllowed, filterForCategory, skippedMessage, categoryBlockers, blockerMessage, dilemmaStats,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
-  PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, validAns, roundVotes, stats, parseCSV, csvToQuestions,
+  PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,

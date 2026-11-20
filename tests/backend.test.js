@@ -17,7 +17,8 @@ function fakeFirebase({ data = {}, user = null, anonFails = false, noAppCheck = 
     signInWithEmailAndPassword: async (email, pw) => { if (pw !== "good") throw Object.assign(new Error("bad"), { code: "auth/invalid-credential" }); setUser({ uid: "u_" + email.split("@")[0], isAnonymous: false, email }); },
     signOut: async () => { log.out++; setUser(null); }, sendPasswordResetEmail: async () => {} };
   const db = { ref: (path) => ({ on: (ev, cb) => { if (path && path[0] !== ".") { log.on.push(path); setTimeout(() => cb({ val: () => get(path) ?? null }), 0); } return cb; },
-    off: () => log.off.push(path), once: async () => ({ val: () => get(path) ?? null }) }) };
+    off: () => log.off.push(path), once: async () => ({ val: () => get(path) ?? null }),
+    set: async (v) => (log.set = log.set || []).push([path, v]), child: (p) => db.ref(path + "/" + p) }) };
   const appCheck = () => ({ activate: (key, refresh) => log.appCheck.push([key, refresh, global.FIREBASE_APPCHECK_DEBUG_TOKEN === true]), getToken: async () => ({ token: "ac-token" }) });
   log.appCheck = [];
   return { log, firebase: { initializeApp() {}, database: () => db, auth: () => auth, ...(noAppCheck ? {} : { appCheck }) } };
@@ -95,4 +96,11 @@ test("demo mode has no sign-in: presenter unless ?host=off", async () => {
   delete require.cache[require.resolve("../js/backend.js")]; const B = require("../js/backend.js");
   const a = B.make({ firebaseConfig: {}, params: new URLSearchParams("demo=1") }), b = B.make({ firebaseConfig: {}, params: new URLSearchParams("demo=1&host=off") });
   assert.equal(a.isHost, true); assert.equal(b.isHost, false); assert.ok(a.id); let s = null; a.onAuth((x) => (s = x)); assert.equal(s.isHost, true);
+});
+test("every config written to Firebase carries the ids of its questions, for the rules to check answers against", async () => {
+  const { be, log } = load({ data: DATA, user: { uid: "u_ann", isAnonymous: false } }, null, "", false); await tick();
+  const cfg = { mode: "live", questions: [{ id: "qabc123", text: "x" }, { id: "bad/id", text: "y" }] };
+  await be.writePoll("a", { config: cfg, session: {} }); await be.poll("a").setConfig(cfg);
+  assert.deepEqual(log.set.map(([p, v]) => [p, (v.config || v).qids]), [["polls/a", { qabc123: true }], ["polls/a/config", { qabc123: true }]]);
+  assert.equal(cfg.qids, undefined, "the caller's object is left alone");
 });

@@ -52,27 +52,27 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
             },
             "answers": {
               "$q": {
-                ".validate": "newData.isNumber()"
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 11 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "conf": {
               "$q": {
-                ".validate": "newData.isNumber()"
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 11 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "revs": {
               "$q": {
-                ".validate": "newData.isNumber()"
+                ".validate": "newData.isNumber() && newData.val() >= 0 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "texts": {
               "$q": {
-                ".validate": "newData.isString() && newData.val().length <= 2000"
+                ".validate": "newData.isString() && newData.val().length <= 2000 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "typing": {
               "$q": {
-                ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+                ".validate": "newData.isNumber() && newData.val() <= now + 60000 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
             },
             "$other": {
@@ -87,6 +87,8 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
 ```
 
 Click **Publish**. `sets` is the list of question sets with their header, colour and expiry date; `polls` holds the questions and answers of each set; `presenters` is the list of accounts that may present. In short: a presenter may read and write everything; a participant may read the one set of the link and write only its own answers, and only while the set exists and has not expired. Nobody can read or write anything without being signed in. Who has the Firebase CLI can publish with `firebase deploy --only database` instead.
+
+**Upgrading to the version that checks answers (21 Nov 2026):** publish the rules of step 1.3 again; the order does not matter. Answers must now be whole numbers from 0 to 11, and belong to a question of the set. A set gets its list of questions (`qids` in its config) the next time a presenter saves its questions; until then its answers are checked for shape only.
 
 **Upgrading to the version with "still writing":** publish the rules of step 1.3 again first, then put the new files online. The rules gained one field (`typing`). With the old rules the new page still works, but the presenter does not see that someone is writing; the text is only held back until the participant pauses.
 

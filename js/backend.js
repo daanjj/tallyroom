@@ -170,7 +170,8 @@ function makeFirebaseBackend(config, opts){
       try{ await db.ref().update({["sets/"+nid]:meta, ["polls/"+nid]:poll, ["sets/"+id]:null, ["polls/"+id]:null}); }
       catch(e){ if(denied(e)) throw new Error("This set holds answers in an old format. Clear the answers or export them first"); throw e; } },
     readPoll:async id=>{ try{ return await rest("polls/"+id); }catch(e){ return (await db.ref("polls/"+id).once("value")).val()||{}; } },
-    writePoll:(id,p)=>db.ref("polls/"+id).set(p),
+    /* the config carries the ids of its questions (qids), which the database rules check every answer against */
+    writePoll:(id,p)=>db.ref("polls/"+id).set(p && p.config ? {...p, config:C.withQids(p.config)} : p),
     poll:id=>{ const node=db.ref("polls/"+id), P="polls/"+id; return {
       /* only a presenter may read polls/{id} as a whole; a participant reads the parts it is allowed to */
       pull:async()=>{ if(st.isHost) return rest(P); const [config,session,votes]=await Promise.all([rest(P+"/config"), rest(P+"/session"), rest(P+"/votes")]); return {config, session, votes}; },
@@ -178,7 +179,7 @@ function makeFirebaseBackend(config, opts){
       onConfig:f=>listen(P+"/config", f),
       onSession:f=>listen(P+"/session", f),
       onVotes:f=>listen(P+"/votes", v=>f(v||{})),
-      setConfig:c=>node.child("config").set(c),
+      setConfig:c=>node.child("config").set(C.withQids(c)),
       setSession:s=>node.child("session").set(s),
       /* the rules refuse a time stamp that is ahead of the server, so a phone with a fast clock is held back to the server's */
       setVotes:(pid,v)=>node.child("votes/"+pid).set(v && Number.isFinite(v.t) && v.t>now()+30000 ? {...v, t:Math.round(now())} : v),
