@@ -157,7 +157,49 @@ function consentMarkdown(p){ const T=(p.questions||[]).filter(q=>q.kind==="traff
         const cs=(h.comments||[]); if(cs.length) out.push(...cs.map(c=>`- ${c.v===3?"Objection":"Concern"}${c.name?` (${mdLine(c.name)})`:""}: ${mdLine(c.text)}`),""); }); } });
   out.push("## All proposals","");
   T.forEach(q=>out.push(`${q.n}. ${String(q.text||"").split(/\r?\n/).join("\n   ")}`));
+  if(actionTotals(p.actionGroups).action) out.push("","## Actions","", ...mdDeadlineTable(p.actionGroups));
   return out.join("\n")+"\n"; }
+
+/* ============ follow-up actions for concerns and objections (backlog F) ============ */
+/* one action per remark: the same key as long as the remark stands, and never shared with another version of the proposal */
+const actionKey = (qid,pid,rev) => `${qid}_${pid}_v${rev||1}`;
+function cleanAction(a){ a=a||{}; const due=String(a.due||"");
+  return { action:String(a.action||"").trim().slice(0,300), owner:String(a.owner||"").replace(/\s+/g," ").trim().slice(0,60), due:/^\d{4}-\d{2}-\d{2}$/.test(due)?due:"", none:!!a.none, t:Number.isFinite(a.t)?a.t:0 }; }
+/* "none" = marked as no action needed, "action" = has an action text, "open" = still to do */
+function actionState(a){ return (a && a.none) ? "none" : (a && String(a.action||"").trim()) ? "action" : "open"; }
+/* the yellow and red remarks on the final version of each proposal, per proposal: red first, then oldest first */
+function actionGroups(cfg, ses, votes, named, actions){ const out=[];
+  (cfg.questions||[]).forEach((qu,i)=>{ if(!isTraffic(qu)) return; const rev=qu.rev||1;
+    const rows=Object.entries(votes||{}).filter(([,v])=>{ const a=validAns(v,qu); return a===2||a===3; })
+      .sort((a,b)=>(b[1].answers[qu.id]-a[1].answers[qu.id]) || ((a[1].t||0)-(b[1].t||0)))
+      .map(([pid,v])=>{ const key=actionKey(qu.id,pid,rev), a=cleanAction((actions||{})[key]);
+        const r={key, v:v.answers[qu.id], text:String(v.texts[qu.id]).trim(), action:a.action, owner:a.owner, due:a.due, none:a.none, state:actionState(a)};
+        if(isNamed(named)) r.name=String(v.name||"unnamed"); return r; });
+    if(rows.length) out.push({n:i+1, id:qu.id, text:qu.text, rev, status:rows.some(r=>r.v===3)?"red":"yellow", rows}); });
+  return out; }
+function actionTotals(groups){ const t={total:0, objections:0, concerns:0, action:0, none:0, open:0};
+  (groups||[]).forEach(g=>g.rows.forEach(r=>{ t.total++; if(r.v===3) t.objections++; else t.concerns++; t[r.state]++; })); t.done=t.action+t.none; return t; }
+/* every row with an action text, soonest deadline first (no deadline last), then by owner */
+function actionsByDeadline(groups){ const rows=[]; (groups||[]).forEach(g=>g.rows.forEach(r=>{ if(r.state==="action") rows.push({due:r.due, owner:r.owner, action:r.action, n:g.n}); }));
+  return rows.sort((a,b)=>((a.due||"9999").localeCompare(b.due||"9999")) || a.owner.localeCompare(b.owner) || (a.n-b.n)); }
+function mdDeadlineTable(groups){ return ["| Deadline | Owner | Action | Proposal |","|----------|-------|--------|----------|",
+  ...actionsByDeadline(groups).map(r=>`| ${r.due} | ${mdCell(r.owner)} | ${mdCell(r.action)} | ${r.n} |`)]; }
+/* Markdown of the action list, from a results payload */
+function actionsMarkdown(p){ const G=p.actionGroups||[], t=actionTotals(G), d=new Date(p.exportedAt), z=n=>String(n).padStart(2,"0"), named=isNamed(p.named);
+  const s=(n,one,many)=>`${n} ${n===1?one:many}`;
+  const out=[`# ${mdLine(p.title)}: follow-up actions`,"",`- Date: ${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`,`- Question set: ${mdLine(p.set&&p.set.name)}`,
+    `- Remarks: ${t.total} (${s(t.objections,"objection","objections")}, ${s(t.concerns,"concern","concerns")})`,`- Handled: ${t.action} with an action, ${t.none} no action needed, ${t.open} open`,"","## Actions by proposal",""];
+  if(!G.length) out.push("No concerns or objections to follow up.","");
+  G.forEach(g=>{ out.push(`### ${g.n}. ${g.status==="red"?"Red":"Yellow"}`,"",mdQuote(g.text),"",
+      `| Type | Remark |${named?" By |":""} Action | Owner | Deadline |`,`|------|--------|${named?"----|":""}--------|-------|----------|`);
+    g.rows.forEach(r=>out.push(`| ${r.v===3?"Objection":"Concern"} | ${mdCell(r.text)} |${named?` ${mdCell(r.name)} |`:""} ${r.state==="none"?"No action needed":r.state==="open"?"(open)":mdCell(r.action)} | ${r.state==="action"?mdCell(r.owner):""} | ${r.state==="action"?r.due:""} |`));
+    out.push(""); });
+  out.push("## Actions by deadline","", ...(t.action ? mdDeadlineTable(G) : ["No actions recorded."]));
+  return out.join("\n")+"\n"; }
+/* the actions stored in a saved results file, back under the keys review mode uses (respondent label as device id) */
+function reviveActions(p, questions){ const out={}, rev={}; (questions||[]).forEach(qu=>{ rev[qu.id]=qu.rev||1; });
+  ((p&&p.answers)||[]).forEach((r,i)=>{ const pid=String((r&&r.respondent)||("R"+(i+1))); Object.entries((r&&r.actions)||{}).forEach(([qid,a])=>{ if(rev[qid]) out[actionKey(qid,pid,rev[qid])]=cleanAction(a); }); });
+  return out; }
 
 /* ============ votes and statistics ============ */
 const PRESENCE_MS = 150000; // a participant without answers counts as present for 2.5 min after their last heartbeat
@@ -283,7 +325,7 @@ function resultsPayload(o){ const cfg=normConfig(o.cfg), ses=o.ses||{}, round=se
   const ids=Object.keys(rv).filter(k=>hasAnswers(rv[k])).sort((a,b)=>(rv[a].t||0)-(rv[b].t||0));
   const title=o.title || (meta?meta.header:"") || "Tally Room";
   return { pollId:o.setId||"", set:{id:o.setId||"", name:meta?meta.name:title, header:title, category},
-    title, named, mode:cfg.mode, round, exportedAt:new Date(o.now).toISOString(), respondents:ids.length,
+    title, named, actionGroups:actionGroups(cfg, ses, Object.fromEntries(ids.map(k=>[k,rv[k]])), named, o.actions), mode:cfg.mode, round, exportedAt:new Date(o.now).toISOString(), respondents:ids.length,
     questions: cfg.questions.map((qu,i)=>{
       const vals=ids.map(k=>validAns(rv[k],qu)).filter(v=>Number.isFinite(v));
       const st=stats(vals,qu.min,qu.max); const num=!isOpt(qu)&&!isOpen(qu)&&st.n;
@@ -298,15 +340,16 @@ function resultsPayload(o){ const cfg=normConfig(o.cfg), ses=o.ses||{}, round=se
         mean:num?+st.mean.toFixed(2):null, median:num?st.median:null, sd:num?+st.sd.toFixed(2):null }; }),
     answers: ids.map((k,i)=>({ respondent:(isNamed(named)&&rv[k].name) ? String(rv[k].name) : "R"+String(i+1).padStart(2,"0"), at:new Date(rv[k].t||0).toISOString(),
       answers:Object.fromEntries(cfg.questions.map(qu=>[qu.id, (Number.isFinite(rv[k].answers?.[qu.id]) && !(isTraffic(qu)&&!answerIsCurrent(rv[k],qu.id,qu.rev)))?rv[k].answers[qu.id]:null])),
+      actions:Object.fromEntries(cfg.questions.filter(qu=>isTraffic(qu) && (o.actions||{})[actionKey(qu.id,k,qu.rev)] && validAns(rv[k],qu)>1).map(qu=>{ const a=cleanAction(o.actions[actionKey(qu.id,k,qu.rev)]); return [qu.id,{action:a.action, owner:a.owner, due:a.due, none:a.none}]; })),
       confidence:Object.fromEntries(cfg.questions.filter(qu=>isDilemma(qu)&&Number.isFinite(rv[k].conf?.[qu.id])).map(qu=>[qu.id,rv[k].conf[qu.id]])),
       texts:Object.fromEntries(cfg.questions.filter(qu=>((isTraffic(qu)&&answerIsCurrent(rv[k],qu.id,qu.rev)&&[2,3].includes(rv[k].answers[qu.id]))||isOpen(qu))&&String(rv[k].texts?.[qu.id]||"").trim()).map(qu=>[qu.id,String(rv[k].texts[qu.id]).trim()])) })),
     followUps:{yellow:followUp(cfg,2), red:followUp(cfg,3)} };
 }
 function resultsCSV(p){ const qq=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`, s=p.set||{};
-  const rows=[["respondent","question_nr","question","value","label","comment","confidence","set","header","category"].join(",")];
-  p.answers.forEach(r=>p.questions.forEach(qu=>{ const v=r.answers[qu.id], text=(r.texts&&r.texts[qu.id])||"", open=qu.kind==="open", cf=r.confidence?r.confidence[qu.id]:null;
+  const rows=[["respondent","question_nr","question","value","label","comment","confidence","set","header","category","action","owner","deadline"].join(",")];
+  p.answers.forEach(r=>p.questions.forEach(qu=>{ const v=r.answers[qu.id], text=(r.texts&&r.texts[qu.id])||"", open=qu.kind==="open", cf=r.confidence?r.confidence[qu.id]:null, ac=r.actions?r.actions[qu.id]:null;
     if(open ? !text : !Number.isFinite(v)) return; // an open answer is one row with its text in the comment column
-    rows.push([qq(r.respondent), qu.n, qq(qu.text), open?"":v, open?'""':qq(qu.options?(qu.options[v-1]||v):v), qq(text), Number.isFinite(cf)?cf:"", qq(s.name), qq(s.header), qq(s.category)].join(",")); }));
+    rows.push([qq(r.respondent), qu.n, qq(qu.text), open?"":v, open?'""':qq(qu.options?(qu.options[v-1]||v):v), qq(text), Number.isFinite(cf)?cf:"", qq(s.name), qq(s.header), qq(s.category), qq(ac?(ac.none?"No action needed":ac.action):""), qq(ac&&!ac.none?ac.owner:""), (ac&&!ac.none?ac.due:"")].join(",")); }));
   return "﻿"+rows.join("\r\n"); }
 
 /* ============ colour: one accent in, the whole palette out ============ */
@@ -367,6 +410,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,
-  answerIsCurrent, trafficCounts, trafficStatus, trafficComments, editQuestion, clearHistory, fixOutcome, questionOutcome, consentRows, consentTotals, consentMarkdown, reviveOutcome };
+  answerIsCurrent, trafficCounts, trafficStatus, trafficComments, editQuestion, clearHistory, fixOutcome, questionOutcome, consentRows, consentTotals, consentMarkdown, reviveOutcome,
+  actionKey, cleanAction, actionState, actionGroups, actionTotals, actionsByDeadline, actionsMarkdown, reviveActions };
 if(typeof module!=="undefined" && module.exports) module.exports=api; else root.TRCore=api;
 })(typeof window!=="undefined" ? window : globalThis);

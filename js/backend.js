@@ -3,7 +3,8 @@
      global   id, isHost, canWrite, demo, isConnected(), onConn(f), downFor(), nudge()
      sets     onSets(f(map|null, err)), getSets(), setMeta(id, meta), patchMeta(id, patch), removeSet(id)
      polls    readPoll(id), writePoll(id, {config, session}), poll(id) -> live access to one set
-   Data layout: sets/{id} = attributes of a set, polls/{id}/config|session|votes = its questions, state and answers. */
+   Data layout: sets/{id} = attributes of a set, polls/{id}/config|session|votes = its questions, state and answers,
+   polls/{id}/actions = follow-up actions the presenter records for concerns and objections. */
 (function(root){
 "use strict";
 const C=root.TRCore;
@@ -31,14 +32,15 @@ function makeDemoBackend(isHost){
   let db=load();
   const save=()=>{ mem=db; try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){} };
   const L={sets:[], poll:{}}; // listeners
-  const pl=id=>(L.poll[id]=L.poll[id]||{meta:[],cfg:[],ses:[],votes:[]});
+  const pl=id=>(L.poll[id]=L.poll[id]||{meta:[],cfg:[],ses:[],votes:[],actions:[]});
   const P=id=>(db.polls[id]=db.polls[id]||{});
   const copy=v=>v==null?null:JSON.parse(JSON.stringify(v));
   function emit(id, what){ const l=L.poll[id]; if(!l) return; const p=db.polls[id]||{};
     if(!what||what==="meta") l.meta.forEach(f=>f(copy(db.sets[id])));
     if(!what||what==="cfg") l.cfg.forEach(f=>f(copy(p.config)));
     if(!what||what==="ses") l.ses.forEach(f=>f(copy(p.session)));
-    if(!what||what==="votes") l.votes.forEach(f=>f(copy(p.votes)||{})); }
+    if(!what||what==="votes") l.votes.forEach(f=>f(copy(p.votes)||{}));
+    if(!what||what==="actions") l.actions.forEach(f=>f(copy(p.actions)||{})); }
   const emitSets=()=>L.sets.forEach(f=>f(copy(db.sets)||{}));
   const emitAll=()=>{ emitSets(); Object.keys(L.poll).forEach(id=>emit(id)); };
   try{ root.addEventListener("storage", e=>{ if(e.key===KEY){ db=load(); emitAll(); } }); }catch(e){}
@@ -82,7 +84,10 @@ function makeDemoBackend(isHost){
       setSession:async s=>{ P(id).session=copy(s); save(); emit(id,"ses"); simulate(id); },
       setVotes:async(pid,v)=>{ const p=P(id); p.votes=p.votes||{}; p.votes[pid]=copy(v); save(); emit(id,"votes"); },
       setAllVotes:async v=>{ P(id).votes=copy(v)||{}; save(); emit(id,"votes"); },
-      clearVotes:async()=>{ P(id).votes={}; save(); emit(id,"votes"); } }; } };
+      clearVotes:async()=>{ P(id).votes={}; save(); emit(id,"votes"); },
+      onActions:f=>{ l.actions.push(f); f(copy((db.polls[id]||{}).actions)||{}); },
+      setAction:async(key,a)=>{ const p=P(id); p.actions=p.actions||{}; p.actions[key]=copy(a); save(); emit(id,"actions"); },
+      clearActions:async()=>{ P(id).actions={}; save(); emit(id,"actions"); } }; } };
 }
 
 /* ---- Firebase Realtime Database backend (self-hosted version, open to anyone with the link) ---- */
@@ -116,7 +121,10 @@ function makeFirebaseBackend(config, isHost){
       setSession:s=>node.child("session").set(s),
       setVotes:(pid,v)=>node.child("votes/"+pid).set(v),
       setAllVotes:v=>node.child("votes").set(v||{}),
-      clearVotes:()=>node.child("votes").remove() }; } };
+      clearVotes:()=>node.child("votes").remove(),
+      onActions:f=>node.child("actions").on("value", s=>f(s.val()||{})),
+      setAction:(key,a)=>node.child("actions/"+key).set(a),
+      clearActions:()=>node.child("actions").remove() }; } };
 }
 
 /* opts: {firebaseConfig, hostKey, params}. Demo when ?demo is in the address or Firebase is not configured. */

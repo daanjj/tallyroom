@@ -538,7 +538,16 @@ Applies when `named` is `yes` or `random`.
 
 ## Epic F: follow-up actions for concerns and objections
 
-Added 20 Nov 2026. Not built yet. Applies to sets of category `consent`.
+Added 20 Nov 2026. Applies to sets of category `consent`.
+
+> **Status: built on 20 Nov 2026**, tried in demo mode (`?demo=1`) on one presenter device; not yet run against the live Firebase database.
+>
+> Differences from the specification below:
+> - **A change from a second presenter device** shows on the first one at its next redraw; a field that is being typed in keeps what was typed there.
+> - **"Open only" filter:** a row you are typing in stays visible until you leave it, even when it is no longer open.
+> - **Group heading:** a proposal shows Red when it has an objection among its remarks and Yellow otherwise, also when its fixed light differs because a remark came in later.
+> - **Actions whose remark is gone** stay in the database until the answers are cleared, as specified, but they are also not counted in the "recorded actions are removed" confirmation unless they have a text or "No action needed".
+> - **"Publish to the room" in review mode** does not write the actions of a saved file to the live set.
 
 ### F1. Action list on the presenter screen — M
 

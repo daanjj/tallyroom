@@ -16,7 +16,7 @@ function joinUrl(id, meta){ return (meta && meta.joinUrl) || urlFor({set:id}); }
 
 /* ============ state ============ */
 /* meta: undefined = not loaded yet, null = this set does not exist */
-const S = { route:(RAW_SET!=null?"set":"home"), setId:SET_ID, booted:false, meta:undefined, metaErr:null, sets:null, setsErr:null, polls:{}, cfg:null, ses:null, votes:{}, me:{id:null,isHost:false,canWrite:true,ackReset:null}, ui:{view:null,configOpen:false,draft:null,readonly:false,qs:.75,dlg:null}, backend:null, be:null };
+const S = { route:(RAW_SET!=null?"set":"home"), setId:SET_ID, booted:false, meta:undefined, metaErr:null, sets:null, setsErr:null, polls:{}, cfg:null, ses:null, votes:{}, actions:{}, me:{id:null,isHost:false,canWrite:true,ackReset:null}, ui:{view:null,configOpen:false,draft:null,readonly:false,qs:.75,dlg:null}, backend:null, be:null };
 const app = document.getElementById("app");
 const QS_STEPS=[.5,.6,.7,.75,.8,.9,1,1.15,1.3,1.5,1.75,2];
 function getQS(){ try{ const v=parseFloat(localStorage.getItem("tr_qs")); if(QS_STEPS.includes(v)) return v; }catch(e){} return .75; }
@@ -158,7 +158,8 @@ function fileBase(meta){ return "tallyroom-"+C.slug(meta?tx(meta.name):"results"
 function saveResults(payload, meta, kind){ const base=`${fileBase(meta)}-${C.stamp(Date.now())}`;
   if(kind==="csv") download(base+".csv", C.resultsCSV(payload), "text/csv;charset=utf-8");
   else download(base+".json", JSON.stringify(payload,null,2), "application/json"); }
-function currentPayload(){ return C.resultsPayload({setId:S.setId, meta:S.meta, title:header(), named:namedMode(), category:catNow(), cfg:S.cfg, ses:S.ses, votes:S.votes, now:Date.now()}); }
+function currentPayload(){ return C.resultsPayload({setId:S.setId, meta:S.meta, title:header(), named:namedMode(), category:catNow(), cfg:S.cfg, ses:S.ses, votes:S.votes, actions:shownActions(), now:Date.now()}); }
+function exportActionsMD(){ download(`${fileBase(S.meta)}-actions-${C.stamp(Date.now())}.md`, C.actionsMarkdown(currentPayload()), "text/markdown;charset=utf-8"); }
 function exportMD(){ download(`${fileBase(S.meta)}-${C.stamp(Date.now())}.md`, C.consentMarkdown(currentPayload()), "text/markdown;charset=utf-8"); }
 function mdBtn(){ return (catNow()==="consent" && S.ses.outcome && Object.keys(S.ses.outcome).length) ? `<button class="btn ghost" data-act="expMD">Export as Markdown</button>` : ""; }
 function exportJSON(){ saveResults(currentPayload(), S.meta, "json"); }
@@ -169,7 +170,7 @@ function exportBtns(){ return Object.values(currentRoundVotes()).some(hasAnswers
 async function exportSet(id, kind){ const meta=metaOf(id); if(!meta) return;
   try{ const poll=await S.be.readPoll(id);
     if(kind==="questions"){ download(`${fileBase(meta)}-questions.json`, JSON.stringify(C.questionsExport(meta, poll.config),null,1), "application/json"); return; }
-    const payload=C.resultsPayload({setId:id, meta, cfg:poll.config, ses:normSession(poll.session)||{}, votes:poll.votes||{}, now:Date.now()});
+    const payload=C.resultsPayload({setId:id, meta, cfg:poll.config, ses:normSession(poll.session)||{}, votes:poll.votes||{}, actions:poll.actions||{}, now:Date.now()});
     if(!payload.respondents && !confirm("This set has no answers in its current round. Export anyway?")) return;
     saveResults(payload, meta, kind);
   }catch(e){ alert("Export failed: "+(e&&e.message||e)); } }
@@ -185,12 +186,12 @@ function importResults(text, fname){
     const cf={}; qs.forEach(qu=>{ const c=r&&r.confidence?r.confidence[qu.id]:null; if(Number.isFinite(c)) cf[qu.id]=c; });
     if(Object.keys(a).length) votes[String((r&&r.respondent)||("R"+(i+1)))]={round:1, answers:a, texts:tx, conf:cf, revs:Object.fromEntries(qs.filter(qu=>isTraffic(qu)&&qu.rev>1&&a[qu.id]!=null).map(qu=>[qu.id,qu.rev])), ...(C.isNamed(p.named)&&r&&r.respondent?{name:String(r.respondent)}:{}), t:Date.parse((r&&r.at)||"")||Date.now()}; });
   if(!Object.keys(votes).length && !confirm("That file has questions but no answers. Open it anyway?")) return;
-  S.review={ live:{cfg:S.cfg, ses:S.ses, votes:S.votes},
+  S.review={ live:{cfg:S.cfg, ses:S.ses, votes:S.votes, actions:S.actions},
     info:{ title:String(p.title||"Saved results"), n:Object.keys(votes).length, file:String(fname||""), named:C.isNamed(p.named)?p.named:"no", category:(p.set&&p.set.category)||"generic",
            exportedAt:String(p.exportedAt||"").slice(0,16).replace("T"," ") } };
   S.cfg={ tlYellow:p.followUps&&p.followUps.yellow||"", tlRed:p.followUps&&p.followUps.red||"", mode:p.mode==="batch"?"batch":"live", questions:qs };
   S.ses={ phase:"summary", current:0, revealed:qs.map(q=>q.id), round:1, showLive:true, outcome:C.reviveOutcome({...p, questions:p.questions.map((q,i)=>({...q, id:qs[i].id}))}), resetAt:(S.review.live.ses&&S.review.live.ses.resetAt)||0 };
-  S.votes=votes; S.ui.view=null; S.ui.configOpen=false; render();
+  S.votes=votes; S.actions=C.reviveActions(p,qs); S.ui.act={}; S.ui.view=null; S.ui.configOpen=false; render();
 }
 function reviewBanner(){ if(!S.review) return "";
   const i=S.review.info;
@@ -215,7 +216,7 @@ function render(){
     html=notice("This question set does not exist (any more)", "Ask the presenter for a new link or QR code."+(S.me.isHost?` <a href="${esc(urlFor())}">All question sets</a>`:"")); }
   else if(S.meta===undefined || !S.cfg || !S.ses){ html=notice("", "Connecting…", true); }
   else { applyTheme(S.meta.accent); document.title=header(); host = S.me.isHost && S.ui.view!=="participant"; }
-  const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.id==="nameIn")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
+  const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.classList.contains("act-in")||ae.id==="nameIn")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
   const mc=document.querySelector("#modal .card"), mTop=mc?mc.scrollTop:0, wTop=window.scrollY;
   S.rendering=true; try{ app.innerHTML = html!=null ? html : (host ? hostHTML() : (expired() ? expiredHTML() : participantHTML())); } finally { S.rendering=false; }
   if(keep){ const el=document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.a,keep.b); }catch(e){} } }
@@ -304,15 +305,49 @@ const cmLi = c => `<li>${c.name?`<b>${esc(c.name)}</b> · `:""}${esc(c.text)}</l
 const LIGHTS={green:[TL_COLORS[0],"Green"], yellow:[TL_COLORS[1],"Yellow"], red:[TL_COLORS[2],"Red"], none:["var(--line-2)","No votes"]};
 function lightHTML(status){ const m=LIGHTS[status]||LIGHTS.none; return `<span class="light" style="--c:${m[0]}">${m[1]}</span>`; }
 function countsHTML(c){ return `<div class="tl-cnt">${["g","y","r"].map((k,i)=>`<span style="--c:${TL_COLORS[i]}">${c[k]||0}</span>`).join("")}</div>`; }
+/* ---- follow-up actions (backlog F): one row per yellow or red remark, with action, owner and deadline ---- */
+/* what is stored, with what is being typed on this screen laid over it */
+function shownActions(){ const out={...S.actions}; Object.entries(S.ui.act||{}).forEach(([k,d])=>{ out[k]={...(out[k]||{}),...d}; }); return out; }
+function actionGroupsNow(){ return C.actionGroups(S.cfg, S.ses, currentRoundVotes(), namedMode(), shownActions()); }
+function actionsHTML(){
+  const ro=!!S.review || expired(), groups=actionGroupsNow(), tot=C.actionTotals(groups), openOnly=S.ui.actFilter==="open";
+  if(!tot.total) return `<div class="card big-wait"><h2 style="font-size:24px">No concerns or objections to follow up.</h2></div>`;
+  const names=C.isNamed(namedMode()) ? [...new Set(Object.values(currentRoundVotes()).map(v=>v.name).filter(Boolean))] : [];
+  const raw=(r,f)=>{ const d=(S.ui.act||{})[r.key]; return d && d[f]!=null ? d[f] : r[f]; }; // while typing, show exactly what was typed
+  const bar=`<div class="card" style="padding:16px 20px"><div class="controls"><b>${tot.done} of ${tot.total} ${tot.total===1?"remark":"remarks"} handled</b>
+      <div class="seg" role="group" aria-label="Show"><button data-act="actFilter" data-v="all" class="${openOnly?"":"on"}">All</button><button data-act="actFilter" data-v="open" class="${openOnly?"on":""}">Open only (${tot.open})</button></div>
+      <span class="spacer"></span><button class="btn" data-act="expActMD">Export actions as Markdown</button></div>
+    ${ro?`<p class="meta" style="margin:10px 0 0">${S.review?"Saved results: the actions can be read and exported, not changed.":"This set has expired: extend it to change the actions."}</p>`:`<p class="meta" style="margin:10px 0 0">Type a follow-up action, an owner and a deadline per remark. Everything is saved as you type.</p>`}</div>
+    ${names.length?`<datalist id="actOwners">${names.map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist>`:""}`;
+  const cards=groups.map(g=>{ const rows=g.rows.filter(r=>!openOnly || r.state==="open" || (S.ui.act||{})[r.key]); if(!rows.length) return "";
+    return `<div class="card act-card"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div class="qnum" style="flex:1">Proposal ${g.n}${g.rev>1?` · version ${g.rev}`:""}</div>${lightHTML(g.status)}</div>
+      <div class="qtext">${esc(tx(g.text))}</div>
+      ${rows.map(r=>{ const k=esc(r.key), off=ro||r.none?"disabled":"", lab=`${r.v===3?"objection":"concern"}${r.name?" of "+esc(r.name):""}`;
+        return `<div class="act-row ${r.state}"><div class="act-remark"><span class="light sm" style="--c:${TL_COLORS[r.v-1]}"></span>${r.name?`<b>${esc(r.name)}</b> · `:""}${esc(r.text)}</div>
+          <div class="act-fields"><textarea class="act-in" id="af_action_${k}" data-key="${k}" data-f="action" maxlength="300" rows="2" placeholder="Follow-up action" aria-label="Follow-up action for the ${lab}" ${off}>${esc(raw(r,"action"))}</textarea>
+            <input class="act-in" type="text" id="af_owner_${k}" data-key="${k}" data-f="owner" maxlength="60" placeholder="Owner" aria-label="Owner of the action for the ${lab}" value="${esc(raw(r,"owner"))}" ${names.length?`list="actOwners"`:""} ${off}>
+            <input class="act-in" type="date" id="af_due_${k}" data-key="${k}" data-f="due" aria-label="Deadline of the action for the ${lab}" value="${esc(r.due)}" ${off}></div>
+          <div class="act-foot"><label><input type="checkbox" class="act-in" id="af_none_${k}" data-key="${k}" data-f="none" ${r.none?"checked":""} ${ro?"disabled":""}> No action needed</label><small id="as_${k}">${(S.ui.actSaved||{})[r.key]>Date.now()-4000?"Saved":""}</small></div></div>`; }).join("")}</div>`; }).join("");
+  return `${bar}${cards||`<div class="card big-wait"><p class="meta">Every remark is handled.</p></div>`}`;
+}
+const actTimers={};
+function actSet(key, f, val){ S.ui.act=S.ui.act||{}; S.ui.act[key]={...(S.ui.act[key]||{}), [f]:val}; }
+/* keepDraft: the field still has the cursor, so what is on screen stays exactly as typed */
+function actSave(key, keepDraft){ clearTimeout(actTimers[key]); const d=(S.ui.act||{})[key]; if(!d || S.review || expired()) return;
+  const obj=C.cleanAction({...(S.actions[key]||{}), ...d, t:Date.now()}); S.actions={...S.actions, [key]:obj}; if(!keepDraft) delete S.ui.act[key];
+  S.ui.actSaved=S.ui.actSaved||{}; S.ui.actSaved[key]=Date.now(); const m=document.getElementById("as_"+key); if(m) m.textContent="Saved";
+  write(()=>S.backend.setAction(key,obj)); }
+function actionNote(){ const n=Object.values(S.actions||{}).filter(a=>C.actionState(a)!=="open").length; return n ? ` ${n} recorded ${n===1?"action is":"actions are"} removed as well.` : ""; }
 /* consent sets: the closing overview replaces the summary (backlog C3) */
 function closingHTML(){
   const rows=C.consentRows(S.cfg,S.ses,currentRoundVotes(),namedMode()), tot=C.consentTotals(rows);
-  const open=[...rows.filter(r=>r.status==="red"), ...rows.filter(r=>r.status==="yellow")], tab=S.ui.closeTab==="details"?"details":"overview";
+  const open=[...rows.filter(r=>r.status==="red"), ...rows.filter(r=>r.status==="yellow")], tab=["details","actions"].includes(S.ui.closeTab)?S.ui.closeTab:"overview", at=C.actionTotals(actionGroupsNow());
   const head=`<div class="card" style="padding:22px 26px"><div class="eyebrow">Outcome</div><h2 style="font-size:28px;margin-top:6px">${tot.green} green · ${tot.yellow} yellow · ${tot.red} red${tot.none?` · ${tot.none} without votes`:""}</h2>
-    <div class="controls" style="margin-top:14px"><div class="seg" role="group" aria-label="View"><button data-act="closeTab" data-v="overview" class="${tab==="overview"?"on":""}">Overview</button><button data-act="closeTab" data-v="details" class="${tab==="details"?"on":""}">Details (${open.length})</button></div>
+    <div class="controls" style="margin-top:14px"><div class="seg" role="group" aria-label="View"><button data-act="closeTab" data-v="overview" class="${tab==="overview"?"on":""}">Overview</button><button data-act="closeTab" data-v="details" class="${tab==="details"?"on":""}">Details (${open.length})</button><button data-act="closeTab" data-v="actions" class="${tab==="actions"?"on":""}">Actions (${at.done} / ${at.total})</button></div>
       <span class="spacer"></span><button class="btn" data-act="expMD">Export as Markdown</button>${exportBtns()}</div></div>`;
   let body;
-  if(tab==="overview"){
+  if(tab==="actions"){ body=actionsHTML(); }
+  else if(tab==="overview"){
     body=`<div class="card" style="padding:18px 20px"><table class="tl-table"><thead><tr><th>#</th><th>Proposal</th><th>Status</th></tr></thead><tbody>${rows.map(r=>{ const qu=S.cfg.questions[r.n-1];
       const cell = r.kind==="traffic" ? `${lightHTML(r.status)}${countsHTML(r.counts)}` : `<span class="meta">${(()=>{ const st=stats(answersFor(qu.id),qu.min,qu.max); return `${st.n} ${st.n===1?"answer":"answers"} · ${sumNote({qu,st})}`; })()}</span>`;
       return `<tr class="pick" data-act="gotoResults" data-v="${r.n-1}" title="Open this question"><td class="n">${r.n}</td><td>${esc(tx(r.text))}${r.edited?` <span class="edited">edited · version ${r.rev}</span>`:""}</td><td class="r">${cell}</td></tr>`; }).join("")}</tbody></table><div class="tl-pager" hidden></div></div>
@@ -650,7 +685,9 @@ function outcomePatch(qs, onlyMissing, always){ if(catNow()!=="consent" || S.rev
     if(onlyMissing && qu!==always && cur && (cur.rev||1)===(qu.rev||1)) return; o=C.fixOutcome(o,qu,rv,now); });
   return {outcome:o}; }
 /* clearing the answers also clears the earlier versions of edited proposals; the last text stays */
-function dropHistory(){ if(S.review || !S.cfg.questions.some(qu=>qu.history||qu.rev)) return; setConfig(C.clearHistory(S.cfg)); }
+function dropHistory(){ if(S.review) return;
+  if(Object.keys(S.actions||{}).length){ S.actions={}; S.ui.act={}; write(()=>S.backend.clearActions()); } // the remarks go, so their actions go too
+  if(S.cfg.questions.some(qu=>qu.history||qu.rev)) setConfig(C.clearHistory(S.cfg)); }
 function editDlgHTML(d){ const i=S.cfg.questions.findIndex(x=>x.id===d.qid), qu=S.cfg.questions[i]; if(!qu) return "";
   const cm=C.trafficComments(currentRoundVotes(),qu,namedMode()), red=cm.filter(c=>c.v===3), yel=cm.filter(c=>c.v===2), rev=qu.rev||1;
   const blk=(v,list)=>list.length?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(tlPrompt(v))} (${list.length})</h3><ul>${list.map(cmLi).join("")}</ul></div>`:"";
@@ -691,7 +728,7 @@ app.addEventListener("click", e=>{
     case "lobby": setSession({phase:"lobby", current:0}); break;
     case "showLive": setSession({showLive: b.checked}); break;
     case "impPick": document.getElementById("impFile")?.click(); break;
-    case "reviewExit": if(S.review){ const l=S.review.live; S.review=null; S.cfg=l.cfg; S.ses=l.ses; S.votes=l.votes; render(); } break;
+    case "reviewExit": if(S.review){ const l=S.review.live; S.review=null; S.cfg=l.cfg; S.ses=l.ses; S.votes=l.votes; S.actions=l.actions||{}; S.ui.act={}; render(); } break;
     case "reviewPublish": { if(!S.review) break;
       if(!confirm("Publish these results to the live poll? The questions and answers everyone sees are replaced.")) break;
       const cfg=S.cfg, next={...S.ses}, votes=S.votes; S.review=null;
@@ -701,14 +738,14 @@ app.addEventListener("click", e=>{
       render(); break; }
     case "expJSON": exportJSON(); break;
     case "expCSV": exportCSV(); break;
-    case "hardReset": if(confirm("Reset the session? All answers are cleared, the round counter goes back to 1 and every device has to tap to rejoin.")){
+    case "hardReset": if(confirm("Reset the session? All answers are cleared, the round counter goes back to 1 and every device has to tap to rejoin."+actionNote())){
       S.votes={};
       setSession({phase:"lobby", current:0, revealed:[], showLive:false, round:1, resetAt:Date.now(), outcome:null}); dropHistory();
       write(()=>S.backend.clearVotes());
       setTimeout(()=>write(()=>S.backend.clearVotes()), 2500); // sweep answers that were already in flight
     } break;
     case "rejoin": S.me.ackReset=(S.ses.resetAt||0); render(); if(S.heartbeat) S.heartbeat(); break;
-    case "reset": if(confirm("Clear all answers and start a new round?")){ const r=(ses.round||1)+1; setSession({phase:"lobby", current:0, revealed:[], round:r, outcome:null}); dropHistory(); write(()=>S.backend.clearVotes()); } break;
+    case "reset": if(confirm("Clear all answers and start a new round?"+actionNote())){ const r=(ses.round||1)+1; setSession({phase:"lobby", current:0, revealed:[], round:r, outcome:null}); dropHistory(); write(()=>S.backend.clearVotes()); } break;
     case "asParticipant": S.ui.view="participant"; render(); if(S.heartbeat) S.heartbeat(); break;
     case "asHost": S.ui.view=null; render(); break;
     case "vote": {
@@ -760,6 +797,8 @@ app.addEventListener("click", e=>{
     case "qEdit": { const i=Q.findIndex(x=>x.id===b.dataset.q); if(i<0) break; S.ui.dlg={type:"edit", qid:Q[i].id, title:`Edit proposal ${i+1}`, focus:"dlgText"}; render(); break; }
     case "closeTab": S.ui.closeTab=v; S.ui.tlPage=0; render(); break;
     case "expMD": exportMD(); break;
+    case "expActMD": Object.keys(S.ui.act||{}).forEach(k=>actSave(k,true)); exportActionsMD(); break;
+    case "actFilter": S.ui.actFilter=v; render(); break;
     /* ---- named respondents ---- */
     case "nameEdit": S.ui.nameEdit=true; S.ui.nameDraft=null; S.ui.nameErr=""; render(); document.getElementById("nameIn")?.focus(); break;
     case "nameCancel": S.ui.nameEdit=false; S.ui.nameDraft=null; S.ui.nameErr=""; render(); break;
@@ -779,6 +818,9 @@ app.addEventListener("click", e=>{
   }
 });
 app.addEventListener("change", e=>{ const inp=e.target;
+  if(inp && inp.classList && inp.classList.contains("act-in")){ const key=inp.dataset.key;
+    if(inp.dataset.f==="none"){ actSet(key,"none",inp.checked); actSave(key); render(); } else { actSet(key,inp.dataset.f,inp.value); actSave(key,true); }
+    return; }
   if(inp && inp.dataset && inp.dataset.k==="kind" && S.ui.configOpen){ readDraftFromDOM(); render(); return; } // another type: other fields
   if(inp && inp.id==="dlgFile"){ const f=inp.files&&inp.files[0]; inp.value=""; if(f) readSetFile(f); return; }
   if(inp && inp.id==="dlgColor"){ markSwatch(); return; }
@@ -790,9 +832,15 @@ app.addEventListener("change", e=>{ const inp=e.target;
   const f=inp.files && inp.files[0]; inp.value="";
   if(!f) return; const r=new FileReader(); r.onerror=()=>alert("Could not read that file.");
   r.onload=()=>importResults(String(r.result||""), f.name); r.readAsText(f); });
+/* leaving an action field saves it; the list is redrawn once the cursor has landed in the next field */
+app.addEventListener("focusout", e=>{ const t=e.target; if(S.rendering || !t || !t.isConnected || !t.classList || !t.classList.contains("act-in") || t.dataset.f==="none") return;
+  const key=t.dataset.key; if(!(S.ui.act||{})[key]) return; actSave(key); setTimeout(renderBg,0); });
 let fuTimer=null;
 app.addEventListener("input", e=>{ const t=e.target; if(t && t.id==="dlgColor"){ markSwatch(); return; }
   if(t && t.id==="nameIn"){ S.ui.nameDraft=t.value; return; }
+  if(t && t.classList && t.classList.contains("act-in")){ const key=t.dataset.key, f=t.dataset.f; if(f==="none") return;
+    actSet(key,f,t.value); const m=document.getElementById("as_"+key); if(m) m.textContent="";
+    clearTimeout(actTimers[key]); actTimers[key]=setTimeout(()=>{ actSave(key,true); renderBg(); }, 2000); return; }
   if(t && t.classList && t.classList.contains("open-in")){ S.ui.tx=S.ui.tx||{}; S.ui.tx[txKey(t.dataset.q)]=t.value; const v=t.value.trim(), btn=document.getElementById("ops_"+t.dataset.q), n=document.getElementById("opn_"+t.dataset.q);
     if(btn) btn.disabled=!v || v===t.dataset.saved; if(n) n.textContent=`${t.value.length} / ${t.maxLength}`; return; }
   if(!t || !t.classList || !t.classList.contains("tl-fu-in")) return;
@@ -846,6 +894,7 @@ function bootSet(be){
   p.onConfig(c=>{ raw.cfg=c||null; if(S.review){ S.review.live.cfg=C.normConfig(c); return; } settle(); renderBg(); });
   p.onSession(s=>{ s=normSession(s); noteReset(s); raw.ses=s||null; if(S.review){ S.review.live.ses={...DEFAULT_SESSION,...(s||{})}; return; } settle(); renderBg(); });
   p.onVotes(v=>{ if(S.review){ S.review.live.votes=v||{}; return; } S.votes=v||{}; votesIn=true; ensureName(); renderBg(); });
+  if(be.isHost) p.onActions(a=>{ if(S.review){ S.review.live.actions=a||{}; return; } S.actions=a||{}; renderBg(); }); // follow-up actions are for the presenter only
   try{ const o=JSON.parse(localStorage.getItem("tr_name_"+S.setId)||"null"); if(o && o.n){ S.me.name=String(o.n); S.me.nameAt=o.at||0; } }catch(e){}
   { const send=p.setVotes; p.setVotes=(pid,v)=>send(pid, pid===be.id ? stampDoc(v) : v); } // this device's doc always carries (or drops) its name
   /* random names are handed out here; when two devices hold the same name the later one gives way */
@@ -872,6 +921,7 @@ function bootSet(be){
     const ss=normSession(d.session); noteReset(ss); if(ss && ss.phase) raw.ses=ss;
     settle(); if(!S.ses) return;
     const mine=S.votes[S.me.id]; S.votes=d.votes||{}; if(mine && mine.round===S.ses.round) S.votes[S.me.id]=mine;
+    if(be.isHost) S.actions=d.actions||{};
     renderBg(); }
   let pulling=false, lastPull=0;
   async function pullNow(){ if(!p.pull || pulling) return; pulling=true; lastPull=Date.now();

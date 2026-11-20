@@ -245,3 +245,18 @@ a{color:var(--accent-text)}
 .hist-v ul{margin:8px 0 0;padding-left:18px;display:grid;gap:4px}
 .modal .card.dlg.wide{width:min(760px,100%)}
 #dlgText{white-space:pre-wrap}
+
+/* follow-up actions */
+.act-card{padding:22px 26px}
+.act-row{margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--bg);display:grid;gap:10px}
+.act-row.action,.act-row.none{border-left:4px solid var(--good)}
+.act-row.open{border-left:4px solid var(--line-2)}
+.act-remark{font-size:calc(16px*var(--qs,.75)*1.25);overflow-wrap:anywhere;white-space:pre-wrap}
+.act-fields{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,1.3fr) auto;gap:8px;align-items:start}
+.act-fields textarea{min-height:44px;field-sizing:content}
+.act-fields input[type=date]{padding:9px 11px;border-radius:10px;border:1px solid var(--line-2);background:var(--surface)}
+.act-fields :disabled{opacity:.5}
+.act-foot{display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:14px;color:var(--ink-2)}
+.act-foot label{display:flex;gap:6px;align-items:center}
+.act-foot small{color:var(--good);font-weight:700}
+@media (max-width:720px){.act-fields{grid-template-columns:1fr 1fr}.act-fields textarea{grid-column:1/-1}}

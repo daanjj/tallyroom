@@ -40,6 +40,7 @@ Needs Node 18 or newer, nothing to install.
 - `polls/{setId}/config`: mode, follow-up prompts and the questions.
 - `polls/{setId}/session`: where the session stands (phase, current question, round).
 - `polls/{setId}/votes/{deviceId}`: one record per device, so a phone counts once per set. It holds `answers`, `texts` (comments and open answers), `conf` (dilemma confidence), `revs` (which version of an edited proposal an answer is for) and, in a named set, `name`.
+- `polls/{setId}/actions/{questionId}_{deviceId}_v{version}`: the follow-up action for one remark (`action`, `owner`, `due`, `none`), written by the presenter.
 - Consent sets also use `session.outcome[questionId]` (the light of a proposal as it stood when the presenter left it), `session.revote` (a re-vote in progress) and, on an edited question, `rev` and `history` (earlier texts with their votes and comments).
 
 ## Named respondents
@@ -60,6 +61,7 @@ In a set of category Consent, traffic light questions are proposals:
 - **Final light**: when the presenter leaves a proposal (Next question or Finish) its light is fixed: red with any red vote, otherwise yellow with any yellow vote, otherwise green.
 - **Closing overview**: after Finish, an Overview tab with every proposal and its light, and a Details tab with the yellow and red proposals, their comments and earlier versions.
 - **Export as Markdown**: the outcome as a structured `.md` file (overview table, details, earlier versions, all proposals), with fixed English headings.
+- **Actions**: a third tab in the closing overview with every yellow and red remark on the final versions. Per remark the presenter types a follow-up action, an owner and a deadline, or ticks "No action needed". It saves as you type, and **Export actions as Markdown** gives the list per proposal and by deadline. Only the presenter sees it.
 
 ## Categories and question types
 

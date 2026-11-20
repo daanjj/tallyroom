@@ -126,8 +126,8 @@ test("responses export: only the current round, yellow and red need their commen
   assert.deepEqual(p.answers.map(r => r.respondent), ["R01", "R02", "R03"]);
   assert.equal(p.answers[1].texts[t1.id], "Too costly");
   const csv = C.resultsCSV(p).replace(/^﻿/, "").split("\r\n");
-  assert.equal(csv[0], "respondent,question_nr,question,value,label,comment,confidence,set,header,category");
-  assert.ok(csv.includes('"R02",1,"Proposal",3,"Bezwaar","Too costly",,"Team B","Team B session","consent"'));
+  assert.equal(csv[0], "respondent,question_nr,question,value,label,comment,confidence,set,header,category,action,owner,deadline");
+  assert.ok(csv.includes('"R02",1,"Proposal",3,"Bezwaar","Too costly",,"Team B","Team B session","consent","","",'));
   assert.equal(csv.length, 1 + 5);
 });
 test("file names: a set name becomes a safe slug", () => {
@@ -493,4 +493,79 @@ test("C4 a saved results file gives the same Markdown again (review mode)", () =
   assert.equal(qs[6].rev, 2); assert.equal(qs[6].history.length, 1); assert.equal(outcome[qs[6].id].status, "red");
   const p2 = C.resultsPayload({ setId: "s", meta, cfg: { questions: qs }, ses: { round: 1, outcome }, votes: back, now: NOW });
   assert.equal(C.consentMarkdown(p2), C.consentMarkdown(p));
+});
+
+/* ---------- follow-up actions (F1, F2) ---------- */
+function actionSession() { // proposal 1: 1 red + 1 yellow; proposal 2: green only; proposal 3: 2 yellow + 1 red; plus an edited proposal 4 with one red on version 2
+  const qs = [tl("First proposal"), tl("Second proposal"), tl("Third | proposal"), tl("Fourth")], id = i => qs[i].id;
+  const votes = {
+    p_a: { round: 1, name: "k1", t: NOW - 30, answers: { [id(0)]: 2, [id(1)]: 1, [id(2)]: 2 }, texts: { [id(0)]: "Concern A1", [id(2)]: "Concern A3" } },
+    p_b: { round: 1, name: "b5", t: NOW - 20, answers: { [id(0)]: 3, [id(1)]: 1, [id(2)]: 3 }, texts: { [id(0)]: "Objection B1", [id(2)]: "Objection B3\nsecond line" } },
+    p_c: { round: 1, name: "p0", t: NOW - 10, answers: { [id(0)]: 1, [id(1)]: 1, [id(2)]: 2 }, texts: { [id(2)]: "Concern C3" } },
+  };
+  qs[3] = C.editQuestion(qs[3], "Fourth, rewritten", { x: { round: 1, answers: { [id(3)]: 3 }, texts: { [id(3)]: "Old objection" }, t: 1 } }, "random", NOW - 50);
+  votes.p_c.answers[id(3)] = 3; votes.p_c.texts[id(3)] = "New objection"; votes.p_c.revs = { [id(3)]: 2 };
+  votes.p_a.answers[id(3)] = 3; votes.p_a.texts[id(3)] = "Objection on version 1";            // given on version 1: not a remark any more
+  return { cfg: { questions: qs }, ses: { round: 1 }, votes, id };
+}
+test("F1 action list: one row per yellow or red remark on the final version, red first, grouped per proposal", () => {
+  const { cfg, ses, votes, id } = actionSession(), G = C.actionGroups(cfg, ses, votes, "random", {});
+  assert.deepEqual(G.map(g => [g.n, g.status, g.rows.length]), [[1, "red", 2], [3, "red", 3], [4, "red", 1]]);
+  assert.deepEqual(G[1].rows.map(r => [r.v, r.name, r.text]), [[3, "b5", "Objection B3\nsecond line"], [2, "k1", "Concern A3"], [2, "p0", "Concern C3"]]);
+  assert.deepEqual(G[2].rows.map(r => r.text), ["New objection"], "remarks on an earlier version are not listed");
+  assert.equal(G[2].rows[0].key, id(3) + "_p_c_v2"); assert.equal(G[0].rows[0].key, id(0) + "_p_b_v1");
+  assert.deepEqual(C.actionTotals(G), { total: 6, objections: 3, concerns: 3, action: 0, none: 0, open: 6, done: 0 });
+  assert.equal(C.actionGroups(cfg, ses, votes, "no", {})[0].rows[0].name, undefined);
+  assert.deepEqual(C.actionGroups({ questions: [tl("x")] }, {}, {}, "no", {}), []);
+});
+test("F1 a remark is handled with an action text or with 'no action needed'; the counter follows", () => {
+  const { cfg, ses, votes, id } = actionSession();
+  const actions = { [id(0) + "_p_b_v1"]: { action: " Recalculate ", owner: " Anna  de Vries ", due: "2026-12-01" }, [id(0) + "_p_a_v1"]: { none: true, action: "kept text" },
+    [id(2) + "_p_b_v1"]: { owner: "Bob", due: "2026-11-25" }, [id(3) + "_p_c_v1"]: { action: "For version 1, must not attach to version 2" } };
+  const G = C.actionGroups(cfg, ses, votes, "random", actions), t = C.actionTotals(G);
+  assert.deepEqual([t.action, t.none, t.open, t.done, t.total], [1, 1, 4, 2, 6]);
+  assert.deepEqual(G[0].rows.map(r => [r.state, r.action, r.owner, r.due]), [["action", "Recalculate", "Anna de Vries", "2026-12-01"], ["none", "kept text", "", ""]]);
+  assert.equal(G[1].rows[0].state, "open", "an owner and a deadline without an action is not handled yet");
+  assert.equal(G[2].rows[0].state, "open", "an action never moves to another version of the proposal");
+  assert.deepEqual(C.cleanAction({ action: "x".repeat(400), owner: "y".repeat(80), due: "next week", none: 0 }), { action: "x".repeat(300), owner: "y".repeat(60), due: "", none: false, t: 0 });
+  assert.equal(C.actionState(null), "open");
+});
+test("F2 actions Markdown: header counts, a table per proposal, and all actions by deadline", () => {
+  const { cfg, ses, votes, id } = actionSession();
+  const actions = { [id(0) + "_p_b_v1"]: { action: "Recalculate | the case", owner: "Anna", due: "2026-12-01" }, [id(0) + "_p_a_v1"]: { none: true },
+    [id(2) + "_p_a_v1"]: { action: "Plan a review", owner: "Bob", due: "2026-11-25" }, [id(2) + "_p_c_v1"]: { action: "No date yet", owner: "Anna" } };
+  const mk = named => JSON.parse(JSON.stringify(C.resultsPayload({ setId: "s", meta: C.newMeta({ name: "Board", header: "Board decisions", category: "consent", named }, NOW), cfg, ses, votes, actions, now: NOW })));
+  const p = mk("random"), md = C.actionsMarkdown(p), lines = md.split("\n");
+  assert.equal(lines[0], "# Board decisions: follow-up actions");
+  assert.ok(lines.includes("- Remarks: 6 (3 objections, 3 concerns)")); assert.ok(lines.includes("- Handled: 3 with an action, 1 no action needed, 2 open"));
+  assert.deepEqual(lines.filter(l => l.startsWith("### ")), ["### 1. Red", "### 3. Red", "### 4. Red"]);
+  assert.ok(lines.includes("| Type | Remark | By | Action | Owner | Deadline |"));
+  assert.ok(lines.includes("| Objection | Objection B1 | b5 | Recalculate \\| the case | Anna | 2026-12-01 |"), "pipes are escaped");
+  assert.ok(lines.includes("| Concern | Concern A1 | k1 | No action needed |  |  |"));
+  assert.ok(lines.includes("| Objection | Objection B3 second line | b5 | (open) |  |  |"), "line breaks are flattened, open remarks are marked");
+  assert.ok(md.includes("### 3. Red\n\n> Third | proposal\n"));
+  const dl = lines.slice(lines.indexOf("## Actions by deadline"));
+  assert.deepEqual(dl.filter(l => /^\| (\d{4}|\s)/.test(l)), ["| 2026-11-25 | Bob | Plan a review | 3 |", "| 2026-12-01 | Anna | Recalculate \\| the case | 1 |", "|  | Anna | No date yet | 3 |"]);
+  const rows = lines.filter(l => /^\| (Objection|Concern) \|/.test(l)); assert.equal(rows.length, 6, "every remark exactly once");
+  const anon = C.actionsMarkdown(mk("no")); assert.ok(anon.includes("| Type | Remark | Action | Owner | Deadline |")); assert.ok(!/\| By \|/.test(anon)); assert.ok(!/k1|b5|p0/.test(anon));
+  assert.ok(C.consentMarkdown(p).includes("## Actions\n\n| Deadline | Owner | Action | Proposal |"), "the outcome export carries the actions too");
+  assert.ok(!C.consentMarkdown(mk2()).includes("## Actions"), "and leaves the section out when there are none");
+  function mk2() { return C.resultsPayload({ setId: "s", meta: C.newMeta({ name: "Board", category: "consent" }, NOW), cfg, ses, votes, actions: {}, now: NOW }); }
+  const empty = C.actionsMarkdown(C.resultsPayload({ setId: "s", meta: C.newMeta({ name: "B", category: "consent" }, NOW), cfg: { questions: [tl("x")] }, ses: {}, votes: {}, now: NOW }));
+  assert.ok(empty.includes("No concerns or objections to follow up.")); assert.ok(empty.includes("No actions recorded."));
+});
+test("F2 JSON and CSV carry the actions, and a saved results file gives the same actions Markdown again", () => {
+  const { cfg, ses, votes, id } = actionSession(), meta = C.newMeta({ name: "Board", category: "consent", named: "random" }, NOW);
+  const actions = { [id(0) + "_p_b_v1"]: { action: "Recalculate", owner: "Anna", due: "2026-12-01" }, [id(0) + "_p_a_v1"]: { none: true }, [id(3) + "_p_c_v2"]: { action: "Rewrite again", owner: "Bob" } };
+  const p = JSON.parse(JSON.stringify(C.resultsPayload({ setId: "s", meta, cfg, ses, votes, actions, now: NOW })));
+  assert.deepEqual(p.answers.find(r => r.respondent === "b5").actions, { [id(0)]: { action: "Recalculate", owner: "Anna", due: "2026-12-01", none: false } });
+  const csv = C.parseCSV(C.resultsCSV(p)), col = n => csv[0].indexOf(n), row = (who, nr) => csv.find(r => r[0] === who && r[1] === String(nr));
+  assert.deepEqual([row("b5", 1)[col("action")], row("b5", 1)[col("owner")], row("b5", 1)[col("deadline")]], ["Recalculate", "Anna", "2026-12-01"]);
+  assert.deepEqual([row("k1", 1)[col("action")], row("k1", 1)[col("owner")]], ["No action needed", ""]); assert.equal(row("p0", 2)[col("action")], "");
+  const qs = p.questions.map(C.reviveQuestion), back = {};
+  p.answers.forEach(r => { const a = {}; qs.forEach(qu => { if (Number.isFinite(r.answers[qu.id])) a[qu.id] = r.answers[qu.id]; });
+    back[r.respondent] = { round: 1, answers: a, texts: r.texts, revs: Object.fromEntries(qs.filter(qu => qu.rev > 1 && a[qu.id] != null).map(qu => [qu.id, qu.rev])), name: r.respondent, t: Date.parse(r.at) }; });
+  const revived = C.reviveActions(p, qs); assert.deepEqual(Object.keys(revived).sort(), [id(0) + "_b5_v1", id(0) + "_k1_v1", id(3) + "_p0_v2"].sort());
+  const p2 = C.resultsPayload({ setId: "s", meta, cfg: { questions: qs }, ses: { round: 1, outcome: C.reviveOutcome(p) }, votes: back, actions: revived, now: NOW });
+  assert.equal(C.actionsMarkdown(p2), C.actionsMarkdown(p));
 });
