@@ -94,7 +94,7 @@ With Yes or Random the presenter sees names in front of comments and open answer
 
 In a set of category Consent, traffic light questions are proposals:
 
-- **Edit and vote again**: a revealed proposal with at least one red vote gets an **Edit** button. Saving a new text starts a new vote on that proposal for everyone; the old text, votes and comments are kept as an earlier version.
+- **Edit and vote again**: a revealed proposal with at least one yellow or red vote gets an **Edit** button. Saving a new text starts a new vote on that proposal for everyone; the old text, votes and comments are kept as an earlier version.
 - **Final light**: when the presenter leaves a proposal (Next question or Finish) its light is fixed: red with any red vote, otherwise yellow with any yellow vote, otherwise green.
 - **Closing overview**: after Finish, an Overview tab with every proposal and its light, and a Details tab with the yellow and red proposals, their comments and earlier versions.
 - **Export as Markdown**: the outcome as a structured `.md` file (overview table, details, earlier versions, all proposals), with fixed English headings.

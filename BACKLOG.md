@@ -340,20 +340,20 @@ All actions sit in the menu per set in the overview (A2). Settings are also reac
 
 Applies only to sets of category `consent`, and within those to traffic light questions. Values as today: 1 = green (Consent), 2 = yellow (Zorg), 3 = red (Bezwaar).
 
-### C1. Edit a question after red votes and vote again — L
+### C1. Edit a question after yellow or red votes and vote again — L
 
-**Story.** As a presenter I want to rewrite a proposal on the spot when there are objections, and let everybody vote again on the new text.
+**Story.** As a presenter I want to rewrite a proposal on the spot when there are concerns or objections, and let everybody vote again on the new text.
 
 **Specification**
 
-- On the presenter screen of a revealed traffic light question with one or more red votes, a button **Edit** appears next to the navigation buttons. No red votes, no button.
+- On the presenter screen of a revealed traffic light question with one or more yellow or red votes, a button **Edit** appears next to the navigation buttons. Only green votes (or none), no button.
 - **Edit** opens a dialog with the question text (large textarea, current text prefilled) and the red and yellow comments below it for reference. Buttons: Save and re-vote, Cancel.
 - On save:
   1. The current text, the vote counts and all yellow and red comments are appended to `config.questions[i].history[]` as `{rev, text, counts: {g, y, r}, comments: [{v, text, name?}], t}`.
   2. The question gets the new text and `rev` + 1 (first version = rev 1).
   3. `session.revote = {qid, rev}` is set and the question goes back to "collecting answers" (removed from `revealed`).
 - Participants: an answer only counts when it was given for the current `rev`. The vote doc gets `revs[qid]`; votes with an older `rev` are ignored by counts and comments. Each device shows the new text with a notice "The proposal was changed. Please vote again." and empty choice and follow-up fields. This also reaches devices in batch mode that had already finished all questions: they are taken back to this one question.
-- The presenter sees the progress of the new vote and reveals as usual. If there are red votes again, **Edit** appears again; there is no limit on the number of rounds.
+- The presenter sees the progress of the new vote and reveals as usual. If there are yellow or red votes again, **Edit** appears again; there is no limit on the number of rounds.
 - Cancel changes nothing.
 - The revision number is shown on the presenter screen when it is higher than 1 ("version 2").
 - **Assumption:** saving without changing the text is allowed and also starts a new vote (sometimes the discussion alone resolves the objection).
@@ -361,7 +361,7 @@ Applies only to sets of category `consent`, and within those to traffic light qu
 
 **AC**
 
-- With 1 red vote: Edit visible. After Save, all participant devices show the new text within a few seconds and can vote again; the presenter counter starts at 0.
+- With 1 red vote or 1 yellow vote: Edit visible. With only green votes: no Edit. After Save, all participant devices show the new text within a few seconds and can vote again; the presenter counter starts at 0.
 - Old votes and comments do not appear in the new count, and are kept in `history`.
 - A participant who joins after the edit sees only the new text.
 - Two edits in a row give `rev` 3 and two history entries.

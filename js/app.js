@@ -304,9 +304,10 @@ function qnumHTML(i, qu){ return `<div class="qnum">Question ${i+1} of ${S.cfg.q
 function waitingHTML(qs){ if(!C.isNamed(namedMode())) return "";
   const w=Object.values(currentRoundVotes()).filter(v=>!qs.every(qu=>validAns(v,qu)!=null)).map(nameLabel); if(!w.length) return "";
   return `<details class="waiting" id="waitBox" ${S.ui.waitOpen?"open":""}><summary>Waiting for ${w.length}</summary><div class="people">${w.map(n=>`<span class="chip">${esc(n)}</span>`).join("")}</div></details>`; }
-/* consent sets: a revealed proposal with at least one red vote can be rewritten and voted on again */
+/* consent sets: a revealed proposal with at least one yellow or red vote can be rewritten and voted on again */
 function editBtn(qu, revealed){ if(!revealed || !isTraffic(qu) || catNow()!=="consent" || S.review || expired()) return "";
-  return C.trafficCounts(currentRoundVotes(),qu,qu.rev||1).r>0 ? `<button class="btn" data-act="qEdit" data-q="${esc(qu.id)}">Edit</button>` : ""; }
+  const c=C.trafficCounts(currentRoundVotes(),qu,qu.rev||1);
+  return (c.r>0 || c.y>0) ? `<button class="btn" data-act="qEdit" data-q="${esc(qu.id)}">Edit</button>` : ""; }
 const cmLi = c => `<li>${c.name?`<b>${esc(c.name)}</b> · `:""}${esc(c.text)}</li>`;
 const LIGHTS={green:[TL_COLORS[0],"Green"], yellow:[TL_COLORS[1],"Yellow"], red:[TL_COLORS[2],"Red"], none:["var(--line-2)","No votes"]};
 function lightHTML(status){ const m=LIGHTS[status]||LIGHTS.none; return `<span class="light" style="--c:${m[0]}">${m[1]}</span>`; }
