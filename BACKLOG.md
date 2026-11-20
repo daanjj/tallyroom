@@ -42,6 +42,15 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 
 ## Epic A: multiple question sets
 
+> **Status: built on 20 Nov 2026**, tried in demo mode (`?demo=1`); not yet run against the live Firebase database. Before going live: add the `sets` block to the database rules (`tallyroom-setup.md`, step 1.3).
+>
+> Differences from the specification below:
+> - **Category** is stored and shown as a label, but does not restrict question types yet (that is B1).
+> - **Named respondents** is stored (`no` for new sets) but has no field in the dialogs yet (that is D1).
+> - The accent palette is calculated in `js/core.js` (`themeVars`) instead of with CSS `color-mix` / `oklch(from …)`, so it can be tested and the contrast can be guaranteed. Text in the accent colour uses a separate variable `--accent-text`, so a light accent such as yellow stays readable.
+> - Migration takes the old poll id from `MIGRATE_POLL_ID` in `config.js` (now `workshop-4`), and the migrated set keeps that id instead of getting an 8-character one, so its data stays where it is.
+> - An expired set is read-only for the presenter in this sense: paging through results works on the presenter's screen only and is not sent to the room; starting, clearing, resetting and editing questions are refused until the set is extended.
+
 ### A1. Data model and routing for multiple sets — L
 
 **Story.** As a presenter I want several question sets to exist next to each other, so that the app can run in different team settings in parallel.
@@ -545,6 +554,8 @@ Choices I made to keep the items implementable. Change them here before you star
 
 ## Not in this backlog, but worth knowing
 
-- `README.md` says `tallyroom.html` is the editable source next to `index.html`; that file is not in the repository. A1 is a good moment to make `index.html` the only source and correct the README. YES, DO IT
-- The file is 866 lines with very long lines. Epics A to D roughly double the code. Splitting it into a few files (still without a build step) before A1 would make the later items easier to review. AGREE: DO IT IN STEP 1
-- There are no automated tests. The calculations that matter most for trust (status rule in C2, revision filtering in C1, unique random names in D1) are small pure functions and worth a handful of tests. AGREE, ADD THEM IN STEP 1 AND MAINTAIN THEM AFTERWARDS
+All three were done together with Epic A (20 Nov 2026):
+
+- `index.html` and the files it loads are the only source; the README no longer refers to `tallyroom.html`.
+- The single file is split into `config.js`, `css/styles.css`, `js/core.js` (pure logic), `js/backend.js` (data) and `js/app.js` (screens), still without a build step.
+- `tests/core.test.js` (run with `node --test`) covers `js/core.js`. The rules for later items are already in `core.js` with their tests, ready to be used: the status rule of C2 (`trafficStatus`), the revision filter of C1 (`answerIsCurrent`, `trafficCounts`) and the unique random names of D1 (`randomName`).
