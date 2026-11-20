@@ -424,7 +424,8 @@ function setRowHTML(id, meta, now){
       <a class="btn sm${isExp?"":" primary"}" href="${open}">Open</a><button class="btn sm" data-act="setQR" data-id="${eid}">Show QR</button>
       <details class="menu"><summary class="btn sm" aria-label="More actions for ${esc(name)}">More</summary><div class="menu-list">
         <button data-act="setSettings" data-id="${eid}">Settings</button>
-        <button data-act="setSettings" data-id="${eid}" data-focus="dlgExp">Other expiry date…</button>
+        <button data-act="setSettings" data-id="${eid}" data-focus="dlgExp">Other expiry date…</button>${isExp?"":`
+        <button data-act="setExpire" data-id="${eid}">Expire now</button>`}
         <button data-act="setDup" data-id="${eid}">Duplicate</button>
         <button data-act="setExpQ" data-id="${eid}">Export questions</button>
         <button data-act="setExpJSON" data-id="${eid}">Export responses (JSON)</button>
@@ -579,6 +580,7 @@ app.addEventListener("click", e=>{
     case "setNew": openSetDlg(null); break;
     case "setSettings": openSetDlg(id, b.dataset.focus); break;
     case "setExtend": extendSet(id); break;
+    case "setExpire": { const now=Date.now(); S.be.patchMeta(id, {expiresAt:now-1000, updatedAt:now}).catch(e=>alert("Expiring failed: "+(e&&e.message||e))); break; } // undone with Extend
     case "setQR": S.ui.dlg={type:"qr", id, title:"QR code: "+tx((metaOf(id)||{}).name)}; render(); break;
     case "setDup": duplicateSet(id); break;
     case "setExpQ": exportSet(id,"questions"); break;
