@@ -123,4 +123,3 @@ The question types, as they appear in the JSON import / export:
 Votes are stored as the option's position (1 = first option), so reordering options after people answered changes what their answers mean. An open answer is stored as text; a dilemma answer as the option's position plus the confidence value.
 
 A questions file exported from the overview also carries a `set` block (`name`, `header`, `accent`, `category`, `named`); "New question set → Create from file" reads it back.
-
