@@ -551,7 +551,7 @@ function qFieldsHTML(qu,i,cat){ const k=kindOf(qu), kinds=[...C.catRules(cat).ki
   else if(k==="options") body=opts("Options, one per line (2 to 11)","Option A&#10;Option B&#10;Option C");
   else if(k==="traffic") body=opts("Button labels for green, yellow, red (3 lines, optional)",esc(TL_LABELS.join("\n")).replace(/\n/g,"&#10;"));
   else if(k==="open") body=`<div class="row"><div class="field"><label for="qml${i}">Longest answer allowed (characters)</label><input type="number" id="qml${i}" data-q="${i}" data-k="maxLen" value="${qu.maxLen||C.OPEN_MAX}" min="20" max="2000"></div></div>`;
-  else if(k==="dilemma"){ const cf=qu.conf||C.DEFAULT_CONF; body=opts("Options to choose from, one per line (2 to 11)","Option A&#10;Option B")
+  else if(k==="dilemma"){ const cf=qu.conf||C.DEFAULT_CONF; body=opts("The two options to choose between, one per line (exactly 2)","Option A&#10;Option B")
     +`<div class="field"><label for="qct${i}">Confidence question (answered together with the choice)</label><input type="text" id="qct${i}" data-q="${i}" data-k="ctext" value="${esc(tx(cf.text))}"></div>`+scale(cf,"c","Confidence scale"); }
   return `<div class="field"><label for="qk${i}">Type</label><select id="qk${i}" data-q="${i}" data-k="kind">${kinds.map(x=>`<option value="${x}" ${x===k?"selected":""}>${C.KIND_LABEL[x]}</option>`).join("")}</select></div>${body}`; }
 function configHTML(){
@@ -688,7 +688,7 @@ function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEF
     <div class="field"><label>Accent colour</label><div class="swatches">${C.ACCENT_PRESETS.map(([n,hex])=>`<button type="button" class="sw${hex===acc?" on":""}" data-act="dlgAccent" data-v="${hex}" style="background:${hex}" title="${n}" aria-label="${n}"></button>`).join("")}
       <label class="sw-custom">Other <input type="color" id="dlgColor" value="${acc.toLowerCase()}" aria-label="Pick another accent colour"></label></div></div>
     <div class="field"><label for="dlgCat">Category</label><select id="dlgCat">${C.CATEGORIES.map(c=>`<option value="${c}" ${f.category===c?"selected":""}>${cap(c)}</option>`).join("")}</select>
-      <div class="meta">Decides which question types the set offers. Generic: scale, multiple choice, open. Consent adds the traffic light, Dilemma adds the dilemma question (choice plus confidence).</div></div>
+      <div class="meta">Decides which question types the set offers. Generic: scale, multiple choice, open. Consent adds the traffic light, Dilemma adds the dilemma question (a choice between two options, plus confidence).</div></div>
     <div class="field"><label for="dlgNamed">Named respondents</label><select id="dlgNamed">${[["no","No: participants answer anonymously"],["yes","Yes: participants type their name"],["random","Random: each participant gets a name such as k1"]].map(([val,l])=>`<option value="${val}" ${(f.named||"no")===val?"selected":""}>${l}</option>`).join("")}</select>
       <div class="meta">With Yes or Random the presenter sees the name with comments and open answers, and in the exports.</div></div>
     <div class="field"><label for="dlgExp">Expires on</label><input type="datetime-local" id="dlgExp" value="${Number.isFinite(f.expiresAt)?toLocalInput(f.expiresAt):toLocalInput(C.extendedExpiry(Date.now()))}">
@@ -714,6 +714,7 @@ async function saveSetDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id)
     const id=await freshSetId(name), imp=d.imported, cfg=C.emptyConfig();
     if(imp){ const f=C.filterForCategory(fields.category, imp.questions), msg=C.skippedMessage(fields.category, f.skipped);
       if(msg && !confirm(msg+"\n\nCreate the set without them?")) return;
+      const probs=C.questionProblems(f.kept); if(probs.length){ alert("This file cannot be used as it is.\n\n"+probs.join("\n")); return; }
       cfg.questions=f.kept; cfg.tlYellow=imp.tlYellow; cfg.tlRed=imp.tlRed; if(imp.set && imp.set.mode) cfg.mode=imp.set.mode; }
     await S.be.writePoll(id, {config:cfg, session:{...DEFAULT_SESSION}});
     await S.be.setMeta(id, C.newMeta(fields, now));

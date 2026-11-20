@@ -25,7 +25,7 @@ const isDilemma = qu => !!qu && qu.kind==="dilemma";
 /* questions answered by picking one labelled option (a dilemma adds a confidence rating on top) */
 const isOpt = qu => !!qu && (qu.kind==="options"||qu.kind==="traffic"||qu.kind==="dilemma") && Array.isArray(qu.options) && qu.options.length>=2;
 const kindOf = qu => isTraffic(qu) ? "traffic" : isDilemma(qu) ? "dilemma" : isOpen(qu) ? "open" : (qu && qu.kind==="options") ? "options" : "scale";
-const KIND_LABEL={scale:"Scale (Likert)", options:"Multiple choice", open:"Open question", traffic:"Traffic light", dilemma:"Dilemma (choice + confidence)"};
+const KIND_LABEL={scale:"Scale (Likert)", options:"Multiple choice", open:"Open question", traffic:"Traffic light", dilemma:"Dilemma (two options + confidence)"};
 const KIND_NAME={scale:"scale", options:"multiple choice", open:"open", traffic:"traffic light", dilemma:"dilemma"};
 const OPEN_MAX=500;
 const DEFAULT_CONF={text:"How confident are you in your choice?", min:1, max:5, lo:"Not at all", hi:"Very"};
@@ -58,7 +58,9 @@ function shapeQuestion(qu, kind){ const base={id:qu.id||newQid(), text:String(qu
   return {...base, min, max, lo:was?String(qu.lo||""):"Strongly disagree", hi:was?String(qu.hi||""):"Strongly agree"}; }
 /* what stops a list of questions from being saved; [] when fine */
 function questionProblems(questions){ const out=[]; (questions||[]).forEach((qu,i)=>{ const k=kindOf(qu);
-  if((k==="options"||k==="dilemma") && normOptions(qu.options).length<2) out.push(`Question ${i+1}: add at least two options.`); }); return out; }
+  const n=normOptions(qu.options).length;
+  if(k==="options" && n<2) out.push(`Question ${i+1}: add at least two options.`);
+  if(k==="dilemma" && n!==2) out.push(`Question ${i+1}: a dilemma has exactly two options${n>2?` (this one has ${n})`:""}.`); }); return out; } // a choice between more than two is multiple choice
 
 /* ============ categories: which question types a set offers (backlog B1) ============ */
 const BASE_KINDS=["scale","options","open"];

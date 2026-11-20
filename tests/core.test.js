@@ -317,7 +317,7 @@ test("editor: changing the type reshapes a question and keeps what carries over"
   assert.deepEqual(C.shapeQuestion(s, "scale"), { id: s.id, text: "Text", min: 0, max: 10, lo: "lo", hi: "hi" });
   assert.equal(C.shapeQuestion({ id: "x", text: "  " }, "open").text, "Untitled question");
   assert.equal(C.shapeQuestion({ id: "x", text: "t", maxLen: 5 }, "open").maxLen, 20);
-  assert.deepEqual(C.questionProblems([C.qNew("options"), s, C.qNew("dilemma"), d]), ["Question 1: add at least two options.", "Question 3: add at least two options."]);
+  assert.deepEqual(C.questionProblems([C.qNew("options"), s, C.qNew("dilemma"), d]), ["Question 1: add at least two options.", "Question 3: a dilemma has exactly two options."]);
 });
 
 /* ---------- open question (B2) ---------- */
@@ -363,7 +363,7 @@ test("B3 dilemma result: 3 on A (5, 4, 3) and 1 on B (2) gives A 3 / 4.0, B 1 / 
   assert.deepEqual(C.dilemmaStats({}, qu).mean, null);
 });
 test("B2/B3 questions file and saved results: open and dilemma questions come back the same", () => {
-  const cfg = { questions: [C.qOpen("Why?", 300), C.qDilemma("Which?", ["Left", "Right", "Wait"], { text: "Sure?", min: 1, max: 7, lo: "no", hi: "yes" })] };
+  const cfg = { questions: [C.qOpen("Why?", 300), C.qDilemma("Which?", ["Left", "Right"], { text: "Sure?", min: 1, max: 7, lo: "no", hi: "yes" })] };
   const back = C.parseQuestionsFile(JSON.parse(JSON.stringify(C.questionsExport(C.newMeta({ name: "D", category: "dilemma" }, NOW), cfg))));
   assert.deepEqual(back.questions.map(C.exportQ), cfg.questions.map(C.exportQ));
   assert.deepEqual(back.questions[1].conf, { text: "Sure?", min: 1, max: 7, lo: "no", hi: "yes" }); assert.equal(back.questions[0].maxLen, 300);
@@ -625,4 +625,11 @@ test("still writing: sending the text takes the flag away", () => {
   assert.deepEqual(C.withoutTyping(doc, "q1"), { round: 1, answers: { q1: 2, q2: 3 }, t: 5, typing: { q2: 11 } });
   assert.deepEqual(C.withoutTyping(C.withoutTyping(doc, "q1"), "q2"), { round: 1, answers: { q1: 2, q2: 3 }, t: 5 });
   assert.deepEqual(doc.typing, { q1: 10, q2: 11 });
+});
+
+test("dilemma: exactly two options, more is refused when saving or creating from a file", () => {
+  const ok = C.qDilemma("Build or buy?", ["Build", "Buy"]), three = C.qFromObj({ text: "Which?", kind: "dilemma", options: ["Left", "Right", "Wait"] }), one = C.shapeQuestion({ id: "x", text: "t", options: ["Only"] }, "dilemma");
+  assert.deepEqual(C.questionProblems([ok]), []);
+  assert.deepEqual(three.options, ["Left", "Right", "Wait"], "a file is not changed in silence");
+  assert.deepEqual(C.questionProblems([ok, three, one, C.q("Pick", 1, 5, "", "", ["A", "B", "C"])]), ["Question 2: a dilemma has exactly two options (this one has 3).", "Question 3: a dilemma has exactly two options."]);
 });

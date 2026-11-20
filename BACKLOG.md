@@ -302,7 +302,7 @@ All actions sit in the menu per set in the overview (A2). Settings are also reac
 
 **Specification**
 
-- New kind `dilemma`: `{id, text, kind: "dilemma", options[2..11], conf: {text, min, max, lo, hi}}`.
+- New kind `dilemma`: `{id, text, kind: "dilemma", options[2], conf: {text, min, max, lo, hi}}`. Exactly two options: the editor and "Create from file" refuse a dilemma with more or fewer.
   - Defaults for `conf`: text "How confident are you in your choice?", scale 1–5, labels "Not at all" and "Very".
 - Participant: both parts on one screen, the options first and the confidence scale below. Submit stays disabled until both are filled in. Both parts are saved in one write.
 - Storage: `answers[qid]` = option position (as for multiple choice), `conf[qid]` = confidence value. A vote only counts as an answer when both are present and valid.
