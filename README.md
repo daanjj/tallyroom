@@ -41,7 +41,7 @@ Needs Node 18 or newer, nothing to install.
 
 ## Third-party scripts and the security policy
 
-The page runs only scripts from its own folder, with one exception: when App Check is switched on (`APPCHECK_SITE_KEY` in `config.js`), Firebase loads reCAPTCHA v3 from Google, which cannot be kept here. The policy lists the reCAPTCHA addresses for that; without the key nothing is loaded from them. `index.html` carries a Content Security Policy that allows scripts from the site itself, connections to the Firebase database and Firebase Authentication, images from the site and `data:` (the QR code), and Google Fonts for the typefaces. Inline scripts and `eval` are not allowed; inline styles are, because the page sets colours and sizes that way.
+The page runs only scripts from its own folder, with one exception: when App Check is switched on (`APPCHECK_SITE_KEY` in `config.js`), Firebase loads the Fraud Defense (reCAPTCHA Enterprise) script from Google, which cannot be kept here. The policy lists the reCAPTCHA addresses for that; without the key nothing is loaded from them. `index.html` carries a Content Security Policy that allows scripts from the site itself, connections to the Firebase database and Firebase Authentication, images from the site and `data:` (the QR code), and Google Fonts for the typefaces. Inline scripts and `eval` are not allowed; inline styles are, because the page sets colours and sizes that way.
 
 The files in `vendor/` are unchanged copies, fetched on 20 Nov 2026. To update one, download the new version from the same place, replace the file, and note the version and checksum here.
 

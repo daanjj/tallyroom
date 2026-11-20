@@ -93,13 +93,15 @@ function makeDemoBackend(isHost){
      participant  signed in anonymously, without any screen; the uid is the device id and the key of its vote record
    The database rules (database.rules.json) decide what each of them may read and write.
    opts.anon: sign in anonymously when nobody is signed in (a set page); opts.signOut: ?host=off
-   opts.appCheckKey: the reCAPTCHA v3 site key for App Check (backlog G6); without it the page runs without App Check */
+   opts.appCheckKey: the Fraud Defense (reCAPTCHA Enterprise) site key for App Check (backlog G6); without it the page runs without App Check */
 /* App Check proves to Firebase that a request comes from this page. It has to be switched on before the database and
    the sign-in are used; they then send its token by themselves. On localhost a debug token stands in for reCAPTCHA:
    the Firebase script prints it in the console once, and it is registered in the Firebase console (tallyroom-setup.md). */
 function startAppCheck(key){ if(!key || !root.firebase.appCheck) return null;
   try{ const h=(root.location && root.location.hostname)||""; if(h==="localhost" || h==="127.0.0.1" || h==="[::1]") root.FIREBASE_APPCHECK_DEBUG_TOKEN=true;
-    const ac=root.firebase.appCheck(); ac.activate(key, true); return ac; }
+    /* Fraud Defense (reCAPTCHA Enterprise): Firebase no longer takes classic reCAPTCHA v3 keys for App Check */
+    const P=root.firebase.appCheck.ReCaptchaEnterpriseProvider; if(!P){ console.warn("App Check: this Firebase script has no Fraud Defense provider"); return null; }
+    const ac=root.firebase.appCheck(); ac.activate(new P(key), true); return ac; }
   catch(e){ console.warn("App Check could not be started", e); return null; } }
 function makeFirebaseBackend(config, opts){
   root.firebase.initializeApp(config);

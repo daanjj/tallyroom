@@ -924,11 +924,11 @@ Optional, and the largest item of this epic. Worth building when sets are named 
 
 **Specification**
 
-- Firebase App Check with the **reCAPTCHA v3** provider, registered for the site's domain. `index.html` loads `firebase-app-check-compat.js`; `config.js` gets `APPCHECK_SITE_KEY` (a public key, not a secret). Without that key the page runs without App Check, so an installation can do G1 to G4 first.
+- Firebase App Check with the **Fraud Defense (reCAPTCHA Enterprise)** provider (changed from reCAPTCHA v3 on 21 Nov 2026: Firebase no longer accepts classic keys), registered for the site's domain. `index.html` loads `firebase-app-check-compat.js`; `config.js` gets `APPCHECK_SITE_KEY` (a public key, not a secret). Without that key the page runs without App Check, so an installation can do G1 to G4 first.
 - The plain HTTPS reads (`rest(…)`) send the App Check token in the `X-Firebase-AppCheck` header.
 - Enforcement for the Realtime Database is switched on in the console only after the App Check metrics show that requests from the page are verified, at least one session later.
 - Local development and `tests`: a debug token for `localhost`, described in `tallyroom-setup.md`. Demo mode does not touch Firebase and is not affected.
-- reCAPTCHA v3 shows no puzzle; it does load a Google script and sets the reCAPTCHA badge. **Assumption:** acceptable; mention it in the setup guide for who has to account for third parties.
+- Fraud Defense, score-based, shows no puzzle; it does load a Google script and sets the reCAPTCHA badge. **Assumption:** acceptable; mention it in the setup guide for who has to account for third parties.
 - Known limit: App Check raises the effort, it is not a guarantee. The rules of G3 and G4 remain the real protection.
 
 **AC**

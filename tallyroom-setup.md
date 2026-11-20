@@ -112,15 +112,15 @@ Anonymous users pile up under Users, one per phone per browser. That is harmless
 
 App Check makes the database accept requests from your page only, so a script elsewhere cannot use it with a self-made anonymous sign-in. It raises the effort for misuse; the rules of step 1.3 remain the real protection. Do this after at least one session has run well with the rules. Without it everything works as described.
 
-It uses reCAPTCHA v3, which shows no puzzle. It does load a script from Google on every device and shows the small reCAPTCHA badge in a corner of the page; mention that where you have to account for third parties.
+It uses Google Cloud **Fraud Defense** (formerly reCAPTCHA Enterprise), score-based, which shows no puzzle. Firebase no longer accepts classic reCAPTCHA v3 keys for App Check; the console marks that option as deprecated. It loads a script from Google on every device and shows the small reCAPTCHA badge in a corner of the page; mention that where you have to account for third parties. Fraud Defense has a free monthly allowance of assessments; check the current pricing in the Google Cloud console. A session of 30 phones stays far below it.
 
-1. Go to https://www.google.com/recaptcha/admin/create. Choose type **Score based (v3)**, add the domain of your page (`<yourname>.github.io`), and create. You get a **site key** (public) and a **secret key**.
-2. Firebase console: **App Check → Apps**. Open your web app, choose **reCAPTCHA** (v3, not Enterprise), paste the **secret key**, and save.
+1. Google Cloud console, in the project of your Firebase app (same name): **Security → Fraud Defense** (in some consoles still called **reCAPTCHA**). Enable the API when asked, then **Create key**: platform **Website**, add the domain of your page (`<yourname>.github.io`), and leave any checkbox challenge off (score-based). Copy the **key ID**: that is the **site key**. There is no secret key to copy.
+2. Firebase console: **App Check → Apps**. Open your web app, choose **reCAPTCHA Enterprise** (shown as **Fraud Defense** in newer consoles, not the deprecated reCAPTCHA v3), paste the **site key**, and save.
 3. In `config.js`, put the **site key** in `APPCHECK_SITE_KEY` and put the file online. The site key is not a secret.
 4. Run a session. Then look at **App Check → APIs → Realtime Database**: the graph should show nearly all requests as **verified**.
 5. Only then click **Enforce** for Realtime Database. From that moment requests without a valid App Check token are refused. Leave Authentication unenforced unless you have checked its graph the same way.
 
-**Working on `localhost`:** reCAPTCHA is not registered for it, so the page asks Firebase for a debug token instead. Open the page on `localhost` with the browser console open; a line "App Check debug token: …" appears once per browser. Add that token under **App Check → Apps → your web app → ⋮ → Manage debug tokens**. Treat the token as a password and never put it in a file of this repository. Demo mode (`?demo=1`) does not touch Firebase and needs none of this.
+**Working on `localhost`:** the Fraud Defense key is not registered for it, so the page asks Firebase for a debug token instead. Open the page on `localhost` with the browser console open; a line "App Check debug token: …" appears once per browser. Add that token under **App Check → Apps → your web app → ⋮ → Manage debug tokens**. Treat the token as a password and never put it in a file of this repository. Demo mode (`?demo=1`) does not touch Firebase and needs none of this.
 
 To switch App Check off again: click **Unenforce** in the console first, then empty `APPCHECK_SITE_KEY`.
 

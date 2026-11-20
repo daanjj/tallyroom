@@ -19,7 +19,8 @@ function fakeFirebase({ data = {}, user = null, anonFails = false, noAppCheck = 
   const db = { ref: (path) => ({ on: (ev, cb) => { if (path && path[0] !== ".") { log.on.push(path); setTimeout(() => cb({ val: () => get(path) ?? null }), 0); } return cb; },
     off: () => log.off.push(path), once: async () => ({ val: () => get(path) ?? null }),
     set: async (v) => (log.set = log.set || []).push([path, v]), child: (p) => db.ref(path + "/" + p) }) };
-  const appCheck = () => ({ activate: (key, refresh) => log.appCheck.push([key, refresh, global.FIREBASE_APPCHECK_DEBUG_TOKEN === true]), getToken: async () => ({ token: "ac-token" }) });
+  const appCheck = () => ({ activate: (p, refresh) => log.appCheck.push([p instanceof appCheck.ReCaptchaEnterpriseProvider ? "enterprise:" + p.siteKey : p, refresh, global.FIREBASE_APPCHECK_DEBUG_TOKEN === true]), getToken: async () => ({ token: "ac-token" }) });
+  appCheck.ReCaptchaEnterpriseProvider = class { constructor(k) { this.siteKey = k; } };
   log.appCheck = [];
   return { log, firebase: { initializeApp() {}, database: () => db, auth: () => auth, ...(noAppCheck ? {} : { appCheck }) } };
 }
@@ -79,7 +80,7 @@ test("App Check starts only with a site key, and plain HTTPS reads carry its tok
   const off = load({ data: DATA }, null, "", false, ""); await tick(); assert.deepEqual(off.log.appCheck, []);
   const calls = []; global.fetch = async (url, o) => { calls.push([url, o]); return { ok: true, json: async () => ({ config: 1 }) }; };
   const on = load({ data: DATA, user: { uid: "u_ann", isAnonymous: false, getIdToken: async () => "id-token" } }, null, "", false, " site-key "); await tick();
-  assert.deepEqual(on.log.appCheck, [["site-key", true, false]]); // reCAPTCHA, token kept fresh, no debug token away from localhost
+  assert.deepEqual(on.log.appCheck, [["enterprise:site-key", true, false]]); // Fraud Defense provider, token kept fresh, no debug token away from localhost
   await on.be.readPoll("a");
   assert.match(calls[0][0], /^https:\/\/x\.example\/polls\/a\.json\?auth=id-token&/); assert.equal(calls[0][1].headers["X-Firebase-AppCheck"], "ac-token");
   calls.length = 0; const plain = load({ data: DATA, user: { uid: "u_ann", isAnonymous: false, getIdToken: async () => "id-token" } }, null, "", false, ""); await tick();
@@ -87,7 +88,7 @@ test("App Check starts only with a site key, and plain HTTPS reads carry its tok
 });
 test("App Check on localhost asks for a debug token; a page without the App Check script runs without it", async () => {
   global.location = { hostname: "localhost" };
-  const local = load({ data: DATA }, null, "", false, "site-key"); await tick(); assert.deepEqual(local.log.appCheck, [["site-key", true, true]]);
+  const local = load({ data: DATA }, null, "", false, "site-key"); await tick(); assert.deepEqual(local.log.appCheck, [["enterprise:site-key", true, true]]);
   delete global.FIREBASE_APPCHECK_DEBUG_TOKEN; delete global.location;
   const none = load({ data: DATA, noAppCheck: true }, null, "set=a", true, "site-key"); await tick(); assert.equal(none.be.id, "anon1");
 });
