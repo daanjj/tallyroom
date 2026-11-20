@@ -450,8 +450,8 @@ function scaleHTML(qu, chosen){
 }
 function txKey(qid){ const qu=S.cfg && S.cfg.questions.find(x=>x.id===qid); return (S.ses.round||1)+":"+qid+(qu && qu.rev>1 ? ":"+qu.rev : ""); } // drafts belong to one round and one version
 function myText(qu){ const k=txKey(qu.id); return String(S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : (myVotes().texts?.[qu.id]||"")).trim(); }
-/* answering at your own pace ("all first, then reveal"): Submit on an open or dilemma question also goes to the next
-   question; Previous and Next stay for looking back. The last question stays, with "All answered" under it */
+/* answering at your own pace ("all first, then reveal"): the first Submit on an open or dilemma question also goes to the
+   next question. "Update answer" stays where it is, and so does the last question, with "All answered" under it */
 function pqAdvance(qid){ const Q=S.cfg.questions; if(S.ses.phase!=="voting" || S.cfg.mode!=="batch" || S.ses.revote || S.ui.pq==null) return false;
   if(!Q[S.ui.pq] || Q[S.ui.pq].id!==qid || S.ui.pq>=Q.length-1) return false; S.ui.pq++; return true; }
 function needsText(qu,chosen){ return isTraffic(qu) && (chosen===2||chosen===3) && !myText(qu); }
@@ -868,13 +868,13 @@ app.addEventListener("click", e=>{
     case "fuDone": clearTimeout(fuTimer); saveText(b.dataset.q); render(); break;
     case "openSubmit": { const qid=b.dataset.q, val=String((S.ui.tx||{})[txKey(qid)] ?? "").trim(); if(!val) break; const mine=myVotes();
       const next={...mine, round:S.ses.round, answers:{...mine.answers,[qid]:1}, texts:{...(mine.texts||{}),[qid]:val}, t:Date.now()};
-      S.votes[S.me.id]=next; const moved=pqAdvance(qid); render(); if(moved) window.scrollTo(0,0); write(()=>S.backend.setVotes(S.me.id,next)); break; }
+      S.votes[S.me.id]=next; const moved=!String((mine.texts||{})[qid]||"").trim() && pqAdvance(qid); render(); if(moved) window.scrollTo(0,0); write(()=>S.backend.setVotes(S.me.id,next)); break; }
     case "dlPick": case "dlConf": { const qu=Q.find(x=>x.id===b.dataset.q); if(!qu) break; S.ui.dl=S.ui.dl||{};
       S.ui.dl[txKey(qu.id)]={...dlDraft(qu), [act==="dlPick"?"a":"c"]:+v}; render(); break; }
     case "dlSubmit": { const qu=Q.find(x=>x.id===b.dataset.q); if(!qu) break; const d=dlDraft(qu), mine=myVotes(); if(!Number.isFinite(d.a) || !Number.isFinite(d.c)) break;
       const next={...mine, round:S.ses.round, answers:{...mine.answers,[qu.id]:d.a}, conf:{...(mine.conf||{}),[qu.id]:d.c}, t:Date.now()}; // both parts in one write
       if(S.ui.dl) delete S.ui.dl[txKey(qu.id)];
-      S.votes[S.me.id]=next; const moved=pqAdvance(qu.id); render(); if(moved) window.scrollTo(0,0); write(()=>S.backend.setVotes(S.me.id,next)); break; }
+      S.votes[S.me.id]=next; const moved=validAns(mine,qu)==null && pqAdvance(qu.id); render(); if(moved) window.scrollTo(0,0); write(()=>S.backend.setVotes(S.me.id,next)); break; }
     case "config": S.ui.draft=JSON.parse(JSON.stringify(S.cfg)); S.ui.configOpen=true; render(); break;
     case "cfgClose": S.ui.configOpen=false; S.ui.draft=null; S.ui.jsonText=null; S.ui.jsonOpen=false; render(); break;
     case "cfgMode": readDraftFromDOM(); S.ui.draft.mode=v; render(); break;
