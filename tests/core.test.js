@@ -592,3 +592,12 @@ test("new set id: draws again while the id is taken", () => {
   const first = "team-b-" + C.randomTail(seq(0)), second = "team-b-" + C.randomTail(seq(0.5));
   assert.equal(C.newSetId("Team B", (id) => id === first, seq(0, 0, 0, 0, 0.5, 0.5, 0.5, 0.5)), second);
 });
+
+test("presence: a heartbeat does not move an answered vote in time, so the comment order holds", () => {
+  assert.deepEqual(C.presenceDoc(undefined, 2, NOW), { round: 2, answers: {}, t: NOW });
+  assert.deepEqual(C.presenceDoc({ round: 1, answers: { q: 1 }, t: 5 }, 2, NOW), { round: 2, answers: {}, t: NOW });
+  assert.deepEqual(C.presenceDoc({ round: 1, answers: {}, t: 5, name: "k1" }, 1, NOW), { round: 1, answers: {}, t: NOW, name: "k1" });
+  const cur = { round: 1, answers: { q: 2 }, texts: { q: "Timing?" }, t: 5 }, next = C.presenceDoc(cur, 1, NOW);
+  assert.deepEqual(next, cur); assert.notEqual(next, cur);
+  assert.equal(C.presenceDoc({ round: 1, answers: { q: 2 } }, 1, NOW).t, NOW);
+});

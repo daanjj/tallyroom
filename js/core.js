@@ -218,6 +218,10 @@ function reviveActions(p, questions){ const out={}, rev={}; (questions||[]).forE
 /* ============ votes and statistics ============ */
 const PRESENCE_MS = 150000; // a participant without answers counts as present for 2.5 min after their last heartbeat
 function hasAnswers(v){ return !!(v && v.answers && Object.keys(v.answers).length); }
+/* the doc a device sends to say it is still here. Once it holds answers, t stays the moment of answering:
+   presence only looks at t of docs without answers, and comments, open answers and exports are ordered by it */
+function presenceDoc(cur, round, now){ if(!cur || cur.round!==round) return {round, answers:{}, t:now};
+  return (hasAnswers(cur) && Number.isFinite(cur.t)) ? {...cur} : {...cur, t:now}; }
 function validAns(v,qu){
   if(isOpen(qu)) return String((v&&v.texts&&v.texts[qu.id])||"").trim() ? 1 : null; // an open answer is its text
   const a=v&&v.answers?v.answers[qu.id]:undefined; if(!Number.isFinite(a)) return null;
@@ -429,7 +433,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   optLabel, q, qOpen, qDilemma, qNew, qFromObj, shapeQuestion, questionProblems, reviveQuestion, exportQ, followUp,
   CATEGORY_RULES, catRules, catName, kindAllowed, filterForCategory, skippedMessage, categoryBlockers, blockerMessage, dilemmaStats,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
-  PRESENCE_MS, hasAnswers, validAns, roundVotes, stats, parseCSV, csvToQuestions,
+  PRESENCE_MS, hasAnswers, presenceDoc, validAns, roundVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,

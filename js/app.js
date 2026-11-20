@@ -210,7 +210,8 @@ function connPill(){ return S.ui.offline ? `<span class="pill warn" title="Tryin
 const RULES_MSG="The database does not allow reading question sets yet. Add the <b>sets</b> block to the database rules (tallyroom-setup.md, step 1.3) and reload this page.";
 function brand(text){ return `<div class="brand"><span class="mark"><i></i></span>${esc(text==null?header():text)}</div>`; }
 function notice(title, html, pulse){ return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card big-wait">${pulse?`<div class="pulse"></div>`:""}${title?`<h2 style="font-size:24px">${esc(title)}</h2>`:""}<p class="meta">${html}</p></div></div>`; }
-function render(){
+let lastHTML=null;
+function render(bg){
   let html, host=false;
   if(!S.booted){ html=notice("", "Connecting…", true); }
   else if(S.route==="signin"){ applyTheme(null); document.title="Tally Room"; html=signInHTML(); }
@@ -223,9 +224,14 @@ function render(){
   else { applyTheme(S.meta.accent); document.title=header(); host = S.me.isHost && S.ui.view!=="participant"; }
   const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.classList.contains("act-in")||ae.id==="nameIn"||ae.id==="siEmail"||ae.id==="siPass")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
   const mc=document.querySelector("#modal .card"), mTop=mc?mc.scrollTop:0, wTop=window.scrollY;
-  S.rendering=true; try{ app.innerHTML = html!=null ? html : (host ? hostHTML() : (expired() ? expiredHTML() : participantHTML())); } finally { S.rendering=false; }
-  if(keep){ const el=document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.a,keep.b); }catch(e){} } }
-  if(host){ afterHost(); paginateTL(); }
+  if(html==null) html = host ? hostHTML() : (expired() ? expiredHTML() : participantHTML());
+  /* a background update that changes nothing on screen (a heartbeat, the clock) leaves the page alone: rebuilding it replays the chart animations, which shows as a flash */
+  const same = bg===true && html===lastHTML && app.firstChild;
+  lastHTML=html;
+  if(same) app.querySelectorAll(":scope > #modal, :scope > #dlg, :scope > .save-err").forEach(n=>n.remove());
+  else { S.rendering=true; try{ app.innerHTML = html; } finally { S.rendering=false; } }
+  if(keep && !same){ const el=document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.a,keep.b); }catch(e){} } }
+  if(host){ if(!same) afterHost(); paginateTL(); }
   if(S.ui.configOpen) app.insertAdjacentHTML("beforeend", configHTML());
   if(S.ui.configOpen && mTop){ const nc=document.querySelector("#modal .card"); if(nc) nc.scrollTop=mTop; } // keep the form where it was
   if(S.ui.dlg){ app.insertAdjacentHTML("beforeend", dlgHTML()); afterDlg(); }
@@ -238,7 +244,7 @@ function renderBg(){
   if(S.ui.configOpen && document.getElementById("modal")) return;
   if(S.ui.dlg && document.getElementById("dlg")) return;
   if(document.querySelector("details.menu[open]")) return;
-  render(); }
+  render(true); }
 function topbar(rightHTML){
   const ph=S.ses.phase; const live = ph!=="lobby";
   return `<div class="topbar">${brand()}
@@ -880,7 +886,7 @@ app.addEventListener("click", e=>{
     case "nameSave": { const el=document.getElementById("nameIn"), n=C.cleanName(el?el.value:""), prob=C.nameProblem(n, C.otherNames(S.votes,S.me.id));
       if(prob){ S.ui.nameErr=prob; S.ui.nameDraft=el?el.value:""; render(); document.getElementById("nameIn")?.focus(); break; }
       setName(n); render(); const cur=S.votes[S.me.id];
-      if(cur && cur.round===S.ses.round){ const next={...cur, t:Date.now()}; S.votes[S.me.id]=next; write(()=>S.backend.setVotes(S.me.id,next)); } else if(S.heartbeat) S.heartbeat(); // tell the room right away
+      if(cur && cur.round===S.ses.round){ const next=C.presenceDoc(cur, S.ses.round, Date.now()); S.votes[S.me.id]=next; write(()=>S.backend.setVotes(S.me.id,next)); } else if(S.heartbeat) S.heartbeat(); // tell the room right away
       break; }
     case "dlgAccent": { const c=document.getElementById("dlgColor"); if(c){ c.value=String(v).toLowerCase(); markSwatch(); } break; }
     case "dlgExpQuick": { const x=document.getElementById("dlgExp"); if(x) x.value=toLocalInput(C.extendedExpiry(Date.now(), +v)); break; }
@@ -982,13 +988,13 @@ function bootSet(be){
     const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
     const clash = S.me.name && C.mustYieldName(S.votes, be.id, S.me.name, S.me.nameAt);
     if(nm==="random" && (!S.me.name || clash)){ const n=C.randomName(new Set(C.otherNames(S.votes,be.id).map(x=>x.toLowerCase()))); if(!n) return;
-      setName(n); const cur=S.votes[be.id], doc=(cur && cur.round===S.ses.round) ? {...cur, t:Date.now()} : {round:S.ses.round, answers:{}, t:Date.now()};
+      setName(n); const cur=S.votes[be.id], doc=C.presenceDoc(cur, S.ses.round, Date.now());
       S.votes[be.id]=doc; write(()=>p.setVotes(be.id,doc)); renderBg(); }
     else if(nm==="yes" && clash){ setName(null); S.ui.nameErr="This name is already in use. Choose another."; renderBg(); } }
   // announce presence so the host sees who joined (a vote doc with no answers)
   function heartbeat(){ if(!be.id || !S.ses || !S.meta || expired() || be.canWrite===false || isKicked() || S.review) return; const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
     ensureName(); if(C.isNamed(S.meta.named) && !S.me.name) return; // in a named set you join once you have a name
-    const cur=S.votes[be.id]; const doc = (cur && cur.round===S.ses.round) ? {...cur, t:Date.now()} : {round:S.ses.round, answers:{}, t:Date.now()};
+    const cur=S.votes[be.id]; const doc = C.presenceDoc(cur, S.ses.round, Date.now());
     S.votes[be.id]=doc; write(()=>p.setVotes(be.id,doc)); }
   S.heartbeat=heartbeat;
   setTimeout(heartbeat, 800);
