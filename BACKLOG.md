@@ -4,7 +4,7 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 
 ## How to read this
 
-- Items are grouped in epics A to F (E is parked for later). IDs are stable (`A1`, `B3`, …) so they can be referenced in commits.
+- Items are grouped in epics A to G (E is parked for later; G is security and stands apart from the features). IDs are stable (`A1`, `B3`, …) so they can be referenced in commits.
 - Each item has: a user story, the specification, acceptance criteria (AC), dependencies and a rough size (S = up to half a day, M = about a day, L = several days).
 - **Assumption** marks a choice I made where your description left room. They are collected again in [Open decisions](#open-decisions); check those before starting the item.
 - "Set" means question set. "Presenter" is the device that opened the page with `?host=…`.
@@ -38,6 +38,9 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 | 6 | C1, C2, C3, C4 | Consent workflow |
 | 7 | B3 | Dilemma question |
 | 8 | F1, F2 | Follow-up actions for concerns and objections; builds on the closing overview |
+| 9 | G1, G2, G3, G4 | Security: sign-in and database rules, as one release, between sessions |
+| 10 | G7 | Small and independent; can also go first |
+| 11 | G6, then G5 | App Check when the rules have run for a session; G5 only when named or sensitive sets ask for it |
 
 ---
 
@@ -656,6 +659,292 @@ Added 20 Nov 2026. Applies to sets of category `consent`.
 
 ---
 
+## Epic G: security
+
+Added 20 Nov 2026, after a review of the setup as it stands. Applies to the Firebase backend; demo mode (`?demo=1`) keeps working without sign-in and without rules.
+
+> **Status: not built.**
+
+**Where it stands today**
+
+- The database rules allow everyone to read and write `sets` and `polls/{id}`, without sign-in. Whoever has the database URL can read every set, every answer and every name, change or delete them, or fill the database, without using the page.
+- The database URL and `HOST_KEY` are in `config.js`, which every visitor's browser downloads. Any participant can read the key and open the page with `?host=…`. The key only switches the presenter buttons on; the database does not check it.
+- Expiry (A7) is checked by the page only. A direct write to an expired set still works.
+- A vote record is keyed by a device id that the device makes up itself (`tr_pid`). Nothing stops one device from writing another device's record.
+- Every device reads all answers of its set, including names and comments in a named set (D1).
+- Since set ids follow the name, links can be guessed. That changes little while the whole list of sets is readable anyway; it starts to matter once G4 closes the list.
+
+**What this epic changes**
+
+| Item | Closes |
+|---|---|
+| G1 | Anyone can become presenter |
+| G2 | One device can write another device's answers |
+| G3 | Anyone can change or delete sets, questions and sessions; answers after expiry |
+| G4 | Anyone can list all sets and read the follow-up actions |
+| G5 | Participants can read each other's answers, names and comments |
+| G6 | The database can be used from outside the page |
+| G7 | Tampered third-party scripts; a missed escape |
+
+**G1, G2, G3 and G4 go live as one release**: the rules of G3 and G4 need the sign-ins of G1 and G2, and the sign-ins protect nothing without the rules. G5, G6 and G7 are separate and optional.
+
+**What stays as it is**
+
+- Participants do not make an account and do not type anything to join. Scanning the QR code is enough.
+- No server and no build step. Everything is Firebase Authentication, database rules and the static page.
+- All presenters see and manage all sets (open decision 2). Sets per presenter are not part of this epic.
+- Not solved: a participant who clears the browser storage counts as a new participant and can answer again; a participant can fill their own record with many answers; Firebase rules cannot limit how often a device writes. G6 reduces the last one, nothing here removes it.
+
+### G1. Presenter sign-in — L
+
+**Story.** As a presenter I want to sign in with an account, so that participants cannot make themselves presenter by reading a key from the page.
+
+**Specification**
+
+- Firebase Authentication, provider **email and password**. Accounts are made by hand in the Firebase console (Authentication → Users → Add user). The page has no sign-up. **Assumption:** a handful of presenters; see open decision 12 for Google or Microsoft sign-in instead.
+- Who is presenter is a list in the database: `presenters/{uid}: true`. It is filled by hand in the Firebase console (Data tab). Nobody can write it through the page or the rules; a signed-in user can read only their own entry.
+- A device is presenter when it is signed in with an account whose uid is in that list. This replaces `HOST_KEY`, `?host=KEY` and the `tr_host` flag in `localStorage`.
+- Sign-in screen at `?host` (any value, so old bookmarks with `?host=KEY` land there): fields **Email** and **Password**, button **Sign in**, link **Forgot password** (sends the Firebase reset mail and always answers "If this address has an account, a mail is on its way"). After sign-in the page returns to where it was, without `host` in the address: the overview, or the set when the link held `?set=…`.
+- Wrong email or password: one message, "Email or password is not right", without saying which. Signed in but not in `presenters`: "This account is not a presenter. Ask the owner of this Tally Room to add it", with **Sign out**.
+- The sign-in is remembered on the device (Firebase's default, local persistence). **Sign out** sits in the top bar of the overview and of the presenter view of a set. `?host=off` signs out too, as today.
+- The page without `?set` and without sign-in shows the participant notice as today ("Scan the QR code or open the link you received"), plus a small link **Presenter sign-in** to `?host`.
+- Boot order: the page waits for the first authentication state before it decides between presenter and participant, behind the existing "Connecting…" screen. A presenter who signs out on a set page becomes a participant of that set at once, without reload.
+- Code: `index.html` loads `firebase-auth-compat.js` in the same version as the other Firebase scripts. `resolveHost` in `js/backend.js` goes; the backend gets `signIn(email, password)`, `signOut()`, `resetPassword(email)` and `onAuth(f)`, and `isHost` becomes a value that can change while the page is open. The demo backend keeps today's behaviour: presenter unless `?host=off`, nothing to sign in to.
+- The one-off migration of `MIGRATE_POLL_ID` keeps running for a signed-in presenter only.
+- Clean-up on the first load of the new version: remove `tr_host` and any `tr_host_*` from `localStorage`. `HOST_KEY` is removed from `config.js`, from the example in `tallyroom-setup.md` and from the README.
+- `tallyroom-setup.md` gets the steps: switch on Email/Password in Authentication, add a user, copy its uid to `presenters/{uid}: true`, and add the site's domain under Authentication → Settings → Authorised domains.
+
+**AC**
+
+- A browser that never signed in, opened with `?host=anything`, gets the sign-in screen and no presenter buttons.
+- `config.js` as served to visitors holds no secret: reading it gives no way to become presenter.
+- After signing in on a laptop, closing the browser and opening the overview again shows the sets without signing in again.
+- An account that is not in `presenters` gets the "not a presenter" message and sees no sets.
+- **Sign out** on a set page turns the screen into the participant screen of that set within a second.
+- Demo mode works as before, without a sign-in screen.
+
+**Depends on:** A1, A2. Goes live together with G2, G3 and G4.
+
+### G2. A participant identity the database can check — M
+
+**Story.** As a participant I want my answers to be mine alone, so that nobody else in the room can change or remove them.
+
+**Specification**
+
+- Every device that is not signed in as presenter signs in **anonymously** with Firebase Authentication, automatically and without any screen. The uid of that sign-in is the device id, and so the key of its vote record: `polls/{setId}/votes/{uid}`.
+- This replaces the self-made id in `tr_pid`. On the first load of the new version `tr_pid` is removed.
+- A presenter uses the uid of the presenter account. Answering in participant view on the presenter laptop writes to `votes/{that uid}`, as it does today under the laptop's device id.
+- The anonymous sign-in is kept on the device by Firebase, so a phone that reloads or comes back from sleep is the same participant, as today. Clearing the browser storage or using a private window gives a new participant, also as today.
+- Order at boot: sign in anonymously first, then attach the listeners of the set. When anonymous sign-in fails (blocked storage, network), the participant sees "Could not connect. Check your connection and reload", not an empty voting screen.
+- Keys that contain the device id keep their shape with the new id: `actions/{questionId}_{uid}_v{version}` (F1) and `tr_name_{setId}` in `localStorage` (D1).
+- The exports keep showing the device id as they do today; it is now the uid.
+- **Existing answers:** records under the old ids stay readable and countable, but no device owns them any more. A participant who returns to a running set after the switch gets a new record, so would count twice. **Assumption:** the switch is made between sessions, and running sets are reset or exported first. No migration of old records.
+- Setup: switch on the **Anonymous** provider in Authentication. **Assumption:** anonymous accounts are left to pile up; the Firebase console can delete them automatically after 30 days when the project is upgraded to Identity Platform, which is optional.
+- Demo backend: unchanged, it keeps its own local id.
+
+**AC**
+
+- A phone that joins a set appears under Authentication → Users as an anonymous user, and its vote record has that uid as key.
+- Reloading the phone keeps the same record; the count of respondents does not go up.
+- With the rules of G3 in place, a write to `votes/{another uid}` from the browser console of a participant is refused.
+- A presenter answering in participant view has one record, under the presenter uid.
+
+**Depends on:** A1, D1, F1. Goes live together with G1, G3 and G4.
+
+### G3. Database rules: who may write what — M
+
+**Story.** As a presenter I want the database itself to refuse what the page would not do, so that someone with technical skill cannot change my sets, end my session or vote after expiry.
+
+**Specification**
+
+- The rules live in the repository as `database.rules.json` and are the source for the block in `tallyroom-setup.md`. Publishing stays a manual step in the Firebase console (Rules tab), or `firebase deploy --only database` for who has the Firebase CLI.
+- "Presenter" in a rule means: `auth != null && root.child('presenters').child(auth.uid).val() === true`.
+- Writing, per path:
+
+| Path | Who may write |
+|---|---|
+| `presenters` | Nobody (console only) |
+| `sets`, `sets/{id}` | Presenter |
+| `polls/{id}` and everything below it (`config`, `session`, `actions`, all `votes`) | Presenter |
+| `polls/{id}/votes/{uid}` | Also the device with that uid, when the set exists and is not expired |
+
+- "The set exists" = `sets/{id}` exists. "Not expired" = `sets/{id}/expiresAt` is missing or greater than `now` (the server's clock). This makes expiry (A7) real: the server refuses a participant's answer after the expiry moment, whatever the clock of the phone says.
+- The presenter keeps full write access to all votes, because Clear all answers, Reset session, removing names (D1), Change link and Delete write or remove the records of others. The presenter can also write in an expired set, as today (Extend, exports, paging).
+- Shape of a vote record, checked on every write:
+  - `round` and `t` are required numbers; `t` is at most one minute ahead of the server's clock.
+  - `answers/{qid}`, `conf/{qid}` and `revs/{qid}` are numbers.
+  - `texts/{qid}` is a string of at most 500 characters (the limit of an open answer, `OPEN_MAX`; a follow-up text is shorter).
+  - `name` is a string of at most 30 characters; `nameAt` is a number.
+  - Any other field is refused.
+- Before building, compare this list with what the page writes (`stampDoc`, `myVotes`, the heartbeat and the vote actions in `js/app.js`) and add what is missing. A record the rules refuse must never be something the page writes.
+- The page handles a refused write: a participant whose answer is refused because the set just expired gets the expired screen (A7), not a silent loss; any other refusal shows "Your answer could not be saved. Reload the page".
+- Things the rules cannot do, and that stay as they are: limit the number of answers in one record, limit how often a device writes, or check that an answer is within the scale of its question. The page keeps ignoring answers that do not fit the question (`validAns`).
+- **Change link** writes the new and the old id in one update; every path in it is a presenter path, so it keeps working. Records from before G2 that hold a field the shape check refuses would block the move: the move then reports "This set holds answers in an old format. Clear the answers or export them first".
+- `tallyroom-setup.md`: the rules block is replaced, with a line for people who upgrade: publish the rules in the same half hour as the new files, because the old page cannot write under the new rules and the new page is not protected under the old ones. The troubleshooting list gets "Votes are refused: the rules are published but the Anonymous provider is off".
+
+**AC**
+
+Each of these is tried with the Rules Playground in the Firebase console or from the browser console, and noted in the pull request:
+
+- Not signed in: writing anything, anywhere, is refused.
+- Anonymous participant: writing `sets/{id}`, `polls/{id}/config`, `polls/{id}/session`, `polls/{id}/actions/x` and `polls/{id}/votes/{other uid}` is refused; writing `polls/{id}/votes/{own uid}` with a valid record succeeds.
+- Anonymous participant, expired set: writing the own record is refused. After **Extend** by the presenter it succeeds again without reload.
+- Anonymous participant, set id that does not exist: writing `polls/{that id}/votes/{own uid}` is refused, so the database cannot be filled under made-up ids.
+- A record with an extra field, with a text of 501 characters or with a name of 31 characters is refused.
+- Presenter: create, edit, duplicate, change link, clear, reset, the consent edit (C1), the action list (F1) and delete all work as before.
+- A full session in a consent set and in a dilemma set, with three phones, runs without a refused write in the console.
+
+**Depends on:** G1, G2; touches A7, A8, C1, D1, F1.
+
+### G4. The list of sets and the follow-up actions are not public — S
+
+**Story.** As a presenter I want a participant of one set not to see which other sets exist or what we agreed as follow-up, so that one team's link does not open another team's session.
+
+**Specification**
+
+- Reading, per path:
+
+| Path | Who may read |
+|---|---|
+| `presenters/{uid}` | The signed-in user with that uid |
+| `sets` (the whole list) | Presenter |
+| `sets/{id}` (one set, when you know its id) | Any signed-in device, so also an anonymous participant |
+| `polls` (the whole list) | Nobody |
+| `polls/{id}` as a whole | Presenter |
+| `polls/{id}/config`, `/session`, `/votes` | Any signed-in device |
+| `polls/{id}/actions` | Presenter |
+
+- A participant therefore reads exactly the set of the link, and needs that link to do so. Reading without any sign-in is refused everywhere.
+- The plain HTTPS reads in `js/backend.js` (`rest(…)`, used for `readPoll` and for the lobby fallback `pull`) send the ID token of the signed-in device. The participant fallback no longer reads `polls/{id}` as a whole, which the rules now refuse, but `polls/{id}/session` and `polls/{id}/config`.
+- The name of a set (`sets/{id}/name`, "only you see this") stays readable for a participant of that set who looks in the database. **Assumption:** acceptable; a name that must stay private does not belong in the name field.
+- Guessable links: with the list closed, the id is what keeps a set apart. A name such as "MT offsite" gives a link that a colleague could guess. The dialog **New question set** and **Change link** get one line: "Anyone who knows or guesses this link can join and see the results shown to the room." No random suffix is added. **Assumption:** readable links are worth more here than unguessable ones; see open decision 14.
+- Complete rules after G1 to G4 (`database.rules.json`); `P` stands for the presenter condition of G3 and is written out in the file:
+
+```json
+{
+  "rules": {
+    "presenters": {
+      "$uid": { ".read": "auth != null && auth.uid === $uid" }
+    },
+    "sets": {
+      ".read": "P",
+      ".write": "P",
+      "$set": { ".read": "auth != null" }
+    },
+    "polls": {
+      "$set": {
+        ".read": "P",
+        ".write": "P",
+        "config": { ".read": "auth != null" },
+        "session": { ".read": "auth != null" },
+        "votes": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('sets').child($set).exists() && (!root.child('sets').child($set).child('expiresAt').exists() || root.child('sets').child($set).child('expiresAt').val() > now)",
+            ".validate": "newData.hasChildren(['round', 't'])",
+            "round": { ".validate": "newData.isNumber()" },
+            "t": { ".validate": "newData.isNumber() && newData.val() <= now + 60000" },
+            "name": { ".validate": "newData.isString() && newData.val().length <= 30" },
+            "nameAt": { ".validate": "newData.isNumber()" },
+            "answers": { "$q": { ".validate": "newData.isNumber()" } },
+            "conf": { "$q": { ".validate": "newData.isNumber()" } },
+            "revs": { "$q": { ".validate": "newData.isNumber()" } },
+            "texts": { "$q": { ".validate": "newData.isString() && newData.val().length <= 500" } },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+- This block is a starting point, written without running it. Publishing it is part of the item, and so is every check under AC here and in G3.
+
+**AC**
+
+- Anonymous participant of set A: reading `sets` is refused; reading `sets/{A}` succeeds; reading `polls/{A}/actions` is refused; reading `polls` is refused.
+- Opening `{databaseURL}/sets.json` and `{databaseURL}/polls/{A}.json` in a browser without sign-in gives "Permission denied".
+- A phone in the lobby whose live connection is cut still moves to question 1 within a few seconds after the presenter starts, through the HTTPS fallback.
+- The overview of the presenter shows all sets with their counts, as before.
+
+**Depends on:** G1, G2, G3; touches A2, A6, F1.
+
+### G5. Participants cannot read each other's answers — L
+
+**Story.** As a participant in a named set I want my answers and comments to reach the presenter only, so that I can be open without everyone in the room being able to pull my answers from the database.
+
+Optional, and the largest item of this epic. Worth building when sets are named (D1) or the topics are sensitive; see open decision 15.
+
+**Specification**
+
+- Reading `polls/{id}/votes` as a whole becomes presenter only. A device reads its own record: `polls/{id}/votes/{uid}`.
+- The participant screen uses other people's answers in three places today. Each gets a replacement:
+  1. **Results on the phone** (after Reveal, or with "show live"). The presenter device publishes what the room may see to `polls/{id}/shown/{questionId}`: the counts per answer and, where the room sees them today, the comments and open answers with names. It is written when the presenter reveals a question and kept up to date while it is shown; with "show live" it is updated at most once a second. Presenter writes, any signed-in device reads. A phone draws its charts from `shown`, never from votes. Nothing appears on a phone that the presenter screen does not show to the room.
+  2. **Unique names** (D1). A register `polls/{id}/names/{name in lowercase}: uid`. A device may write an entry that does not exist yet, with its own uid as value, and may remove its own entry; nobody can read the register as a list. Claiming a name is one write: when it is refused the name is taken, and the participant gets today's message. Changing a name claims the new one first and then releases the old one. Random names (`k1`, `b5`) try a name and take the next one on refusal. This replaces `otherNames` and `mustYieldName` on the participant side; two devices can no longer hold the same name, so giving way is not needed.
+  3. **The count "n people joined"** on the participant screen, where shown: taken from `polls/{id}/shown/_room` (`joined`, `answered`), published by the presenter device like the results.
+- The presenter device reads all votes as today; nothing changes on the presenter screen.
+- Consequence: results on phones only update while a presenter device has the set open. That is the case in every session; a set that is left alone shows its last published state.
+- Clear all answers, Reset session and switching named respondents to "No" also clear `names` and `shown`. Duplicate copies neither. Change link and Delete take them along with the rest of the set.
+- Rules, on top of G4: `votes/.read` moves to the presenter and `votes/$uid/.read` to the owner; `shown` is presenter write and signed-in read; `names/$name` is writable when `!data.exists() && newData.val() === auth.uid`, or `data.val() === auth.uid && !newData.exists()`, or by the presenter, with the name at most 30 characters.
+- The exports are unchanged: they are made on the presenter device from the votes.
+
+**AC**
+
+- Anonymous participant: reading `polls/{id}/votes` and `polls/{id}/votes/{other uid}` is refused; reading the own record succeeds.
+- Two phones that type the same name at the same moment: one gets the name, the other gets "That name is taken", every time.
+- After Reveal a phone shows the same counts as the presenter screen, within two seconds.
+- With "show live" on, a phone follows the presenter screen with at most a second of delay.
+- Before Reveal, `polls/{id}/shown/{questionId}` does not exist or is empty, so nothing can be read ahead of the presenter.
+- Random names are still unique in a room of 30 phones that join within ten seconds.
+
+**Depends on:** G1 to G4, D1, D2; touches C1, C3, F1.
+
+### G6. App Check — S
+
+**Story.** As the owner of the installation I want the database to accept requests from my page only, so that scripts cannot fill or read it from elsewhere with a self-made anonymous sign-in.
+
+**Specification**
+
+- Firebase App Check with the **reCAPTCHA v3** provider, registered for the site's domain. `index.html` loads `firebase-app-check-compat.js`; `config.js` gets `APPCHECK_SITE_KEY` (a public key, not a secret). Without that key the page runs without App Check, so an installation can do G1 to G4 first.
+- The plain HTTPS reads (`rest(…)`) send the App Check token in the `X-Firebase-AppCheck` header.
+- Enforcement for the Realtime Database is switched on in the console only after the App Check metrics show that requests from the page are verified, at least one session later.
+- Local development and `tests`: a debug token for `localhost`, described in `tallyroom-setup.md`. Demo mode does not touch Firebase and is not affected.
+- reCAPTCHA v3 shows no puzzle; it does load a Google script and sets the reCAPTCHA badge. **Assumption:** acceptable; mention it in the setup guide for who has to account for third parties.
+- Known limit: App Check raises the effort, it is not a guarantee. The rules of G3 and G4 remain the real protection.
+
+**AC**
+
+- With enforcement on, a `curl` to `{databaseURL}/sets/{id}.json` with a valid ID token but without App Check token is refused.
+- A phone on mobile data joins and votes without seeing a puzzle.
+- The page on `localhost` works with the debug token.
+- An installation without `APPCHECK_SITE_KEY` works as before.
+
+**Depends on:** G1 to G4.
+
+### G7. Smaller hardening: scripts and escaping — S
+
+**Story.** As the owner of the installation I want the page to run only the code I put there and to show participant text as text, so that neither a changed third-party file nor a crafted answer can take over the presenter screen.
+
+**Specification**
+
+- **Third-party scripts.** The QR library and the Firebase scripts move into the repository as `vendor/…`, at the versions in use, and `index.html` loads them from there. No script comes from another host any more (with G6: except reCAPTCHA, which cannot be self-hosted). The README lists the files, their versions and where they came from, so they can be updated on purpose.
+- **Content Security Policy** as a `<meta>` tag in `index.html`: scripts from the site itself only (plus the reCAPTCHA hosts with G6); connections to the site, the database host (`https` and `wss`) and the Firebase Authentication hosts; images from the site and `data:` (the QR code); inline styles stay allowed, because the page sets colours and sizes inline. No inline scripts and no `eval`.
+- **Escaping.** Every text that comes from the database or from a file goes through `esc()` before it becomes HTML: set name and header, question texts, option and scale labels, follow-up prompts, comments, open answers, respondent names, action texts and owners, the join link, and everything from "Open saved results". One pass through `js/app.js` checks each template; what is found is fixed.
+- A test set for that pass, kept as `tests/fixtures/hostile-set.json`: every text field holds `<img src=x onerror=alert(1)>` and `"><script>alert(1)</script>`. Importing it and running a session must show the texts literally.
+- The Markdown and CSV exports: a cell that starts with `=`, `+`, `-` or `@` gets a leading apostrophe in the CSV, so a spreadsheet does not run an answer as a formula. Markdown exports escape `|` in table cells and never produce raw HTML from an answer.
+
+**AC**
+
+- With the network tab open, loading the page fetches scripts from the site's own host only.
+- The hostile set, run through every phase on a presenter screen and a phone, in a consent set with names and actions: no dialog appears, the texts are shown as typed, and the console shows no Content Security Policy violations in normal use.
+- A CSV export with the answer `=1+1` opens in a spreadsheet as the text `=1+1`.
+- QR codes, sign-in (G1) and live voting work with the policy in place.
+
+**Depends on:** none for scripts and escaping; the policy lists the hosts of G1, G2 and G6 when those are built.
+
+---
+
 ## Epic E (later): multiple languages for question texts
 
 Not planned now. Specified far enough to check that A to D do not block it.
@@ -691,8 +980,8 @@ Not planned now. Specified far enough to check that A to D do not block it.
 Choices I made to keep the items implementable. Change them here before you start the item.
 
 1. **Header versus name (A1, A3).** I gave a set two labels: a `name` for your overview ("MT offsite team B") and a `header` that the audience sees. If one label is enough, drop `name`. AGREE
-2. **Presenter rights (A1).** One shared `HOST_KEY` gives access to all sets. "In parallel in different team settings" could also mean different presenters who should not see each other's sets; that needs a key per set or real sign-in, and is a separate item. AGREE
-3. **Expiry is not enforced by the database (A7).** Good enough for workshops; real enforcement needs rules that compare `now` with `expiresAt`. AGREE
+2. **Presenter rights (A1).** One shared `HOST_KEY` gives access to all sets. "In parallel in different team settings" could also mean different presenters who should not see each other's sets; that needs a key per set or real sign-in, and is a separate item. AGREE. (G1 brings real sign-in, still with all presenters seeing all sets.)
+3. **Expiry is not enforced by the database (A7).** Good enough for workshops; real enforcement needs rules that compare `now` with `expiresAt`. AGREE. (G3 adds that enforcement.)
 4. **Decided: all purple follows the accent (A5).** Buttons, logo mark and bars, and also the faint page tint, borders and text tints. The alternative, a neutral grey page for every accent, is simpler but changes how today's purple sets look.
 5. **No mixing of consent and dilemma in one set (B1).**  AGREE
 6. **Saving an edit without text change starts a new vote (C1).** NO: after an edit without changes, just show the current question again and only proceed to the next question if the presenter clicks on Next Question
@@ -701,6 +990,11 @@ Choices I made to keep the items implementable. Change them here before you star
 9. **Named `yes`: duplicate names are refused (D1).** The alternative is to allow them and add a suffix ("Jan (2)"). AGREE
 10. **Presenter can see who has not answered yet (D2).** Leave out if that feels like too much pressure on participants. MAKE IT AN OPTION FOR THE PRESENTER
 11. **English defaults for new traffic light questions (Language).** New questions get "Consent / Concern / Objection" and English follow-up prompts instead of today's Dutch ones. If most of your consent sessions are Dutch, a per-set default (or keeping the Dutch defaults) saves retyping. AGREE
+12. **Presenter sign-in with email and password (G1).** Accounts made by hand in the Firebase console. The alternative is Google or Microsoft sign-in, which saves a password but needs the provider set up and a pop-up or redirect on the laptop. AGREE
+13. **Anonymous sign-in for participants (G2).** Invisible to the participant, and the only way the database can tell devices apart. The alternative is to leave participants unsigned and accept that one device can overwrite another's answers; G3 and G4 then protect sets, questions and sessions only. AGREE
+14. **Readable links stay guessable (G4).** No random suffix on the slug. The alternative is a short random tail (`mt-offsite-x7k2`) on new sets, or a join code per set. ADD A SHORT RANDOM TAIL
+15. **Hiding answers from other participants (G5).** Specified but optional: it is the largest item and changes how phones get their results. Decide per installation whether named or sensitive sets justify it. 
+16. **No migration of answers at the switch (G2).** The switch to the new device ids is made between sessions; old records stay but belong to nobody. AGREE, NO PROBLEM
 
 ## Not in this backlog, but worth knowing
 
