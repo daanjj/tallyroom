@@ -59,6 +59,11 @@
                 ".validate": "newData.isString() && newData.val().length <= 2000"
               }
             },
+            "typing": {
+              "$q": {
+                ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+              }
+            },
             "$other": {
               ".validate": false
             }

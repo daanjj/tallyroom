@@ -601,3 +601,28 @@ test("presence: a heartbeat does not move an answered vote in time, so the comme
   assert.deepEqual(next, cur); assert.notEqual(next, cur);
   assert.equal(C.presenceDoc({ round: 1, answers: { q: 2 } }, 1, NOW).t, NOW);
 });
+
+test("still writing: a comment that is being typed shows as a placeholder and counts as unfinished", () => {
+  const qu = tl("Proposal"), T = C.TYPING_MS;
+  const votes = {
+    a: tv(qu, 1),
+    b: tv(qu, 2, "Timing?", { t: NOW - 9 }),
+    c: tv(qu, 3, "Too cost", { t: NOW - 5, typing: { [qu.id]: NOW - 1000 } }),   // changing a sent comment
+    d: tv(qu, 2, "", { typing: { [qu.id]: NOW - 2000 } }),                        // first text, nothing sent yet
+    e: tv(qu, 3),                                                                  // chose red, has not typed
+    f: tv(qu, 2, "Done long ago", { t: NOW - 7, typing: { [qu.id]: NOW - T - 1 } }), // flag ran out
+    g: tv(qu, 1, "", { typing: { [qu.id]: NOW } }),                               // green has no comment
+  };
+  assert.deepEqual(C.trafficComments(votes, qu, "no", NOW), [{ v: 2, text: "Timing?" }, { v: 2, text: "Done long ago" }, { v: 3, text: "Too cost", writing: true }]);
+  assert.deepEqual(C.trafficComments(votes, qu, "no").map(c => c.writing), [undefined, undefined, undefined], "history and exports take the text as it is");
+  assert.equal(C.trafficWriting(votes, qu, NOW), 3);
+  assert.equal(C.trafficWriting(votes, { ...qu, rev: 2 }, NOW), 0, "votes on an earlier version do not count");
+  assert.equal(C.typingExpiry(votes, NOW), T - 2000);
+  assert.equal(C.typingExpiry({ a: votes.a, f: votes.f }, NOW), 0);
+});
+test("still writing: sending the text takes the flag away", () => {
+  const doc = { round: 1, answers: { q1: 2, q2: 3 }, t: 5, typing: { q1: 10, q2: 11 } };
+  assert.deepEqual(C.withoutTyping(doc, "q1"), { round: 1, answers: { q1: 2, q2: 3 }, t: 5, typing: { q2: 11 } });
+  assert.deepEqual(C.withoutTyping(C.withoutTyping(doc, "q1"), "q2"), { round: 1, answers: { q1: 2, q2: 3 }, t: 5 });
+  assert.deepEqual(doc.typing, { q1: 10, q2: 11 });
+});

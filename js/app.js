@@ -210,7 +210,7 @@ function connPill(){ return S.ui.offline ? `<span class="pill warn" title="Tryin
 const RULES_MSG="The database does not allow reading question sets yet. Add the <b>sets</b> block to the database rules (tallyroom-setup.md, step 1.3) and reload this page.";
 function brand(text){ return `<div class="brand"><span class="mark"><i></i></span>${esc(text==null?header():text)}</div>`; }
 function notice(title, html, pulse){ return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card big-wait">${pulse?`<div class="pulse"></div>`:""}${title?`<h2 style="font-size:24px">${esc(title)}</h2>`:""}<p class="meta">${html}</p></div></div>`; }
-let lastHTML=null;
+let lastHTML=null, typT=null;
 function render(bg){
   let html, host=false;
   if(!S.booted){ html=notice("", "Connecting…", true); }
@@ -232,6 +232,7 @@ function render(bg){
   else { S.rendering=true; try{ app.innerHTML = html; } finally { S.rendering=false; } }
   if(keep && !same){ const el=document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.a,keep.b); }catch(e){} } }
   if(host){ if(!same) afterHost(); paginateTL(); }
+  clearTimeout(typT); if(host && !S.review){ const left=C.typingExpiry(S.votes, nowS()); if(left) typT=setTimeout(renderBg, left+300); }
   if(S.ui.configOpen) app.insertAdjacentHTML("beforeend", configHTML());
   if(S.ui.configOpen && mTop){ const nc=document.querySelector("#modal .card"); if(nc) nc.scrollTop=mTop; } // keep the form where it was
   if(S.ui.dlg){ app.insertAdjacentHTML("beforeend", dlgHTML()); afterDlg(); }
@@ -314,7 +315,7 @@ function waitingHTML(qs){ if(!C.isNamed(namedMode())) return "";
 function editBtn(qu, revealed){ if(!revealed || !isTraffic(qu) || catNow()!=="consent" || S.review || expired()) return "";
   const c=C.trafficCounts(currentRoundVotes(),qu,qu.rev||1);
   return (c.r>0 || c.y>0) ? `<button class="btn" data-act="qEdit" data-q="${esc(qu.id)}">Edit</button>` : ""; }
-const cmLi = c => `<li>${c.name?`<b>${esc(c.name)}</b> · `:""}${esc(c.text)}</li>`;
+const cmLi = c => `<li${c.writing?` class="wr"`:""}>${c.name?`<b>${esc(c.name)}</b> · `:""}${c.writing?"✎ writing…":esc(c.text)}</li>`; // a comment that is being changed shows when it is finished
 const LIGHTS={green:[TL_COLORS[0],"Green"], yellow:[TL_COLORS[1],"Yellow"], red:[TL_COLORS[2],"Red"], none:["var(--line-2)","No votes"]};
 function lightHTML(status){ const m=LIGHTS[status]||LIGHTS.none; return `<span class="light" style="--c:${m[0]}">${m[1]}</span>`; }
 function countsHTML(c){ return `<div class="tl-cnt">${["g","y","r"].map((k,i)=>`<span style="--c:${TL_COLORS[i]}">${esc(c[k]||0)}</span>`).join("")}</div>`; }
@@ -450,21 +451,44 @@ function scaleHTML(qu, chosen){
 function txKey(qid){ const qu=S.cfg && S.cfg.questions.find(x=>x.id===qid); return (S.ses.round||1)+":"+qid+(qu && qu.rev>1 ? ":"+qu.rev : ""); } // drafts belong to one round and one version
 function myText(qu){ const k=txKey(qu.id); return String(S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : (myVotes().texts?.[qu.id]||"")).trim(); }
 function needsText(qu,chosen){ return isTraffic(qu) && (chosen===2||chosen===3) && !myText(qu); }
+/* the follow-up text of a yellow or red vote. It is sent when the participant stops typing for FU_IDLE, leaves the box
+   or taps Done; until then the presenter only hears that someone is writing (see TYPING_MS in core.js) */
+const FU_IDLE=4000, FU_PING=5000;
+let typingOff=false, lastPing={};
+function fuState(qid){ const k=txKey(qid), saved=String(myVotes().texts?.[qid]||""), draft = S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : saved;
+  return !draft.trim() ? "req" : (draft===saved ? "sent" : "draft"); }
+function fuNoteText(st){ return st==="req" ? "Required: fill this in to continue to the next question."
+  : st==="draft" ? "Not sent yet. It goes to the presenter when you pause or tap Done."
+  : `Sent to the presenter${C.isNamed(namedMode())?"":", anonymous"}. You can still change it.`; }
+function fuNote(qid){ const st=fuState(qid), m=document.getElementById("fus_"+qid), d=document.getElementById("fud_"+qid);
+  if(m){ m.textContent=fuNoteText(st); m.classList.toggle("req", st==="req"); } if(d) d.disabled = st!=="draft"; }
 function followUpHTML(qu, chosen){
   if(chosen!==2 && chosen!==3) return "";
-  const k=txKey(qu.id), val = S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : (myVotes().texts?.[qu.id]||"");
-  return `<div class="tl-fu"><label for="fu_${esc(qu.id)}">${esc(tlPrompt(chosen))}</label><textarea class="tl-fu-in" id="fu_${esc(qu.id)}" data-q="${esc(qu.id)}" maxlength="600" rows="3" placeholder="Type your answer here">${esc(val)}</textarea>${val.trim()?`<small>Saved automatically, anonymous.</small>`:`<small style="color:var(--warn);font-weight:700">Required: fill this in to continue to the next question.</small>`}</div>`;
+  const k=txKey(qu.id), val = S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : (myVotes().texts?.[qu.id]||""), st=fuState(qu.id);
+  return `<div class="tl-fu"><label for="fu_${esc(qu.id)}">${esc(tlPrompt(chosen))}</label><textarea class="tl-fu-in" id="fu_${esc(qu.id)}" data-q="${esc(qu.id)}" maxlength="600" rows="3" placeholder="Type your answer here">${esc(val)}</textarea>
+    <div class="fu-foot"><small id="fus_${esc(qu.id)}" class="${st==="req"?"req":""}" role="status">${esc(fuNoteText(st))}</small><button class="btn sm" id="fud_${esc(qu.id)}" data-act="fuDone" data-q="${esc(qu.id)}" ${st==="draft"?"":"disabled"}>Done</button></div></div>`;
 }
+/* tell the room that this device is typing, at most once per FU_PING. Under database rules from before this field the
+   write is refused: the page then stops sending it and only holds the text back */
+function typingPing(qid){ if(typingOff || S.review || !S.backend) return; const now=nowS(); if(now-(lastPing[qid]||0)<FU_PING) return;
+  const mine=myVotes(); if(!Number.isFinite(mine.answers[qid]) || !Number.isFinite(mine.t)) return;
+  lastPing[qid]=now; const doc={...mine, typing:{...(mine.typing||{}), [qid]:Math.round(now)}};
+  writeChain=writeChain.then(()=>S.backend.setVotes(S.me.id,doc)).catch(e=>{ if(isDenied(e)) typingOff=true; else console.warn("typing flag not sent",e); }); }
 function saveText(qid){ const val=(S.ui.tx||{})[txKey(qid)]; if(val==null || S.review) return; const mine=myVotes();
-  if(!Number.isFinite(mine.answers[qid]) || (mine.texts&&mine.texts[qid])===val) return;
-  const next={...mine, round:S.ses.round, answers:{...mine.answers}, texts:{...(mine.texts||{}),[qid]:val}, t:Date.now()};
-  S.votes[S.me.id]=next; write(()=>S.backend.setVotes(S.me.id,next)); }
+  if(!Number.isFinite(mine.answers[qid])) return;
+  const same=(mine.texts&&mine.texts[qid])===val, flagged=lastPing[qid]!=null || (mine.typing && mine.typing[qid]!=null);
+  if(same && !flagged) return;
+  delete lastPing[qid];
+  const next=C.withoutTyping({...mine, round:S.ses.round, answers:{...mine.answers}, texts:{...(mine.texts||{}),[qid]:val}, t:(same && Number.isFinite(mine.t))?mine.t:Date.now()}, qid);
+  S.votes[S.me.id]=next; write(()=>S.backend.setVotes(S.me.id,next)); fuNote(qid); }
+function flushFu(){ clearTimeout(fuTimer); document.querySelectorAll(".tl-fu-in").forEach(t=>saveText(t.dataset.q)); }
 function commentsHTML(qu, always){
   if(!isTraffic(qu)) return "";
-  const cm=C.trafficComments(currentRoundVotes(),qu,namedMode()), y=cm.filter(c=>c.v===2), r=cm.filter(c=>c.v===3);
-  if(!always && !cm.length) return "";
+  const live=!S.review && !expired(), now=nowS(), rv=currentRoundVotes();
+  const cm=C.trafficComments(rv,qu,namedMode(),live?now:NaN), y=cm.filter(c=>c.v===2), r=cm.filter(c=>c.v===3), w=live?C.trafficWriting(rv,qu,now):0;
+  if(!always && !cm.length && !w) return "";
   const blk=(v,list,title)=>list.length?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(title)} (${list.length})</h3><ul>${list.map(cmLi).join("")}</ul></div>`:(always?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(title)} (0)</h3><p class="meta">No answers.</p></div>`:"");
-  return `<div class="card tl-cm">${blk(2,y,tlPrompt(2))}${blk(3,r,tlPrompt(3))}</div>`;
+  return `<div class="card tl-cm">${blk(2,y,tlPrompt(2))}${blk(3,r,tlPrompt(3))}${w?`<p class="tl-wr" role="status">✎ ${w} ${w===1?"person is":"people are"} still writing</p>`:""}</div>`;
 }
 /* named sets: "yes" asks for a name before anything else, "random" hands one out (see ensureName in bootSet) */
 function needName(){ const nm=namedMode(); if(S.review || !C.isNamed(nm)) return false; return !S.me.name || (nm==="yes" && S.ui.nameEdit); }
@@ -830,11 +854,13 @@ app.addEventListener("click", e=>{
     case "asHost": S.ui.view=null; render(); break;
     case "vote": {
       const qid=b.dataset.q, val=+b.dataset.v; const mine=myVotes(); const texts={...(mine.texts||{})}; if(mine.answers[qid]!==val){ delete texts[qid]; if(S.ui.tx) delete S.ui.tx[txKey(qid)]; }
-      const next={...mine, round:S.ses.round, answers:{...mine.answers,[qid]:val}, texts, t:Date.now()};
+      let next={...mine, round:S.ses.round, answers:{...mine.answers,[qid]:val}, texts, t:Date.now()};
+      if(mine.answers[qid]!==val){ next=C.withoutTyping(next,qid); delete lastPing[qid]; }
       const vq=Q.find(x=>x.id===qid); if(isTraffic(vq) && (vq.rev||1)>1) next.revs={...(mine.revs||{}),[qid]:vq.rev}; // which version this answer is for
       S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next));
       if(mine.answers[qid]!==val && isTraffic(Q.find(x=>x.id===qid)) && val!==1){ const box=document.getElementById("fu_"+qid); if(box){ box.scrollIntoView({block:"center",behavior:reduced?"auto":"smooth"}); try{ box.focus({preventScroll:true}); }catch(e){} } }
       break; }
+    case "fuDone": clearTimeout(fuTimer); saveText(b.dataset.q); render(); break;
     case "openSubmit": { const qid=b.dataset.q, val=String((S.ui.tx||{})[txKey(qid)] ?? "").trim(); if(!val) break; const mine=myVotes();
       const next={...mine, round:S.ses.round, answers:{...mine.answers,[qid]:1}, texts:{...(mine.texts||{}),[qid]:val}, t:Date.now()};
       S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next)); break; }
@@ -925,7 +951,9 @@ app.addEventListener("input", e=>{ const t=e.target; if(t && t.id==="dlgColor"){
   if(t && t.classList && t.classList.contains("open-in")){ S.ui.tx=S.ui.tx||{}; S.ui.tx[txKey(t.dataset.q)]=t.value; const v=t.value.trim(), btn=document.getElementById("ops_"+t.dataset.q), n=document.getElementById("opn_"+t.dataset.q);
     if(btn) btn.disabled=!v || v===t.dataset.saved; if(n) n.textContent=`${t.value.length} / ${t.maxLength}`; return; }
   if(!t || !t.classList || !t.classList.contains("tl-fu-in")) return;
-  S.ui.tx=S.ui.tx||{}; S.ui.tx[txKey(t.dataset.q)]=t.value; clearTimeout(fuTimer); const qid=t.dataset.q; fuTimer=setTimeout(()=>saveText(qid), 800); });
+  S.ui.tx=S.ui.tx||{}; S.ui.tx[txKey(t.dataset.q)]=t.value; clearTimeout(fuTimer); const qid=t.dataset.q; typingPing(qid); fuNote(qid); fuTimer=setTimeout(()=>saveText(qid), FU_IDLE); });
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="hidden") flushFu(); }); // a phone that is put away sends what was typed
+window.addEventListener("pagehide", flushFu);
 app.addEventListener("focusout", e=>{ const t=e.target; if(S.rendering || !t || !t.isConnected) return; if(t.classList && t.classList.contains("tl-fu-in")){ clearTimeout(fuTimer); saveText(t.dataset.q); } });
 app.addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target && e.target.id==="nameIn"){ e.preventDefault(); document.querySelector('[data-act="nameSave"]')?.click(); return; }
   if(e.key==="Enter" && e.target && (e.target.id==="siEmail" || e.target.id==="siPass")){ e.preventDefault(); doSignIn(); return; }
@@ -982,7 +1010,7 @@ function bootSet(be){
   p.onVotes(v=>{ if(S.review){ S.review.live.votes=v||{}; return; } S.votes=v||{}; votesIn=true; ensureName(); renderBg(); });
   p.onActions(a=>{ if(!be.isHost) a={}; if(S.review){ S.review.live.actions=a||{}; return; } S.actions=a||{}; renderBg(); }); // follow-up actions are for the presenter only
   try{ const o=JSON.parse(localStorage.getItem("tr_name_"+S.setId)||"null"); if(o && o.n){ S.me.name=String(o.n); S.me.nameAt=o.at||0; } }catch(e){}
-  { const send=p.setVotes; p.setVotes=(pid,v)=>send(pid, pid===be.id ? stampDoc(v) : v); } // this device's doc always carries (or drops) its name
+  { const send=p.setVotes; p.setVotes=(pid,v)=>{ if(typingOff && v && v.typing){ v={...v}; delete v.typing; } return send(pid, pid===be.id ? stampDoc(v) : v); }; } // this device's doc always carries (or drops) its name
   /* random names are handed out here; when two devices hold the same name the later one gives way */
   function ensureName(){ if(!be.id || !S.meta || !S.ses || !votesIn || S.review || expired()) return; const nm=S.meta.named; if(!C.isNamed(nm)) return;
     const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;

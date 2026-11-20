@@ -127,8 +127,20 @@ function trafficCounts(votes, qu, rev){ const c={g:0,y:0,r:0}, q2={...qu, rev};
 /* the light of a proposal: any red = red, else any yellow = yellow, all green = green, no votes = none */
 function trafficStatus(counts){ const c=counts||{}; return (c.r>0) ? "red" : (c.y>0) ? "yellow" : (c.g>0) ? "green" : "none"; }
 /* yellow and red comments on the current version, oldest first; with the respondent's name in a named set */
-function trafficComments(votes, qu, named){ return Object.values(votes||{}).filter(v=>{ const a=validAns(v,qu); return a===2||a===3; }).sort((a,b)=>(a.t||0)-(b.t||0))
-  .map(v=>{ const c={v:v.answers[qu.id], text:String(v.texts[qu.id]).trim()}; if(isNamed(named)) c.name=String(v.name||"unnamed"); return c; }); }
+function trafficComments(votes, qu, named, now){ return Object.values(votes||{}).filter(v=>{ const a=validAns(v,qu); return a===2||a===3; }).sort((a,b)=>(a.t||0)-(b.t||0))
+  .map(v=>{ const c={v:v.answers[qu.id], text:String(v.texts[qu.id]).trim()}; if(isNamed(named)) c.name=String(v.name||"unnamed"); if(Number.isFinite(now) && isWriting(v,qu.id,now)) c.writing=true; return c; }); }
+/* ---- "still writing" ----
+   While a participant types a comment the page holds the text back and sends typing/{qid} = the time of typing instead,
+   refreshed every few seconds. The presenter shows a placeholder until the text arrives, so no half sentences on screen.
+   A flag that is not refreshed (the phone went to sleep) stops counting after TYPING_MS. */
+const TYPING_MS=15000;
+function isWriting(v, qid, now){ const t=v&&v.typing?v.typing[qid]:undefined; return Number.isFinite(t) && now-t<TYPING_MS; }
+function withoutTyping(doc, qid){ if(!doc || !doc.typing) return doc; const ty={...doc.typing}; delete ty[qid]; const out={...doc}; if(Object.keys(ty).length) out.typing=ty; else delete out.typing; return out; }
+/* how many chose yellow or red on this version and have no finished comment: nothing sent yet, or typing again */
+function trafficWriting(votes, qu, now){ return Object.values(votes||{}).filter(v=>{ const a=v&&v.answers?v.answers[qu.id]:undefined;
+  if((a!==2 && a!==3) || !answerIsCurrent(v,qu.id,qu.rev)) return false; return !String(v.texts?.[qu.id]||"").trim() || isWriting(v,qu.id,now); }).length; }
+/* milliseconds until the first typing flag runs out (0 = nobody is typing): the presenter screen redraws then */
+function typingExpiry(votes, now){ let m=0; Object.values(votes||{}).forEach(v=>Object.values((v&&v.typing)||{}).forEach(t=>{ if(Number.isFinite(t) && now-t<TYPING_MS){ const left=Math.max(1,t+TYPING_MS-now); m=m?Math.min(m,left):left; } })); return m; }
 /* presenter rewrote a proposal: the old text, votes and comments go to its history, the new text is the next version */
 function editQuestion(qu, text, votes, named, now){ const rev=qu.rev||1;
   const entry={rev, text:qu.text, counts:trafficCounts(votes,qu,rev), comments:trafficComments(votes,qu,named), t:now};
@@ -433,7 +445,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   optLabel, q, qOpen, qDilemma, qNew, qFromObj, shapeQuestion, questionProblems, reviveQuestion, exportQ, followUp,
   CATEGORY_RULES, catRules, catName, kindAllowed, filterForCategory, skippedMessage, categoryBlockers, blockerMessage, dilemmaStats,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
-  PRESENCE_MS, hasAnswers, presenceDoc, validAns, roundVotes, stats, parseCSV, csvToQuestions,
+  PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, validAns, roundVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,

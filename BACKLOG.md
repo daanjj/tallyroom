@@ -785,6 +785,7 @@ Added 20 Nov 2026, after a review of the setup as it stands. Applies to the Fire
   - `answers/{qid}`, `conf/{qid}` and `revs/{qid}` are numbers.
   - `texts/{qid}` is a string of at most 500 characters (the limit of an open answer, `OPEN_MAX`; a follow-up text is shorter).
   - `name` is a string of at most 30 characters; `nameAt` is a number.
+  - `typing/{qid}` is a number, at most one minute ahead of the server's clock: the time a participant last typed in the follow-up box (the presenter shows "still writing" from it).
   - Any other field is refused.
 - Before building, compare this list with what the page writes (`stampDoc`, `myVotes`, the heartbeat and the vote actions in `js/app.js`) and add what is missing. A record the rules refuse must never be something the page writes.
 - The page handles a refused write: a participant whose answer is refused because the set just expired gets the expired screen (A7), not a silent loss; any other refusal shows "Your answer could not be saved. Reload the page".

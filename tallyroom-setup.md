@@ -70,6 +70,11 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
                 ".validate": "newData.isString() && newData.val().length <= 2000"
               }
             },
+            "typing": {
+              "$q": {
+                ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+              }
+            },
             "$other": {
               ".validate": false
             }
@@ -82,6 +87,8 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
 ```
 
 Click **Publish**. `sets` is the list of question sets with their header, colour and expiry date; `polls` holds the questions and answers of each set; `presenters` is the list of accounts that may present. In short: a presenter may read and write everything; a participant may read the one set of the link and write only its own answers, and only while the set exists and has not expired. Nobody can read or write anything without being signed in. Who has the Firebase CLI can publish with `firebase deploy --only database` instead.
+
+**Upgrading to the version with "still writing":** publish the rules of step 1.3 again first, then put the new files online. The rules gained one field (`typing`). With the old rules the new page still works, but the presenter does not see that someone is writing; the text is only held back until the participant pauses.
 
 **Upgrading from the version with `HOST_KEY`:** do steps 1b and 1.3 and put the new files online in the same half hour, between sessions. The old page cannot write under the new rules, and the new page is not protected under the old ones. Export or reset running sets first: answers given before the switch stay readable but belong to no device any more, so a participant who returns would count twice. `HOST_KEY` is gone from `config.js`.
 

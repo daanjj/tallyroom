@@ -175,6 +175,10 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
 .tl-fu label{font-size:15px;font-weight:600;color:var(--ink)}
 .tl-fu textarea{width:100%;min-height:84px;padding:10px 12px;border:1px solid var(--line-2);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:16px;resize:vertical}
 .tl-fu small{color:var(--muted)}
+.tl-fu small.req{color:var(--warn);font-weight:700}
+.fu-foot{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.tl-cm .tl-wr{margin:0;color:var(--muted);font-size:15px}
+.tl-cm li.wr{color:var(--muted);font-style:italic}
 .tl-cm{padding:18px 20px;display:grid;gap:14px}
 .tl-cm h3{font-family:var(--display);font-size:15px;margin:0 0 6px;display:flex;align-items:center;gap:8px}
 .tl-cm h3:before{content:"";width:12px;height:12px;border-radius:50%;background:var(--c)}
