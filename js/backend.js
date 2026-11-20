@@ -96,7 +96,11 @@ function makeDemoBackend(isHost){
 function makeFirebaseBackend(config, opts){
   root.firebase.initializeApp(config);
   dropLegacyKeys();
-  const db=root.firebase.database(), auth=root.firebase.auth(), BASE=String(config.databaseURL).replace(/\/+$/,"");
+  const db=root.firebase.database();
+  /* WebSockets only: the other way the Firebase script connects (long polling) loads scripts from the database host,
+     which the Content Security Policy in index.html does not allow (backlog G7) */
+  try{ db.INTERNAL.forceWebSockets(); }catch(e){ console.warn("WebSockets could not be forced", e); }
+  const auth=root.firebase.auth(), BASE=String(config.databaseURL).replace(/\/+$/,"");
   /* a phone that was locked or backgrounded comes back with a dead socket: watch the link,
      force a reconnect, and fall back to plain HTTPS reads so a stalled socket never strands anyone */
   let connected=false, downSince=Date.now(), lastNudge=0, offset=0; const connFns=[];

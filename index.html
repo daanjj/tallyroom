@@ -3,25 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Scripts come from this site only, and nothing inline runs (backlog G7). Connections go to the Firebase database
+     (https and wss) and to Firebase Authentication; fonts to Google Fonts. Inline styles stay allowed: the page sets
+     colours and sizes that way. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.firebasedatabase.app wss://*.firebasedatabase.app https://*.firebaseio.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; object-src 'none'; base-uri 'none'; form-action 'self'">
 <title>Tally Room</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
-<link rel="stylesheet" href="css/styles.css?v=20261120f">
+<link rel="stylesheet" href="css/styles.css?v=20261120g">
 </head>
 <body>
 <div id="app"></div>
 
 <!-- No build step: plain scripts, loaded in this order.
+     vendor/     third-party scripts, kept in this repository (see README): QR code, Firebase
      config.js   your settings (Firebase project); it holds no secret
      core.js     pure logic, covered by tests/core.test.js
      backend.js  where the data lives (Firebase, or a demo store in the browser with ?demo=1)
      app.js      screens and actions -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-<script src="config.js?v=20261120f"></script>
-<script src="js/core.js?v=20261120f"></script>
-<script src="js/backend.js?v=20261120f"></script>
-<script src="js/app.js?v=20261120f"></script>
+<script src="vendor/qrcode.min.js"></script>
+<script src="vendor/firebase-app-compat.js"></script>
+<script src="vendor/firebase-auth-compat.js"></script>
+<script src="vendor/firebase-database-compat.js"></script>
+<script src="config.js?v=20261120g"></script>
+<script src="js/core.js?v=20261120g"></script>
+<script src="js/backend.js?v=20261120g"></script>
+<script src="js/app.js?v=20261120g"></script>
 </body>
 </html>

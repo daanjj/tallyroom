@@ -82,11 +82,23 @@ const followUp = (cfg,v) => v===2 ? ((cfg&&cfg.tlYellow)||TL_Q_YELLOW) : v===3 ?
 const DEFAULT_SESSION = { phase:"lobby", current:0, revealed:[], round:1, showLive:false, resetAt:0 };
 function emptyConfig(){ return { mode:"batch", tlYellow:"", tlRed:"", questions:[] }; } // "live" = one question at a time, "batch" = answer all first
 /* Firebase turns arrays into objects when they have gaps and drops empty ones, so always normalise what comes back */
+/* A question from the database or from a file, made safe to draw: its numbers are numbers within the limits of the
+     editor and its id is a string. The screens put these straight into the page (backlog G7). */
+function tidyQuestion(qu){ if(!qu || typeof qu!=="object") return qu;
+  if(qu.id!=null) qu.id=String(qu.id);
+  if(qu.min!=null || qu.max!=null){ qu.min=clamp(Math.round(num(qu.min,1)),0,10); qu.max=clamp(Math.round(num(qu.max,5)),qu.min,11); }
+  if(qu.maxLen!=null) qu.maxLen=clamp(Math.round(num(qu.maxLen,OPEN_MAX)),20,2000);
+  if(qu.rev!=null) qu.rev=Math.max(1,Math.round(num(qu.rev,1)));
+  if(qu.conf && typeof qu.conf==="object"){ const mn=clamp(Math.round(num(qu.conf.min,DEFAULT_CONF.min)),0,10); qu.conf={...qu.conf, min:mn, max:clamp(Math.round(num(qu.conf.max,DEFAULT_CONF.max)),mn+1,11)}; }
+  if(qu.history){ const n=x=>Math.max(0,Math.round(num(x,0))), hs=Array.isArray(qu.history)?qu.history:Object.values(qu.history);
+    qu.history=hs.filter(h=>h && typeof h==="object").map(h=>{ const c=h.counts||{}, cs=h.comments?(Array.isArray(h.comments)?h.comments:Object.values(h.comments)):[];
+      return {...h, rev:Math.max(1,n(h.rev)), text:String(h.text==null?"":h.text), counts:{g:n(c.g), y:n(c.y), r:n(c.r)},
+        comments:cs.filter(x=>x && typeof x==="object").map(x=>({...x, v:n(x.v), text:String(x.text==null?"":x.text), ...(x.name!=null?{name:String(x.name)}:{})}))}; }); }
+  return qu; }
 function normConfig(v){ if(!v || typeof v!=="object") return emptyConfig();
   let qs=v.questions; if(qs && !Array.isArray(qs)) qs=Object.values(qs); if(!Array.isArray(qs)) qs=[];
   qs=qs.filter(Boolean); qs.forEach(qu=>{ if(qu.options && !Array.isArray(qu.options)) qu.options=Object.values(qu.options);
-    if(qu.history){ if(!Array.isArray(qu.history)) qu.history=Object.values(qu.history);
-      qu.history=qu.history.filter(Boolean).map(h=>({...h, counts:{g:0,y:0,r:0,...(h.counts||{})}, comments:h.comments?(Array.isArray(h.comments)?h.comments:Object.values(h.comments)):[]})); } });
+    tidyQuestion(qu); });
   return {...v, mode:v.mode==="live"?"live":"batch", tlYellow:v.tlYellow||"", tlRed:v.tlRed||"", questions:qs}; }
 function normSession(v){ if(v && v.revealed && !Array.isArray(v.revealed)) v.revealed=Object.values(v.revealed); if(v && !v.revealed) v.revealed=[]; return v; }
 
@@ -136,9 +148,11 @@ function consentRows(cfg, ses, votes, named){ return (cfg.questions||[]).map((qu
   return {...base, rev, edited:rev>1, status:o.status, counts:o.counts, fixed:o.fixed, comments:trafficComments(votes,qu,named), history:qu.history||[]}; }); }
 function consentTotals(rows){ const t={green:0,yellow:0,red:0,none:0}; (rows||[]).forEach(r=>{ if(r.kind==="traffic") t[r.status||"none"]++; }); return t; }
 /* Markdown of the outcome, from a results payload (so it also works for a saved results file). Fixed English headings, content as typed. */
-function mdLine(x){ return String(x==null?"":x).replace(/\s*\r?\n\s*/g," ").trim(); }
+/* a text never becomes raw HTML in the Markdown: "<" is written as "\<", which Markdown shows as a plain "<" */
+const mdText = x => String(x==null?"":x).replace(/</g,"\\<");
+function mdLine(x){ return mdText(x).replace(/\s*\r?\n\s*/g," ").trim(); }
 function mdCell(x,max){ let t=mdLine(x); if(max && t.length>max) t=t.slice(0,max).trimEnd()+"…"; return t.replace(/\|/g,"\\|"); }
-function mdQuote(x){ return String(x==null?"":x).split(/\r?\n/).map(l=>("> "+l).trimEnd()).join("\n"); }
+function mdQuote(x){ return mdText(x).split(/\r?\n/).map(l=>("> "+l).trimEnd()).join("\n"); }
 function consentMarkdown(p){ const T=(p.questions||[]).filter(q=>q.kind==="traffic"), tot=consentTotals(T), d=new Date(p.exportedAt), z=n=>String(n).padStart(2,"0");
   const bullet=c=>`- ${c.name?`(${mdLine(c.name)}) `:""}${mdLine(c.text)}`, L=q=>q.lights||{g:0,y:0,r:0};
   const out=[`# ${mdLine(p.title)}`,"",`- Date: ${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`,`- Question set: ${mdLine(p.set&&p.set.name)}`,`- Respondents: ${p.respondents}`,
@@ -156,7 +170,7 @@ function consentMarkdown(p){ const T=(p.questions||[]).filter(q=>q.kind==="traff
       q.history.forEach(h=>{ out.push(`Version ${h.rev}:`,"",mdQuote(h.text),"");
         const cs=(h.comments||[]); if(cs.length) out.push(...cs.map(c=>`- ${c.v===3?"Objection":"Concern"}${c.name?` (${mdLine(c.name)})`:""}: ${mdLine(c.text)}`),""); }); } });
   out.push("## All proposals","");
-  T.forEach(q=>out.push(`${q.n}. ${String(q.text||"").split(/\r?\n/).join("\n   ")}`));
+  T.forEach(q=>out.push(`${q.n}. ${mdText(q.text||"").split(/\r?\n/).join("\n   ")}`));
   if(actionTotals(p.actionGroups).action) out.push("","## Actions","", ...mdDeadlineTable(p.actionGroups));
   return out.join("\n")+"\n"; }
 
@@ -322,9 +336,9 @@ function parseQuestionsFile(obj){ let arr=obj, set=null, tlYellow="", tlRed="";
 
 /* a question from a saved results file, for review mode: same shape as qFromObj but it keeps its id */
 function reviveQuestion(x, i){ const qu=qFromObj(x), out={...qu, id:String((x&&x.id)||("q"+i)), text:String((x&&x.text)||("Question "+(i+1)))};
-  if(x && x.kind==="traffic" && x.rev>1){ out.rev=x.rev; out.history=Array.isArray(x.history)?x.history:[]; } return out; }
+  if(x && x.kind==="traffic" && x.rev>1){ out.rev=x.rev; out.history=Array.isArray(x.history)?x.history:[]; } return tidyQuestion(out); }
 /* the lights stored in a saved results file, back as session.outcome */
-function reviveOutcome(p){ const o={}; ((p&&p.questions)||[]).forEach(q=>{ if(q && q.kind==="traffic" && q.status) o[q.id]={status:q.status, rev:q.rev||1, counts:{g:0,y:0,r:0,...(q.lights||{})}, t:Date.parse(p.exportedAt||"")||0}; }); return o; }
+function reviveOutcome(p){ const o={}; ((p&&p.questions)||[]).forEach(q=>{ if(q && q.kind==="traffic" && q.status) o[q.id]={status:q.status, rev:q.rev||1, counts:{g:num((q.lights||{}).g,0), y:num((q.lights||{}).y,0), r:num((q.lights||{}).r,0)}, t:Date.parse(p.exportedAt||"")||0}; }); return o; }
 
 /* ---- responses export ---- */
 function resultsPayload(o){ const cfg=normConfig(o.cfg), ses=o.ses||{}, round=ses.round||1, meta=normMeta(o.meta)||null;
@@ -353,7 +367,9 @@ function resultsPayload(o){ const cfg=normConfig(o.cfg), ses=o.ses||{}, round=se
       texts:Object.fromEntries(cfg.questions.filter(qu=>((isTraffic(qu)&&answerIsCurrent(rv[k],qu.id,qu.rev)&&[2,3].includes(rv[k].answers[qu.id]))||isOpen(qu))&&String(rv[k].texts?.[qu.id]||"").trim()).map(qu=>[qu.id,String(rv[k].texts[qu.id]).trim()])) })),
     followUps:{yellow:followUp(cfg,2), red:followUp(cfg,3)} };
 }
-function resultsCSV(p){ const qq=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`, s=p.set||{};
+/* a cell that starts with = + - or @ would be run as a formula by a spreadsheet: an apostrophe in front makes it text */
+function csvCell(v){ let t=String(v==null?"":v); if(/^[=+\-@\t\r]/.test(t)) t="'"+t; return `"${t.replace(/"/g,'""')}"`; }
+function resultsCSV(p){ const qq=csvCell, s=p.set||{};
   const rows=[["respondent","question_nr","question","value","label","comment","confidence","set","header","category","action","owner","deadline"].join(",")];
   p.answers.forEach(r=>p.questions.forEach(qu=>{ const v=r.answers[qu.id], text=(r.texts&&r.texts[qu.id])||"", open=qu.kind==="open", cf=r.confidence?r.confidence[qu.id]:null, ac=r.actions?r.actions[qu.id]:null;
     if(open ? !text : !Number.isFinite(v)) return; // an open answer is one row with its text in the comment column
@@ -414,7 +430,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   CATEGORY_RULES, catRules, catName, kindAllowed, filterForCategory, skippedMessage, categoryBlockers, blockerMessage, dilemmaStats,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, validAns, roundVotes, stats, parseCSV, csvToQuestions,
-  DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
+  DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,

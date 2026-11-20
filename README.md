@@ -16,6 +16,9 @@ There is no build step: the browser loads these files as they are.
 | `js/backend.js` | Where the data lives: Firebase, or a demo store inside the browser |
 | `js/app.js` | Screens and actions |
 | `tests/core.test.js` | Tests for `js/core.js` |
+| `vendor/` | Third-party scripts, kept here so the page loads no script from another host (see below) |
+| `tests/hardening.test.js` | Tests for the script sources, the security policy and the escaping in exports |
+| `tests/fixtures/hostile-set.json` | A question set whose every text tries to inject HTML (see below) |
 | `tests/backend.test.js` | Tests for the sign-in logic of `js/backend.js`, against a stand-in for Firebase |
 
 ## Trying it without touching the database
@@ -35,6 +38,27 @@ node --test
 ```
 
 Needs Node 18 or newer, nothing to install.
+
+## Third-party scripts and the security policy
+
+The page runs only scripts from its own folder. `index.html` carries a Content Security Policy that allows scripts from the site itself, connections to the Firebase database and Firebase Authentication, images from the site and `data:` (the QR code), and Google Fonts for the typefaces. Inline scripts and `eval` are not allowed; inline styles are, because the page sets colours and sizes that way.
+
+The files in `vendor/` are unchanged copies, fetched on 20 Nov 2026. To update one, download the new version from the same place, replace the file, and note the version and checksum here.
+
+| File | Version | Source | SHA-256 |
+|---|---|---|---|
+| `qrcode.min.js` | qrcodejs 1.0.0 | `https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js` | `c541ef06327885a8415bca8df6071e14189b4855336def4f36db54bde8484f36` |
+| `firebase-app-compat.js` | Firebase 10.12.0 | `https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js` | `367d0b9aef0a8c08717135c67d4bcc26a5d4a7103e228a1da7c33aedb91e285f` |
+| `firebase-auth-compat.js` | Firebase 10.12.0 | `https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js` | `53de4f22563944851e5cbde4d89e930996b00301904adb69767d9e8b814c8247` |
+| `firebase-database-compat.js` | Firebase 10.12.0 | `https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js` | `274e3b01a7b86dc52441f9d0980ba765b7df6e5eff6e2d05a5ae62980140eca8` |
+
+The three Firebase files must stay on the same version. The database connection uses WebSockets only: Firebase's other way of connecting (long polling) loads scripts from the database host, which the policy does not allow.
+
+### Hostile test set
+
+`tests/fixtures/hostile-set.json` is a consent set with named respondents in which every text holds `<img src=x onerror=alert(1)>` or `"><script>alert(1)</script>`. After a change to the screens: open `?demo=1`, **New question set → Create from file**, run a session through every phase (type the same texts as name, comment, open answer, action and owner), and check that the texts are shown as typed, that no dialog appears and that the console shows no Content Security Policy violations.
+
+In the exports, a CSV cell that starts with `=`, `+`, `-` or `@` gets an apostrophe in front so a spreadsheet does not run it as a formula, and the Markdown exports write `<` as `\<` and `|` in a table cell as `\|`.
 
 ## Who may do what
 

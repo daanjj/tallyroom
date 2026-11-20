@@ -934,6 +934,15 @@ Optional, and the largest item of this epic. Worth building when sets are named 
 
 ### G7. Smaller hardening: scripts and escaping — S
 
+> **Status: built on 20 Nov 2026.** The hostile set was run through every phase in demo mode (presenter and participant view, names, comments, open answers, edit dialog, closing overview, actions): the texts show as typed, no dialog, no policy violations. The real page was loaded under the policy up to the sign-in screen and the database connection. **Not tried:** signing in and live voting against Firebase under the policy (step 9 is not live yet), and opening a CSV in a spreadsheet.
+>
+> Differences from the specification below:
+> - **The database connects through WebSockets only.** Firebase otherwise starts with long polling, which loads scripts from the database host; allowing that host for scripts would let any Firebase database serve script to the page. A network that blocks WebSockets can therefore no longer connect.
+> - **Google Fonts stays an outside host** for the stylesheet and the font files (not scripts); the policy lists it.
+> - **Numbers and ids are made safe where they come in** (`tidyQuestion` in `js/core.js`, for the database and for files), next to `esc()` in the templates. The pass found unescaped question ids, version numbers, counts of earlier versions and the round number; all other texts were escaped already.
+> - **Markdown writes `<` as `\<`**, which Markdown shows as a plain `<`.
+> - The CSV guard also covers a cell that starts with a tab or a carriage return.
+
 **Story.** As the owner of the installation I want the page to run only the code I put there and to show participant text as text, so that neither a changed third-party file nor a crafted answer can take over the presenter screen.
 
 **Specification**

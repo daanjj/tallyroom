@@ -142,7 +142,7 @@ function trafficTable(Q, curId, allShown, pick){
     if(!shown) cell=`<span class="tl-hid">${qu.id===curId?`${n} answered, hidden until you reveal`:"not shown yet"}</span>`;
     else cell=`<div class="tl-bar">${[1,2,3].map(v=>st.counts[v]?`<i style="--c:${TL_COLORS[v-1]};flex-grow:${st.counts[v]}"></i>`:"").join("")}</div>
       <div class="tl-cnt">${[1,2,3].map(v=>`<span style="--c:${TL_COLORS[v-1]}" title="${esc(tx(qu.options[v-1]))}">${st.counts[v]||0}</span>`).join("")}${n?`<small class="meta">${n} answers</small>`:""}</div>`;
-    return `<tr class="${qu.id===curId?"cur":""}${pick?" pick":""}"${pick?` data-act="tlSel" data-q="${qu.id}" title="Show details"`:""}><td class="n">${i+1}</td><td>${esc(tx(qu.text))}</td><td class="r">${cell}</td></tr>`; }).join("");
+    return `<tr class="${qu.id===curId?"cur":""}${pick?" pick":""}"${pick?` data-act="tlSel" data-q="${esc(qu.id)}" title="Show details"`:""}><td class="n">${i+1}</td><td>${esc(tx(qu.text))}</td><td class="r">${cell}</td></tr>`; }).join("");
   return `<div class="card" style="padding:18px 20px"><table class="tl-table"><thead><tr><th>#</th><th>Statement</th><th>${esc(((Q.find(isTraffic)||{}).options||TL_LABELS).join(" / "))}</th></tr></thead><tbody>${body}</tbody></table><div class="tl-pager" hidden></div></div>`;
 }
 function miniStrip(qu, vals){ if(isOpen(qu)) return `<div class="mini" style="visibility:hidden"></div>`;
@@ -299,18 +299,18 @@ function hostHTML(){
   }
   return `<div class="wrap">${topbar(controls)}${reviewBanner()}${expiredBanner()}${S.ui.readonly?`<div class="banner" style="margin-bottom:12px">You can see this session but this account is not allowed to change it.</div>`:""}<div class="stage two"><div class="stage">${main}</div>${side}</div></div>`;
 }
-function qnumHTML(i, qu){ return `<div class="qnum">Question ${i+1} of ${S.cfg.questions.length}${(qu.rev||1)>1?` · version ${qu.rev}`:""}</div>`; }
+function qnumHTML(i, qu){ return `<div class="qnum">Question ${i+1} of ${S.cfg.questions.length}${(qu.rev||1)>1?` · version ${esc(qu.rev)}`:""}</div>`; }
 /* named sets: who still has to answer, behind a click so it is not on the projector by default */
 function waitingHTML(qs){ if(!C.isNamed(namedMode())) return "";
   const w=Object.values(currentRoundVotes()).filter(v=>!qs.every(qu=>validAns(v,qu)!=null)).map(nameLabel); if(!w.length) return "";
   return `<details class="waiting" id="waitBox" ${S.ui.waitOpen?"open":""}><summary>Waiting for ${w.length}</summary><div class="people">${w.map(n=>`<span class="chip">${esc(n)}</span>`).join("")}</div></details>`; }
 /* consent sets: a revealed proposal with at least one red vote can be rewritten and voted on again */
 function editBtn(qu, revealed){ if(!revealed || !isTraffic(qu) || catNow()!=="consent" || S.review || expired()) return "";
-  return C.trafficCounts(currentRoundVotes(),qu,qu.rev||1).r>0 ? `<button class="btn" data-act="qEdit" data-q="${qu.id}">Edit</button>` : ""; }
+  return C.trafficCounts(currentRoundVotes(),qu,qu.rev||1).r>0 ? `<button class="btn" data-act="qEdit" data-q="${esc(qu.id)}">Edit</button>` : ""; }
 const cmLi = c => `<li>${c.name?`<b>${esc(c.name)}</b> · `:""}${esc(c.text)}</li>`;
 const LIGHTS={green:[TL_COLORS[0],"Green"], yellow:[TL_COLORS[1],"Yellow"], red:[TL_COLORS[2],"Red"], none:["var(--line-2)","No votes"]};
 function lightHTML(status){ const m=LIGHTS[status]||LIGHTS.none; return `<span class="light" style="--c:${m[0]}">${m[1]}</span>`; }
-function countsHTML(c){ return `<div class="tl-cnt">${["g","y","r"].map((k,i)=>`<span style="--c:${TL_COLORS[i]}">${c[k]||0}</span>`).join("")}</div>`; }
+function countsHTML(c){ return `<div class="tl-cnt">${["g","y","r"].map((k,i)=>`<span style="--c:${TL_COLORS[i]}">${esc(c[k]||0)}</span>`).join("")}</div>`; }
 /* ---- follow-up actions (backlog F): one row per yellow or red remark, with action, owner and deadline ---- */
 /* what is stored, with what is being typed on this screen laid over it */
 function shownActions(){ const out={...S.actions}; Object.entries(S.ui.act||{}).forEach(([k,d])=>{ out[k]={...(out[k]||{}),...d}; }); return out; }
@@ -326,7 +326,7 @@ function actionsHTML(){
     ${ro?`<p class="meta" style="margin:10px 0 0">${S.review?"Saved results: the actions can be read and exported, not changed.":"This set has expired: extend it to change the actions."}</p>`:`<p class="meta" style="margin:10px 0 0">Type a follow-up action, an owner and a deadline per remark. Everything is saved as you type.</p>`}</div>
     ${names.length?`<datalist id="actOwners">${names.map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist>`:""}`;
   const cards=groups.map(g=>{ const rows=g.rows.filter(r=>!openOnly || r.state==="open" || (S.ui.act||{})[r.key]); if(!rows.length) return "";
-    return `<div class="card act-card"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div class="qnum" style="flex:1">Proposal ${g.n}${g.rev>1?` · version ${g.rev}`:""}</div>${lightHTML(g.status)}</div>
+    return `<div class="card act-card"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div class="qnum" style="flex:1">Proposal ${g.n}${g.rev>1?` · version ${esc(g.rev)}`:""}</div>${lightHTML(g.status)}</div>
       <div class="qtext">${esc(tx(g.text))}</div>
       ${rows.map(r=>{ const k=esc(r.key), off=ro||r.none?"disabled":"", lab=`${r.v===3?"objection":"concern"}${r.name?" of "+esc(r.name):""}`;
         return `<div class="act-row ${r.state}"><div class="act-remark"><span class="light sm" style="--c:${TL_COLORS[r.v-1]}"></span>${r.name?`<b>${esc(r.name)}</b> · `:""}${esc(r.text)}</div>
@@ -356,15 +356,15 @@ function closingHTML(){
   else if(tab==="overview"){
     body=`<div class="card" style="padding:18px 20px"><table class="tl-table"><thead><tr><th>#</th><th>Proposal</th><th>Status</th></tr></thead><tbody>${rows.map(r=>{ const qu=S.cfg.questions[r.n-1];
       const cell = r.kind==="traffic" ? `${lightHTML(r.status)}${countsHTML(r.counts)}` : `<span class="meta">${(()=>{ const st=stats(answersFor(qu.id),qu.min,qu.max); return `${st.n} ${st.n===1?"answer":"answers"} · ${sumNote({qu,st})}`; })()}</span>`;
-      return `<tr class="pick" data-act="gotoResults" data-v="${r.n-1}" title="Open this question"><td class="n">${r.n}</td><td>${esc(tx(r.text))}${r.edited?` <span class="edited">edited · version ${r.rev}</span>`:""}</td><td class="r">${cell}</td></tr>`; }).join("")}</tbody></table><div class="tl-pager" hidden></div></div>
+      return `<tr class="pick" data-act="gotoResults" data-v="${r.n-1}" title="Open this question"><td class="n">${r.n}</td><td>${esc(tx(r.text))}${r.edited?` <span class="edited">edited · version ${esc(r.rev)}</span>`:""}</td><td class="r">${cell}</td></tr>`; }).join("")}</tbody></table><div class="tl-pager" hidden></div></div>
       <div class="meta" style="margin:-6px 4px 0">Click a row to open that question.</div>`;
   } else if(!open.length){
     body=`<div class="card big-wait"><h2 style="font-size:24px">No concerns or objections left.</h2></div>`;
   } else {
     body=open.map(r=>{ const red=r.comments.filter(c=>c.v===3), yel=r.comments.filter(c=>c.v===2);
       const blk=(v,list)=>list.length?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(tlPrompt(v))} (${list.length})</h3><ul>${list.map(cmLi).join("")}</ul></div>`:"";
-      const hist=r.history.length?`<details class="hist"><summary>Earlier versions (${r.history.length})</summary>${r.history.map(h=>`<div class="hist-v"><div class="meta">Version ${h.rev} · ${h.counts.g} green, ${h.counts.y} yellow, ${h.counts.r} red</div><div class="hist-t">${esc(tx(h.text))}</div>${h.comments.length?`<ul>${h.comments.map(c=>`<li><span class="light sm" style="--c:${TL_COLORS[c.v-1]}"></span>${c.name?`<b>${esc(c.name)}</b> · `:""}${esc(c.text)}</li>`).join("")}</ul>`:""}</div>`).join("")}</details>`:"";
-      return `<div class="card" style="padding:22px 26px"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div class="qnum" style="flex:1">Proposal ${r.n}${r.edited?` · version ${r.rev}`:""}</div>${lightHTML(r.status)}${countsHTML(r.counts)}</div>
+      const hist=r.history.length?`<details class="hist"><summary>Earlier versions (${r.history.length})</summary>${r.history.map(h=>`<div class="hist-v"><div class="meta">Version ${esc(h.rev)} · ${esc(h.counts.g)} green, ${esc(h.counts.y)} yellow, ${esc(h.counts.r)} red</div><div class="hist-t">${esc(tx(h.text))}</div>${h.comments.length?`<ul>${h.comments.map(c=>`<li><span class="light sm" style="--c:${TL_COLORS[c.v-1]}"></span>${c.name?`<b>${esc(c.name)}</b> · `:""}${esc(c.text)}</li>`).join("")}</ul>`:""}</div>`).join("")}</details>`:"";
+      return `<div class="card" style="padding:22px 26px"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div class="qnum" style="flex:1">Proposal ${r.n}${r.edited?` · version ${esc(r.rev)}`:""}</div>${lightHTML(r.status)}${countsHTML(r.counts)}</div>
         <div class="qtext">${esc(tx(r.text))}</div><div class="tl-cm" style="padding:14px 0 0">${blk(3,red)}${blk(2,yel)}${red.length||yel.length?"":`<p class="meta">No comments on this version.</p>`}</div>${hist}</div>`; }).join("");
   }
   return `${head}${body}<div class="controls"><button class="btn" data-act="gotoResults" data-v="0">Back to question 1</button><button class="btn ghost" data-act="lobby">Back to lobby</button><span class="spacer"></span>${expired()||S.review?"":`<button class="btn danger" data-act="reset">Clear all answers</button>`}</div>`;
@@ -374,7 +374,7 @@ function sideHTML(){
   const rv=currentRoundVotes(); const Q=S.cfg.questions;
   const dots = Object.values(rv).map(v=>{ const k=Q.filter(q=>validAns(v,q)!=null).length; return C.isNamed(namedMode()) ? `<span class="chip ${k===Q.length&&Q.length?"done":""}" title="${k}/${Q.length} answered">${esc(nameLabel(v))}</span>` : `<i class="${k===Q.length?"done":(k?"on":"on")}" title="${k}/${Q.length}"></i>`; }).join("");
   return `<aside class="card side"><div><div class="eyebrow">Join</div><p class="meta" style="margin:4px 0 10px">Scan or open the link. No login needed.</p><div class="qr" id="qr"></div><div class="link" style="margin-top:8px">${esc(url)}</div></div>
-    <div><div class="eyebrow">In the room</div><p class="meta" style="margin:4px 0 8px">${Object.keys(rv).length} joined · round ${S.ses.round}</p><div class="people">${dots||'<span class="meta">Nobody yet</span>'}</div></div></aside>`;
+    <div><div class="eyebrow">In the room</div><p class="meta" style="margin:4px 0 8px">${Object.keys(rv).length} joined · round ${esc(S.ses.round)}</p><div class="people">${dots||'<span class="meta">Nobody yet</span>'}</div></div></aside>`;
 }
 function paginateTL(){
   const tb=document.querySelector(".tl-table"); if(!tb || !tb.tBodies[0]) return;
@@ -413,30 +413,30 @@ function myVotes(){ const v=S.votes[S.me.id]; /* Firebase drops empty objects, s
   return m; }
 function openDraft(qu){ const k=txKey(qu.id); return S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : String(myVotes().texts?.[qu.id]||""); }
 function openInputHTML(qu){ const val=openDraft(qu), saved=String(myVotes().texts?.[qu.id]||"").trim(), max=qu.maxLen||C.OPEN_MAX;
-  return `<div class="tl-fu"><label for="op_${qu.id}">Your answer</label><textarea class="open-in" id="op_${qu.id}" data-q="${qu.id}" data-saved="${esc(saved)}" maxlength="${max}" rows="4" placeholder="Type your answer here">${esc(val)}</textarea>
-    <div class="controls"><button class="btn primary" data-act="openSubmit" data-q="${qu.id}" id="ops_${qu.id}" ${val.trim()&&val.trim()!==saved?"":"disabled"}>${saved?"Update answer":"Submit"}</button><small id="opn_${qu.id}">${val.length} / ${max}</small></div></div>`; }
+  return `<div class="tl-fu"><label for="op_${esc(qu.id)}">Your answer</label><textarea class="open-in" id="op_${esc(qu.id)}" data-q="${esc(qu.id)}" data-saved="${esc(saved)}" maxlength="${max}" rows="4" placeholder="Type your answer here">${esc(val)}</textarea>
+    <div class="controls"><button class="btn primary" data-act="openSubmit" data-q="${esc(qu.id)}" id="ops_${esc(qu.id)}" ${val.trim()&&val.trim()!==saved?"":"disabled"}>${saved?"Update answer":"Submit"}</button><small id="opn_${esc(qu.id)}">${val.length} / ${max}</small></div></div>`; }
 /* dilemma: the choice and the confidence are picked first and sent together with Submit */
 function dlDraft(qu){ const d=(S.ui.dl||{})[txKey(qu.id)]||{}, m=myVotes(); return { a:d.a!=null?d.a:m.answers[qu.id], c:d.c!=null?d.c:(m.conf||{})[qu.id] }; }
 function dilemmaInputHTML(qu){ const d=dlDraft(qu), m=myVotes(), cf=qu.conf||C.DEFAULT_CONF, cpts=cf.max-cf.min+1;
   const saved=validAns(m,qu)!=null, dirty=d.a!==m.answers[qu.id] || d.c!==(m.conf||{})[qu.id], ready=Number.isFinite(d.a)&&Number.isFinite(d.c);
   let ob="", cb="";
-  qu.options.forEach((o,i)=>{ const v=i+1; ob+=`<button data-act="dlPick" data-q="${qu.id}" data-v="${v}" class="${d.a===v?"on":""}" style="--c:var(--accent);--sel-ink:var(--accent-ink)" aria-pressed="${d.a===v}"><b>${v}</b><span>${esc(tx(o))}</span></button>`; });
-  for(let c=cf.min,j=0;c<=cf.max;c++,j++) cb+=`<button data-act="dlConf" data-q="${qu.id}" data-v="${c}" class="${d.c===c?"on":""}" style="--c:${rampColor(j,cpts)};--sel-ink:${selInk(j,cpts)}" aria-pressed="${d.c===c}">${c}</button>`;
+  qu.options.forEach((o,i)=>{ const v=i+1; ob+=`<button data-act="dlPick" data-q="${esc(qu.id)}" data-v="${v}" class="${d.a===v?"on":""}" style="--c:var(--accent);--sel-ink:var(--accent-ink)" aria-pressed="${d.a===v}"><b>${v}</b><span>${esc(tx(o))}</span></button>`; });
+  for(let c=cf.min,j=0;c<=cf.max;c++,j++) cb+=`<button data-act="dlConf" data-q="${esc(qu.id)}" data-v="${c}" class="${d.c===c?"on":""}" style="--c:${rampColor(j,cpts)};--sel-ink:${selInk(j,cpts)}" aria-pressed="${d.c===c}">${c}</button>`;
   return `<div class="scale opts" style="grid-template-columns:1fr">${ob}</div>
     <div class="dl-conf">${esc(tx(cf.text))}</div>
     <div class="scale" style="margin-top:8px;grid-template-columns:repeat(${cpts>6?Math.ceil(cpts/2):cpts},minmax(0,1fr))">${cb}</div><div class="scale-ends"><span>${esc(tx(cf.lo))}</span><span>${esc(tx(cf.hi))}</span></div>
-    <div class="controls" style="margin-top:16px"><button class="btn primary" data-act="dlSubmit" data-q="${qu.id}" ${ready&&(dirty||!saved)?"":"disabled"}>${saved?"Update answer":"Submit"}</button>${saved&&dirty?`<small style="color:var(--warn);font-weight:700">Changed, not sent yet.</small>`:""}</div>`; }
+    <div class="controls" style="margin-top:16px"><button class="btn primary" data-act="dlSubmit" data-q="${esc(qu.id)}" ${ready&&(dirty||!saved)?"":"disabled"}>${saved?"Update answer":"Submit"}</button>${saved&&dirty?`<small style="color:var(--warn);font-weight:700">Changed, not sent yet.</small>`:""}</div>`; }
 function answerHint(qu){ return isOpen(qu) ? "Type your answer and tap Submit." : isDilemma(qu) ? "Choose an option and your confidence, then tap Submit." : isOpt(qu) ? "Tap an option to answer." : "Tap a number to answer."; }
 function scaleHTML(qu, chosen){
   if(isOpen(qu)) return openInputHTML(qu);
   if(isDilemma(qu)) return dilemmaInputHTML(qu);
   const pts=qu.max-qu.min+1; let b="";
   if(isOpt(qu)){
-    for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${qu.id}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${qColor(qu,i,pts)};--sel-ink:${qInk(qu,i,pts)}" aria-pressed="${chosen===v}"><b>${v}</b><span>${esc(tx(qu.options[i]))}</span></button>`; }
+    for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${esc(qu.id)}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${qColor(qu,i,pts)};--sel-ink:${qInk(qu,i,pts)}" aria-pressed="${chosen===v}"><b>${v}</b><span>${esc(tx(qu.options[i]))}</span></button>`; }
     const again = (isTraffic(qu) && (qu.rev||1)>1 && !Number.isFinite(chosen)) ? `<div class="banner" style="margin-top:14px">The proposal was changed. Please vote again.</div>` : "";
     return `${again}<div class="scale opts" style="grid-template-columns:1fr">${b}</div>${isTraffic(qu)?followUpHTML(qu,chosen):""}`;
   }
-  for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${qu.id}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${rampColor(i,pts)};--sel-ink:${selInk(i,pts)}" aria-pressed="${chosen===v}">${v}</button>`; }
+  for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${esc(qu.id)}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${rampColor(i,pts)};--sel-ink:${selInk(i,pts)}" aria-pressed="${chosen===v}">${v}</button>`; }
   const cols = pts>6 ? Math.ceil(pts/2) : pts;
   return `<div class="scale" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${b}</div><div class="scale-ends"><span>${esc(tx(qu.lo))}</span><span>${esc(tx(qu.hi))}</span></div>`;
 }
@@ -446,7 +446,7 @@ function needsText(qu,chosen){ return isTraffic(qu) && (chosen===2||chosen===3) 
 function followUpHTML(qu, chosen){
   if(chosen!==2 && chosen!==3) return "";
   const k=txKey(qu.id), val = S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : (myVotes().texts?.[qu.id]||"");
-  return `<div class="tl-fu"><label for="fu_${qu.id}">${esc(tlPrompt(chosen))}</label><textarea class="tl-fu-in" id="fu_${qu.id}" data-q="${qu.id}" maxlength="600" rows="3" placeholder="Type your answer here">${esc(val)}</textarea>${val.trim()?`<small>Saved automatically, anonymous.</small>`:`<small style="color:var(--warn);font-weight:700">Required: fill this in to continue to the next question.</small>`}</div>`;
+  return `<div class="tl-fu"><label for="fu_${esc(qu.id)}">${esc(tlPrompt(chosen))}</label><textarea class="tl-fu-in" id="fu_${esc(qu.id)}" data-q="${esc(qu.id)}" maxlength="600" rows="3" placeholder="Type your answer here">${esc(val)}</textarea>${val.trim()?`<small>Saved automatically, anonymous.</small>`:`<small style="color:var(--warn);font-weight:700">Required: fill this in to continue to the next question.</small>`}</div>`;
 }
 function saveText(qid){ const val=(S.ui.tx||{})[txKey(qid)]; if(val==null || S.review) return; const mine=myVotes();
   if(!Number.isFinite(mine.answers[qid]) || (mine.texts&&mine.texts[qid])===val) return;
@@ -502,7 +502,7 @@ function participantHTML(){
       ${done===Q.length?`<div class="toast">✓ All ${Q.length} answered. Your answers are saved; you can still go back and change them until the reveal starts.</div>`:(needsText(qu,mine.answers[qu.id])?`<div class="toast wait">Required: answer the follow-up question above. Your vote counts once you have.</div>`:`<div class="toast wait">${Q.length-done} to go. Answers save automatically.</div>`)}`;
   } else if(ph==="results"){
     const qu=Q[ses.current];
-    body=`<div class="card p-q">${qnumHTML(ses.current,qu)}<div class="qtext">${esc(tx(qu.text))}</div></div><div class="card chart">${resultHTML(qu)}</div>${!isOpen(qu)&&validAns(mine,qu)!=null?`<div class="toast wait">You answered ${esc(optLabel(qu,mine.answers[qu.id]))}${isDilemma(qu)?`, confidence ${mine.conf[qu.id]}`:""}.</div>`:""}`;
+    body=`<div class="card p-q">${qnumHTML(ses.current,qu)}<div class="qtext">${esc(tx(qu.text))}</div></div><div class="card chart">${resultHTML(qu)}</div>${!isOpen(qu)&&validAns(mine,qu)!=null?`<div class="toast wait">You answered ${esc(optLabel(qu,mine.answers[qu.id]))}${isDilemma(qu)?`, confidence ${esc(mine.conf[qu.id])}`:""}.</div>`:""}`;
   } else if(ph==="summary"){
     const rows=Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)})).sort((a,b)=>sumScore(b)-sumScore(a));
     body=`<div class="card" style="padding:20px"><div class="eyebrow">Summary</div>${rows.map(r=>`<div class="sum-row"><div class="t">${esc(tx(r.qu.text))}<small>Q${r.i+1} · ${r.st.n} answers${isOpt(r.qu)&&r.st.n?` · most chosen: ${esc(optLabel(r.qu,r.st.mode))}`:""}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${sumMetric(r)}</div></div>`).join("")}</div>`;

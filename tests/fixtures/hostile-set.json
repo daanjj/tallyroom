@@ -1,0 +1,54 @@
+{
+ "set": {
+  "name": "<img src=x onerror=alert(1)> set",
+  "header": "\"><script>alert(1)</script> header",
+  "accent": "#5A3BD6",
+  "category": "consent",
+  "named": "yes"
+ },
+ "mode": "live",
+ "followUps": {
+  "yellow": "<img src=x onerror=alert(1)> concern?",
+  "red": "\"><script>alert(1)</script> objection?"
+ },
+ "questions": [
+  {
+   "text": "<img src=x onerror=alert(1)> proposal one",
+   "kind": "traffic",
+   "options": [
+    "<img src=x onerror=alert(1)> yes",
+    "\"><script>alert(1)</script> maybe",
+    "<img src=x onerror=alert(1)> no"
+   ]
+  },
+  {
+   "text": "\"><script>alert(1)</script> proposal two",
+   "kind": "traffic",
+   "options": [
+    "Consent",
+    "Concern",
+    "Objection"
+   ]
+  },
+  {
+   "text": "<img src=x onerror=alert(1)> scale",
+   "min": 1,
+   "max": 5,
+   "lo": "\"><script>alert(1)</script> low",
+   "hi": "<img src=x onerror=alert(1)> high"
+  },
+  {
+   "text": "\"><script>alert(1)</script> choice",
+   "options": [
+    "<img src=x onerror=alert(1)> first",
+    "\"><script>alert(1)</script> second",
+    "<img src=x onerror=alert(1)> third"
+   ]
+  },
+  {
+   "text": "<img src=x onerror=alert(1)> open \"><script>alert(1)</script>",
+   "kind": "open",
+   "maxLen": 500
+  }
+ ]
+}

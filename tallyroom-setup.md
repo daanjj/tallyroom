@@ -1,6 +1,6 @@
 # Tally Room, self-hosted version: setup guide
 
-A small static site (`index.html`, `config.js` and the folders `css` and `js`) plus a free Firebase database for the live votes. Participants need only the link or QR code, no login; presenters sign in. Unlimited participants (Firebase's free plan allows 100 simultaneous connections). Total setup time: about 20 minutes, once.
+A small static site (`index.html`, `config.js` and the folders `css`, `js` and `vendor`) plus a free Firebase database for the live votes. Participants need only the link or QR code, no login; presenters sign in. Unlimited participants (Firebase's free plan allows 100 simultaneous connections). Total setup time: about 20 minutes, once.
 
 ## 1. Create the free database (Firebase)
 
@@ -115,11 +115,11 @@ OneDrive and SharePoint cannot serve an HTML page as a website, so use one of th
 
 **Option A: GitHub Pages**
 1. Create a free account at https://github.com, then a new **public** repository (e.g. `tallyroom`).
-2. Upload `index.html`, `config.js` and the folders `css` and `js`, keeping the folder structure.
+2. Upload `index.html`, `config.js` and the folders `css`, `js` and `vendor`, keeping the folder structure.
 3. Repository **Settings → Pages → Source: Deploy from a branch → main → Save**. After a minute your page is live at `https://<yourname>.github.io/tallyroom/`.
 
 **Option B: Netlify Drop**
-1. Go to https://app.netlify.com/drop, create a free account, and drag the folder with `index.html`, `config.js`, `css` and `js` onto the page.
+1. Go to https://app.netlify.com/drop, create a free account, and drag the folder with `index.html`, `config.js`, `css`, `js` and `vendor` onto the page.
 2. You get a link like `https://random-name.netlify.app`. You can rename it under Site settings.
 
 To change questions or create sets later you do not need to re-upload: that happens inside the tool (they are stored in the database).
@@ -153,7 +153,8 @@ Firebase Spark plan: free, no credit card, 1 GB storage and 100 simultaneous con
 
 ## Troubleshooting
 
-- Page shows "Connecting…" forever: `databaseURL` missing or wrong in `config.js`, or rules not published.
+- Page shows "Connecting…" forever: `databaseURL` missing or wrong in `config.js`, or rules not published. Also when the folder `vendor` was not uploaded, or on a network that blocks WebSockets (the page connects through WebSockets only; try mobile data).
+- The browser console shows "violates the following Content Security Policy directive": the page tried to load or connect to something the policy in `index.html` does not list. A database on another host than `*.firebasedatabase.app` or `*.firebaseio.com` has to be added to `connect-src` there.
 - "Could not connect. Check your connection and reload" on a phone: the **Anonymous** provider is off (step 1b), the phone blocks storage (some private modes), or there is no network.
 - Votes are refused ("Your answer could not be saved"): the rules are published but the Anonymous provider is off, or the page online is still the old version.
 - "This account is not a presenter": the UID of the account is not under `presenters` with the value `true` (step 1b.3), or the rules are not published yet.
