@@ -228,3 +228,20 @@ a{color:var(--accent-text)}
 .dl-num span{display:block;font-family:var(--body);font-weight:400;font-size:13px;color:var(--muted)}
 .dl-conf{margin-top:20px;font-weight:600;font-size:16px}
 @media (max-width:560px){.dl-row{grid-template-columns:1fr auto}.dl-track{grid-column:1/-1;grid-row:2}}
+
+/* named respondents and the consent workflow */
+.chip{display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);font-size:13px;font-weight:600;font-family:var(--display)}
+.chip.done{background:var(--accent);color:var(--accent-ink)}
+.waiting{margin-top:10px;font-size:14px}
+.waiting .people{margin-top:8px}
+.light{display:inline-flex;align-items:center;gap:7px;font-family:var(--display);font-weight:800;font-size:15px}
+.light::before{content:"";width:16px;height:16px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+.light.sm{margin-right:6px;vertical-align:-1px}.light.sm::before{width:10px;height:10px}
+.tl-table td .light{margin-bottom:6px}
+.edited{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent-text);font-family:var(--display);font-weight:700;font-size:12px;white-space:nowrap}
+.hist{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.hist-v{margin-top:10px;padding:12px 14px;border-radius:12px;background:var(--surface-2)}
+.hist-t{margin-top:4px;white-space:pre-wrap}
+.hist-v ul{margin:8px 0 0;padding-left:18px;display:grid;gap:4px}
+.modal .card.dlg.wide{width:min(760px,100%)}
+#dlgText{white-space:pre-wrap}

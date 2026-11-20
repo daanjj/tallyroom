@@ -46,7 +46,7 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 >
 > Differences from the specification below:
 > - **Category** was a label only until B1 was built (see Epic B).
-> - **Named respondents** is stored (`no` for new sets) but has no field in the dialogs yet (that is D1).
+> - **Named respondents** had no field in the dialogs until D1 was built (see Epic D).
 > - The accent palette is calculated in `js/core.js` (`themeVars`) instead of with CSS `color-mix` / `oklch(from …)`, so it can be tested and the contrast can be guaranteed. Text in the accent colour uses a separate variable `--accent-text`, so a light accent such as yellow stays readable.
 > - Migration takes the old poll id from `MIGRATE_POLL_ID` in `config.js` (now `workshop-4`), and the migrated set keeps that id instead of getting an 8-character one, so its data stays where it is.
 > - An expired set is read-only for the presenter in this sense: paging through results works on the presenter's screen only and is not sent to the room; starting, clearing, resetting and editing questions are refused until the set is extended.
@@ -323,6 +323,17 @@ All actions sit in the menu per set in the overview (A2). Settings are also reac
 
 ## Epic C: consent workflow
 
+> **Status: built on 20 Nov 2026**, tried in demo mode (`?demo=1`); not yet run against the live Firebase database.
+>
+> Differences from the specification below:
+> - **Re-vote in "answer all first" mode:** while a proposal is voted on again, both modes show that one proposal on every device, as in one-at-a-time mode. After Reveal the presenter is back on the result screen of that proposal.
+> - **Leaving a proposal** means Next question or Finish. Previous does not fix a light.
+> - **The Finish button** is the old "Show summary" button, renamed in consent sets. In a set with only traffic light questions in "answer all first" mode, "Start revealing results" goes straight to the closing overview and fixes all lights at that moment.
+> - **Clear answers and Reset** also set an edited proposal back to version 1 (with its last text), since its earlier versions are removed.
+> - **A duplicate** of a set starts without earlier versions.
+> - **Markdown export:** "Objections" and "Concerns" sections are left out when empty; a line "N without votes" is added to the result when a proposal got no votes; "All proposals" lists the proposals only, with their own numbers.
+> - **The participant summary screen** is unchanged; the closing overview is for the presenter.
+
 Applies only to sets of category `consent`, and within those to traffic light questions. Values as today: 1 = green (Consent), 2 = yellow (Zorg), 3 = red (Bezwaar).
 
 ### C1. Edit a question after red votes and vote again — L
@@ -466,6 +477,14 @@ Version 1:
 
 ## Epic D: named respondents
 
+> **Status: built on 20 Nov 2026**, tried in demo mode (`?demo=1`); not yet run against the live Firebase database.
+>
+> Differences from the specification below:
+> - **Who gives way on a clash** is decided by the moment the name was claimed (`nameAt` in the vote doc), not by the last activity, so the outcome does not flip while people keep voting.
+> - **Changing the setting from the overview or Settings** asks for confirmation when people have already answered. Switching to No removes the names from the stored answers at once.
+> - **Someone who answered before names were switched on** shows as "unnamed" until their device has a name.
+> - **The presenter's own "View as participant"** follows the same rules: it asks for a name or gets a random one.
+
 ### D1. Setting "named respondents" per set — M
 
 **Story.** As a presenter I want to choose per set whether participants are named, get a random name, or stay anonymous.
@@ -567,4 +586,4 @@ All three were done together with Epic A (20 Nov 2026):
 
 - `index.html` and the files it loads are the only source; the README no longer refers to `tallyroom.html`.
 - The single file is split into `config.js`, `css/styles.css`, `js/core.js` (pure logic), `js/backend.js` (data) and `js/app.js` (screens), still without a build step.
-- `tests/core.test.js` (run with `node --test`) covers `js/core.js`. The rules for later items are already in `core.js` with their tests, ready to be used: the status rule of C2 (`trafficStatus`), the revision filter of C1 (`answerIsCurrent`, `trafficCounts`) and the unique random names of D1 (`randomName`).
+- `tests/core.test.js` (run with `node --test`) covers `js/core.js`. The rules for C1, C2 and D1 were written with their tests before those items were built: the status rule of C2 (`trafficStatus`), the revision filter of C1 (`answerIsCurrent`, `trafficCounts`) and the unique random names of D1 (`randomName`).

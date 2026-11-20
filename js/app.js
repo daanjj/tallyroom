@@ -34,7 +34,11 @@ function rampColor(idx,n){ // idx 0..n-1 -> --r1..--r10 spread evenly
 function selInk(idx,n){ const step=1+Math.round(idx*(9/(n-1||1))); return step>=5 ? "var(--surface)" : "var(--ink)"; }
 function isKicked(){ return S.me.ackReset!=null && !!S.ses && (S.ses.resetAt||0) > S.me.ackReset; }
 function noteReset(s){ if(S.me.ackReset==null && s && s.phase) S.me.ackReset = s.resetAt||0; }
-function currentRoundVotes(){ return C.roundVotes(S.votes, S.ses?.round??1, Date.now(), S.me.isHost?S.me.id:null); }
+function currentRoundVotes(){ return C.roundVotes(S.votes, S.ses?.round??1, Date.now(), S.me.isHost?S.me.id:null, namedMode()); }
+/* in review mode the saved file decides, otherwise the set */
+function namedMode(){ return S.review ? (S.review.info.named||"no") : ((S.meta && S.meta.named)||"no"); }
+function catNow(){ return S.review ? (S.review.info.category||"generic") : ((S.meta && S.meta.category)||"generic"); }
+const nameLabel = v => v.name ? String(v.name) : "unnamed";
 function header(){ return S.review ? S.review.info.title : ((S.meta && (tx(S.meta.header)||tx(S.meta.name))) || "Tally Room"); }
 function expired(){ return !S.review && C.isExpired(S.meta, Date.now()); }
 function metaOf(id){ if(S.route==="set") return id===S.setId ? S.meta : null; return (S.sets && S.sets[id]) ? C.normMeta(S.sets[id]) : null; }
@@ -98,9 +102,9 @@ function chartHTML(qu, vals, opts={}){
 /* the result of one question, whatever its kind */
 function resultHTML(qu){ return isOpen(qu) ? openAnswersHTML(qu) : isDilemma(qu) ? dilemmaChartHTML(qu) : chartHTML(qu, answersFor(qu.id)); }
 function openAnswersHTML(qu){
-  const list=Object.values(currentRoundVotes()).filter(v=>validAns(v,qu)!=null).sort((a,b)=>(a.t||0)-(b.t||0)).map(v=>String(v.texts[qu.id]).trim());
+  const list=Object.values(currentRoundVotes()).filter(v=>validAns(v,qu)!=null).sort((a,b)=>(a.t||0)-(b.t||0)).map(v=>({text:String(v.texts[qu.id]).trim(), ...(C.isNamed(namedMode())?{name:nameLabel(v)}:{})}));
   return `<div class="chart-head"><div class="hero"><span class="num">${list.length}</span><span class="den">${list.length===1?"answer":"answers"}</span></div></div>
-  ${list.length ? `<ul class="open-list">${list.map(t=>`<li>${esc(t)}</li>`).join("")}</ul>` : `<div class="empty">No answers yet.</div>`}`;
+  ${list.length ? `<ul class="open-list">${list.map(cmLi).join("")}</ul>` : `<div class="empty">No answers yet.</div>`}`;
 }
 function dilemmaChartHTML(qu){
   const ds=C.dilemmaStats(currentRoundVotes(),qu), cf=qu.conf||C.DEFAULT_CONF, n=ds.n, cpts=cf.max-cf.min+1;
@@ -154,7 +158,9 @@ function fileBase(meta){ return "tallyroom-"+C.slug(meta?tx(meta.name):"results"
 function saveResults(payload, meta, kind){ const base=`${fileBase(meta)}-${C.stamp(Date.now())}`;
   if(kind==="csv") download(base+".csv", C.resultsCSV(payload), "text/csv;charset=utf-8");
   else download(base+".json", JSON.stringify(payload,null,2), "application/json"); }
-function currentPayload(){ return C.resultsPayload({setId:S.setId, meta:S.meta, title:header(), cfg:S.cfg, ses:S.ses, votes:S.votes, now:Date.now()}); }
+function currentPayload(){ return C.resultsPayload({setId:S.setId, meta:S.meta, title:header(), named:namedMode(), category:catNow(), cfg:S.cfg, ses:S.ses, votes:S.votes, now:Date.now()}); }
+function exportMD(){ download(`${fileBase(S.meta)}-${C.stamp(Date.now())}.md`, C.consentMarkdown(currentPayload()), "text/markdown;charset=utf-8"); }
+function mdBtn(){ return (catNow()==="consent" && S.ses.outcome && Object.keys(S.ses.outcome).length) ? `<button class="btn ghost" data-act="expMD">Export as Markdown</button>` : ""; }
 function exportJSON(){ saveResults(currentPayload(), S.meta, "json"); }
 function exportCSV(){ saveResults(currentPayload(), S.meta, "csv"); }
 function exportBtns(){ return Object.values(currentRoundVotes()).some(hasAnswers)
@@ -177,13 +183,13 @@ function importResults(text, fname){
     qs.forEach(qu=>{ const v=r && r.answers ? r.answers[qu.id] : null; if(Number.isFinite(v)) a[qu.id]=v; });
     const tx={}; qs.forEach(qu=>{ const t=r&&r.texts?r.texts[qu.id]:null; if(typeof t==="string"&&t.trim()) tx[qu.id]=t; });
     const cf={}; qs.forEach(qu=>{ const c=r&&r.confidence?r.confidence[qu.id]:null; if(Number.isFinite(c)) cf[qu.id]=c; });
-    if(Object.keys(a).length) votes[String((r&&r.respondent)||("R"+(i+1)))]={round:1, answers:a, texts:tx, conf:cf, t:Date.parse((r&&r.at)||"")||Date.now()}; });
+    if(Object.keys(a).length) votes[String((r&&r.respondent)||("R"+(i+1)))]={round:1, answers:a, texts:tx, conf:cf, revs:Object.fromEntries(qs.filter(qu=>isTraffic(qu)&&qu.rev>1&&a[qu.id]!=null).map(qu=>[qu.id,qu.rev])), ...(C.isNamed(p.named)&&r&&r.respondent?{name:String(r.respondent)}:{}), t:Date.parse((r&&r.at)||"")||Date.now()}; });
   if(!Object.keys(votes).length && !confirm("That file has questions but no answers. Open it anyway?")) return;
   S.review={ live:{cfg:S.cfg, ses:S.ses, votes:S.votes},
-    info:{ title:String(p.title||"Saved results"), n:Object.keys(votes).length, file:String(fname||""),
+    info:{ title:String(p.title||"Saved results"), n:Object.keys(votes).length, file:String(fname||""), named:C.isNamed(p.named)?p.named:"no", category:(p.set&&p.set.category)||"generic",
            exportedAt:String(p.exportedAt||"").slice(0,16).replace("T"," ") } };
   S.cfg={ tlYellow:p.followUps&&p.followUps.yellow||"", tlRed:p.followUps&&p.followUps.red||"", mode:p.mode==="batch"?"batch":"live", questions:qs };
-  S.ses={ phase:"summary", current:0, revealed:qs.map(q=>q.id), round:1, showLive:true, resetAt:(S.review.live.ses&&S.review.live.ses.resetAt)||0 };
+  S.ses={ phase:"summary", current:0, revealed:qs.map(q=>q.id), round:1, showLive:true, outcome:C.reviveOutcome({...p, questions:p.questions.map((q,i)=>({...q, id:qs[i].id}))}), resetAt:(S.review.live.ses&&S.review.live.ses.resetAt)||0 };
   S.votes=votes; S.ui.view=null; S.ui.configOpen=false; render();
 }
 function reviewBanner(){ if(!S.review) return "";
@@ -209,7 +215,7 @@ function render(){
     html=notice("This question set does not exist (any more)", "Ask the presenter for a new link or QR code."+(S.me.isHost?` <a href="${esc(urlFor())}">All question sets</a>`:"")); }
   else if(S.meta===undefined || !S.cfg || !S.ses){ html=notice("", "Connecting…", true); }
   else { applyTheme(S.meta.accent); document.title=header(); host = S.me.isHost && S.ui.view!=="participant"; }
-  const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in"))) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
+  const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.id==="nameIn")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
   const mc=document.querySelector("#modal .card"), mTop=mc?mc.scrollTop:0, wTop=window.scrollY;
   S.rendering=true; try{ app.innerHTML = html!=null ? html : (host ? hostHTML() : (expired() ? expiredHTML() : participantHTML())); } finally { S.rendering=false; }
   if(keep){ const el=document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.a,keep.b); }catch(e){} } }
@@ -245,33 +251,35 @@ function hostHTML(){
     main=`<div class="card" style="padding:28px"><div class="eyebrow">${Q.length?"Ready to start":"No questions yet"} · ${esc(cap(S.meta.category))}</div><h1 style="font-size:clamp(26px,4vw,40px);margin-top:8px">${esc(header())}</h1>
       <p class="meta" style="margin:10px 0 22px">${Q.length} ${Q.length===1?"question":"questions"} · ${joined} ${joined===1?"person has":"people have"} joined. ${Q.length?"Share the QR code or link on the right.":"Add questions before you start."}</p>
       <div class="controls"><div class="seg" role="group" aria-label="Mode"><button data-act="mode" data-v="live" class="${cfg.mode==="live"?"on":""}">One question at a time</button><button data-act="mode" data-v="batch" class="${cfg.mode==="batch"?"on":""}">Answer all first, then reveal</button></div></div>
-      <div class="controls" style="margin-top:22px">${Q.length?`<button class="btn primary" data-act="start">${cfg.mode==="live"?"Start with question 1":"Open all questions"}</button>`:`<button class="btn primary" data-act="config">Add questions</button>`}${Object.keys(S.votes).length&&!expired()?`<button class="btn ghost" data-act="reset">Clear previous answers</button>`:""}${exportBtns()}<button class="btn ghost" data-act="impPick">Open saved results</button><input type="file" id="impFile" accept=".json,application/json" style="display:none"><span class="spacer"></span>${expired()?"":`<button class="btn danger" data-act="hardReset">Reset session</button>`}</div></div>`;
-  } else if(ph==="voting" && cfg.mode==="live"){
-    const qu=Q[ses.current]; const vals=answersFor(qu.id); const revealed=ses.revealed.includes(qu.id);
-    main=`<div class="card" style="padding:26px 26px 20px"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(tx(qu.text))}</div>
-      <div class="progress" style="margin:20px 0 6px"><div class="bar"><i style="width:${joined?Math.round(100*vals.length/joined):0}%"></i></div><b>${vals.length} / ${joined} answered</b></div></div>
+      <div class="controls" style="margin-top:22px">${Q.length?`<button class="btn primary" data-act="start">${cfg.mode==="live"?"Start with question 1":"Open all questions"}</button>`:`<button class="btn primary" data-act="config">Add questions</button>`}${Object.keys(S.votes).length&&!expired()?`<button class="btn ghost" data-act="reset">Clear previous answers</button>`:""}${exportBtns()}${mdBtn()}<button class="btn ghost" data-act="impPick">Open saved results</button><input type="file" id="impFile" accept=".json,application/json" style="display:none"><span class="spacer"></span>${expired()?"":`<button class="btn danger" data-act="hardReset">Reset session</button>`}</div></div>`;
+  } else if(ph==="voting" && (cfg.mode==="live" || ses.revote)){
+    const qu=Q[ses.current]; const vals=answersFor(qu.id); const revealed=ses.revealed.includes(qu.id), revoteOnly=!!ses.revote && cfg.mode==="batch";
+    main=`<div class="card" style="padding:26px 26px 20px">${qnumHTML(ses.current,qu)}<div class="qtext">${esc(tx(qu.text))}</div>
+      <div class="progress" style="margin:20px 0 6px"><div class="bar"><i style="width:${joined?Math.round(100*vals.length/joined):0}%"></i></div><b>${vals.length} / ${joined} answered</b></div>${waitingHTML([qu])}</div>
       <div class="card chart">${revealed||ses.showLive ? resultHTML(qu) : `<div class="hidden-note"><div class="pulse"></div><div>Answers are hidden until you reveal them. <span class="meta">${vals.length} in so far.</span></div></div>`}</div>
       ${isTraffic(qu)?trafficTable(Q,qu.id,false):""}${isTraffic(qu)&&(revealed||ses.showLive)?commentsHTML(qu):""}
-      <div class="controls"><button class="btn" data-act="prev" ${ses.current===0?"disabled":""}>← Previous</button>
-        ${revealed?"":`<button class="btn primary" data-act="reveal">Reveal results</button>`}
-        ${ses.current<Q.length-1?`<button class="btn ${revealed?"primary":""}" data-act="next">Next question →</button>`:`<button class="btn ${revealed?"primary":""}" data-act="summary">Show summary</button>`}
+      <div class="controls">${revoteOnly?"":`<button class="btn" data-act="prev" ${ses.current===0?"disabled":""}>← Previous</button>`}
+        ${revealed?"":`<button class="btn primary" data-act="reveal">Reveal results</button>`}${editBtn(qu,revealed)}
+        ${revoteOnly?`<span class="meta">Everyone is voting again on this proposal. Reveal to return to the results.</span>`:(ses.current<Q.length-1?`<button class="btn ${revealed?"primary":""}" data-act="next">Next question →</button>`:`<button class="btn ${revealed?"primary":""}" data-act="summary">${catNow()==="consent"?"Finish":"Show summary"}</button>`)}
         <span class="spacer"></span><label class="meta" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="showLive" data-act="showLive" ${ses.showLive?"checked":""}> show answers as they come in</label></div>`;
   } else if(ph==="voting" && cfg.mode==="batch"){
     const done = Object.values(currentRoundVotes()).filter(v=>Q.every(qu=>validAns(v,qu)!=null)).length;
     const total=Q.reduce((n,qu)=>n+answersFor(qu.id).length,0), expected=joined*Q.length;
     main=`<div class="card" style="padding:28px"><div class="eyebrow">Collecting answers</div><h2 style="font-size:28px;margin-top:8px">Everyone answers all ${Q.length} questions on their own device</h2>
       <div class="progress" style="margin:22px 0 8px"><div class="bar"><i style="width:${expected?Math.min(100,Math.round(100*total/expected)):0}%"></i></div><b>${total} / ${expected} answers</b></div>
-      <div class="progress" style="margin:8px 0 8px"><div class="bar"><i style="width:${joined?Math.round(100*done/joined):0}%"></i></div><b>${done} / ${joined} people finished</b></div>
+      <div class="progress" style="margin:8px 0 8px"><div class="bar"><i style="width:${joined?Math.round(100*done/joined):0}%"></i></div><b>${done} / ${joined} people finished</b></div>${waitingHTML(Q)}
       <p class="meta" style="margin:4px 0 0">${Q.length} questions × ${joined} ${joined===1?"person":"people"} = ${expected} answers expected.</p>
       <p class="meta">Results stay hidden until you start revealing them, one question at a time.</p>
       <div class="controls" style="margin-top:18px"><button class="btn primary" data-act="startReveal">Start revealing results</button><button class="btn ghost" data-act="lobby">Back to lobby</button></div></div>`;
   } else if(ph==="results"){
     const qu=Q[ses.current]; const vals=answersFor(qu.id);
-    main=`<div class="card" style="padding:26px 26px 20px"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(tx(qu.text))}</div></div>
+    main=`<div class="card" style="padding:26px 26px 20px">${qnumHTML(ses.current,qu)}<div class="qtext">${esc(tx(qu.text))}</div></div>
       <div class="card chart">${resultHTML(qu)}</div>
       ${isTraffic(qu)?trafficTable(Q,qu.id,true)+commentsHTML(qu):""}
       <div class="controls"><button class="btn" data-act="prev" ${ses.current===0?"disabled":""}>← Previous</button>
-        ${ses.current<Q.length-1?`<button class="btn primary" data-act="next">Next question →</button>`:`<button class="btn primary" data-act="summary">Show summary</button>`}</div>`;
+        ${editBtn(qu,true)}${ses.current<Q.length-1?`<button class="btn primary" data-act="next">Next question →</button>`:`<button class="btn primary" data-act="summary">${catNow()==="consent"?"Finish":"Show summary"}</button>`}</div>`;
+  } else if(ph==="summary" && catNow()==="consent"){
+    main=closingHTML();
   } else if(ph==="summary"){
     const rows = Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)}));
     const sorted=[...rows].filter(r=>!isTraffic(r.qu)).sort((a,b)=>sumScore(b)-sumScore(a));
@@ -284,10 +292,46 @@ function hostHTML(){
   }
   return `<div class="wrap">${topbar(controls)}${reviewBanner()}${expiredBanner()}${S.ui.readonly?`<div class="banner" style="margin-bottom:12px">You can see this session but this account is not allowed to change it.</div>`:""}<div class="stage two"><div class="stage">${main}</div>${side}</div></div>`;
 }
+function qnumHTML(i, qu){ return `<div class="qnum">Question ${i+1} of ${S.cfg.questions.length}${(qu.rev||1)>1?` · version ${qu.rev}`:""}</div>`; }
+/* named sets: who still has to answer, behind a click so it is not on the projector by default */
+function waitingHTML(qs){ if(!C.isNamed(namedMode())) return "";
+  const w=Object.values(currentRoundVotes()).filter(v=>!qs.every(qu=>validAns(v,qu)!=null)).map(nameLabel); if(!w.length) return "";
+  return `<details class="waiting" id="waitBox" ${S.ui.waitOpen?"open":""}><summary>Waiting for ${w.length}</summary><div class="people">${w.map(n=>`<span class="chip">${esc(n)}</span>`).join("")}</div></details>`; }
+/* consent sets: a revealed proposal with at least one red vote can be rewritten and voted on again */
+function editBtn(qu, revealed){ if(!revealed || !isTraffic(qu) || catNow()!=="consent" || S.review || expired()) return "";
+  return C.trafficCounts(currentRoundVotes(),qu,qu.rev||1).r>0 ? `<button class="btn" data-act="qEdit" data-q="${qu.id}">Edit</button>` : ""; }
+const cmLi = c => `<li>${c.name?`<b>${esc(c.name)}</b> · `:""}${esc(c.text)}</li>`;
+const LIGHTS={green:[TL_COLORS[0],"Green"], yellow:[TL_COLORS[1],"Yellow"], red:[TL_COLORS[2],"Red"], none:["var(--line-2)","No votes"]};
+function lightHTML(status){ const m=LIGHTS[status]||LIGHTS.none; return `<span class="light" style="--c:${m[0]}">${m[1]}</span>`; }
+function countsHTML(c){ return `<div class="tl-cnt">${["g","y","r"].map((k,i)=>`<span style="--c:${TL_COLORS[i]}">${c[k]||0}</span>`).join("")}</div>`; }
+/* consent sets: the closing overview replaces the summary (backlog C3) */
+function closingHTML(){
+  const rows=C.consentRows(S.cfg,S.ses,currentRoundVotes(),namedMode()), tot=C.consentTotals(rows);
+  const open=[...rows.filter(r=>r.status==="red"), ...rows.filter(r=>r.status==="yellow")], tab=S.ui.closeTab==="details"?"details":"overview";
+  const head=`<div class="card" style="padding:22px 26px"><div class="eyebrow">Outcome</div><h2 style="font-size:28px;margin-top:6px">${tot.green} green · ${tot.yellow} yellow · ${tot.red} red${tot.none?` · ${tot.none} without votes`:""}</h2>
+    <div class="controls" style="margin-top:14px"><div class="seg" role="group" aria-label="View"><button data-act="closeTab" data-v="overview" class="${tab==="overview"?"on":""}">Overview</button><button data-act="closeTab" data-v="details" class="${tab==="details"?"on":""}">Details (${open.length})</button></div>
+      <span class="spacer"></span><button class="btn" data-act="expMD">Export as Markdown</button>${exportBtns()}</div></div>`;
+  let body;
+  if(tab==="overview"){
+    body=`<div class="card" style="padding:18px 20px"><table class="tl-table"><thead><tr><th>#</th><th>Proposal</th><th>Status</th></tr></thead><tbody>${rows.map(r=>{ const qu=S.cfg.questions[r.n-1];
+      const cell = r.kind==="traffic" ? `${lightHTML(r.status)}${countsHTML(r.counts)}` : `<span class="meta">${(()=>{ const st=stats(answersFor(qu.id),qu.min,qu.max); return `${st.n} ${st.n===1?"answer":"answers"} · ${sumNote({qu,st})}`; })()}</span>`;
+      return `<tr class="pick" data-act="gotoResults" data-v="${r.n-1}" title="Open this question"><td class="n">${r.n}</td><td>${esc(tx(r.text))}${r.edited?` <span class="edited">edited · version ${r.rev}</span>`:""}</td><td class="r">${cell}</td></tr>`; }).join("")}</tbody></table><div class="tl-pager" hidden></div></div>
+      <div class="meta" style="margin:-6px 4px 0">Click a row to open that question.</div>`;
+  } else if(!open.length){
+    body=`<div class="card big-wait"><h2 style="font-size:24px">No concerns or objections left.</h2></div>`;
+  } else {
+    body=open.map(r=>{ const red=r.comments.filter(c=>c.v===3), yel=r.comments.filter(c=>c.v===2);
+      const blk=(v,list)=>list.length?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(tlPrompt(v))} (${list.length})</h3><ul>${list.map(cmLi).join("")}</ul></div>`:"";
+      const hist=r.history.length?`<details class="hist"><summary>Earlier versions (${r.history.length})</summary>${r.history.map(h=>`<div class="hist-v"><div class="meta">Version ${h.rev} · ${h.counts.g} green, ${h.counts.y} yellow, ${h.counts.r} red</div><div class="hist-t">${esc(tx(h.text))}</div>${h.comments.length?`<ul>${h.comments.map(c=>`<li><span class="light sm" style="--c:${TL_COLORS[c.v-1]}"></span>${c.name?`<b>${esc(c.name)}</b> · `:""}${esc(c.text)}</li>`).join("")}</ul>`:""}</div>`).join("")}</details>`:"";
+      return `<div class="card" style="padding:22px 26px"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div class="qnum" style="flex:1">Proposal ${r.n}${r.edited?` · version ${r.rev}`:""}</div>${lightHTML(r.status)}${countsHTML(r.counts)}</div>
+        <div class="qtext">${esc(tx(r.text))}</div><div class="tl-cm" style="padding:14px 0 0">${blk(3,red)}${blk(2,yel)}${red.length||yel.length?"":`<p class="meta">No comments on this version.</p>`}</div>${hist}</div>`; }).join("");
+  }
+  return `${head}${body}<div class="controls"><button class="btn" data-act="gotoResults" data-v="0">Back to question 1</button><button class="btn ghost" data-act="lobby">Back to lobby</button><span class="spacer"></span>${expired()||S.review?"":`<button class="btn danger" data-act="reset">Clear all answers</button>`}</div>`;
+}
 function sideHTML(){
   const url = joinUrl(S.setId, S.meta);
   const rv=currentRoundVotes(); const Q=S.cfg.questions;
-  const dots = Object.values(rv).map(v=>{ const k=Q.filter(q=>validAns(v,q)!=null).length; return `<i class="${k===Q.length?"done":(k?"on":"on")}" title="${k}/${Q.length}"></i>`; }).join("");
+  const dots = Object.values(rv).map(v=>{ const k=Q.filter(q=>validAns(v,q)!=null).length; return C.isNamed(namedMode()) ? `<span class="chip ${k===Q.length&&Q.length?"done":""}" title="${k}/${Q.length} answered">${esc(nameLabel(v))}</span>` : `<i class="${k===Q.length?"done":(k?"on":"on")}" title="${k}/${Q.length}"></i>`; }).join("");
   return `<aside class="card side"><div><div class="eyebrow">Join</div><p class="meta" style="margin:4px 0 10px">Scan or open the link. No login needed.</p><div class="qr" id="qr"></div><div class="link" style="margin-top:8px">${esc(url)}</div></div>
     <div><div class="eyebrow">In the room</div><p class="meta" style="margin:4px 0 8px">${Object.keys(rv).length} joined · round ${S.ses.round}</p><div class="people">${dots||'<span class="meta">Nobody yet</span>'}</div></div></aside>`;
 }
@@ -321,7 +365,11 @@ function afterHost(){
 
 /* ---- participant ---- */
 function myVotes(){ const v=S.votes[S.me.id]; /* Firebase drops empty objects, so a vote doc from the lobby comes back without answers/texts */
-  return (v && v.round===S.ses.round) ? {...v, answers:v.answers||{}, texts:v.texts||{}} : {round:S.ses.round, answers:{}, texts:{}}; }
+  if(!(v && v.round===S.ses.round)) return {round:S.ses.round, answers:{}, texts:{}};
+  const m={...v, answers:{...(v.answers||{})}, texts:{...(v.texts||{})}};
+  /* an answer on an earlier version of a proposal is gone: the choice and the follow-up start empty */
+  S.cfg.questions.forEach(qu=>{ if(isTraffic(qu) && !C.answerIsCurrent(v,qu.id,qu.rev)){ delete m.answers[qu.id]; delete m.texts[qu.id]; } });
+  return m; }
 function openDraft(qu){ const k=txKey(qu.id); return S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : String(myVotes().texts?.[qu.id]||""); }
 function openInputHTML(qu){ const val=openDraft(qu), saved=String(myVotes().texts?.[qu.id]||"").trim(), max=qu.maxLen||C.OPEN_MAX;
   return `<div class="tl-fu"><label for="op_${qu.id}">Your answer</label><textarea class="open-in" id="op_${qu.id}" data-q="${qu.id}" data-saved="${esc(saved)}" maxlength="${max}" rows="4" placeholder="Type your answer here">${esc(val)}</textarea>
@@ -344,13 +392,14 @@ function scaleHTML(qu, chosen){
   const pts=qu.max-qu.min+1; let b="";
   if(isOpt(qu)){
     for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${qu.id}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${qColor(qu,i,pts)};--sel-ink:${qInk(qu,i,pts)}" aria-pressed="${chosen===v}"><b>${v}</b><span>${esc(tx(qu.options[i]))}</span></button>`; }
-    return `<div class="scale opts" style="grid-template-columns:1fr">${b}</div>${isTraffic(qu)?followUpHTML(qu,chosen):""}`;
+    const again = (isTraffic(qu) && (qu.rev||1)>1 && !Number.isFinite(chosen)) ? `<div class="banner" style="margin-top:14px">The proposal was changed. Please vote again.</div>` : "";
+    return `${again}<div class="scale opts" style="grid-template-columns:1fr">${b}</div>${isTraffic(qu)?followUpHTML(qu,chosen):""}`;
   }
   for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${qu.id}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${rampColor(i,pts)};--sel-ink:${selInk(i,pts)}" aria-pressed="${chosen===v}">${v}</button>`; }
   const cols = pts>6 ? Math.ceil(pts/2) : pts;
   return `<div class="scale" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${b}</div><div class="scale-ends"><span>${esc(tx(qu.lo))}</span><span>${esc(tx(qu.hi))}</span></div>`;
 }
-function txKey(qid){ return (S.ses.round||1)+":"+qid; }
+function txKey(qid){ const qu=S.cfg && S.cfg.questions.find(x=>x.id===qid); return (S.ses.round||1)+":"+qid+(qu && qu.rev>1 ? ":"+qu.rev : ""); } // drafts belong to one round and one version
 function myText(qu){ const k=txKey(qu.id); return String(S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : (myVotes().texts?.[qu.id]||"")).trim(); }
 function needsText(qu,chosen){ return isTraffic(qu) && (chosen===2||chosen===3) && !myText(qu); }
 function followUpHTML(qu, chosen){
@@ -364,12 +413,26 @@ function saveText(qid){ const val=(S.ui.tx||{})[txKey(qid)]; if(val==null || S.r
   S.votes[S.me.id]=next; write(()=>S.backend.setVotes(S.me.id,next)); }
 function commentsHTML(qu, always){
   if(!isTraffic(qu)) return "";
-  const rv=Object.values(currentRoundVotes()).sort((a,b)=>(a.t||0)-(b.t||0));
-  const by=v=>rv.filter(x=>x.answers?.[qu.id]===v && String(x.texts?.[qu.id]||"").trim()).map(x=>String(x.texts[qu.id]).trim());
-  const y=by(2), r=by(3); if(!always && !y.length && !r.length) return "";
-  const blk=(v,list,title)=>list.length?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(title)} (${list.length})</h3><ul>${list.map(t=>`<li>${esc(t)}</li>`).join("")}</ul></div>`:(always?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(title)} (0)</h3><p class="meta">No answers.</p></div>`:"");
+  const cm=C.trafficComments(currentRoundVotes(),qu,namedMode()), y=cm.filter(c=>c.v===2), r=cm.filter(c=>c.v===3);
+  if(!always && !cm.length) return "";
+  const blk=(v,list,title)=>list.length?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(title)} (${list.length})</h3><ul>${list.map(cmLi).join("")}</ul></div>`:(always?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(title)} (0)</h3><p class="meta">No answers.</p></div>`:"");
   return `<div class="card tl-cm">${blk(2,y,tlPrompt(2))}${blk(3,r,tlPrompt(3))}</div>`;
 }
+/* named sets: "yes" asks for a name before anything else, "random" hands one out (see ensureName in bootSet) */
+function needName(){ const nm=namedMode(); if(S.review || !C.isNamed(nm)) return false; return !S.me.name || (nm==="yes" && S.ui.nameEdit); }
+function nameFormHTML(){ const nm=namedMode();
+  if(nm==="random") return `<div class="card big-wait"><div class="pulse"></div><p class="meta">Getting your name…</p></div>`;
+  const val = S.ui.nameDraft!=null ? S.ui.nameDraft : (S.me.name||"");
+  return `<div class="card p-q"><h2 style="font-size:22px">${S.me.name?"Change your name":"What is your name?"}</h2>
+    <div class="field" style="margin-top:14px"><label for="nameIn">Your name</label><input type="text" id="nameIn" maxlength="30" autocomplete="name" value="${esc(val)}">
+      ${S.ui.nameErr?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(S.ui.nameErr)}</small>`:""}<small class="meta">Your name is shown to the presenter with your answers.</small></div>
+    <div class="controls" style="margin-top:14px"><button class="btn primary" data-act="nameSave">${S.me.name?"Save":"Join"}</button>${S.me.name?`<button class="btn ghost" data-act="nameCancel">Cancel</button>`:""}</div></div>`; }
+function nameTag(){ const nm=namedMode(); if(S.review || !C.isNamed(nm) || !S.me.name) return "";
+  return `<span class="pill" title="This name is shown with your answers">You are <b>${esc(S.me.name)}</b></span>${nm==="yes"&&!S.ui.nameEdit?`<button class="btn sm ghost" data-act="nameEdit">Change name</button>`:""}`; }
+function setName(n){ S.me.name=n; S.me.nameAt=Date.now(); S.ui.nameEdit=false; S.ui.nameDraft=null; S.ui.nameErr="";
+  try{ if(n) localStorage.setItem("tr_name_"+S.setId, JSON.stringify({n, at:S.me.nameAt})); else localStorage.removeItem("tr_name_"+S.setId); }catch(e){} }
+/* every vote doc this device writes carries its name in a named set, and never in an anonymous one */
+function stampDoc(doc){ if(C.isNamed(S.meta && S.meta.named) && S.me.name){ doc.name=S.me.name; doc.nameAt=S.me.nameAt||0; } else { delete doc.name; delete doc.nameAt; } return doc; }
 function participantHTML(){
   const ses=S.ses, cfg=S.cfg, Q=cfg.questions, ph=Q.length?ses.phase:"lobby", mine=myVotes();
   if(ph!=="voting") S.ui.pq=null;
@@ -379,11 +442,13 @@ function participantHTML(){
   if(isKicked()){
     body=`<div class="card big-wait"><div class="pulse"></div><h2 style="font-size:24px">Session was reset</h2><p class="meta">The presenter cleared the room and started over. Tap to join again.</p>
       <div class="controls" style="margin-top:16px;justify-content:center"><button class="btn primary" data-act="rejoin">Join again</button></div></div>`;
+  } else if(needName()){
+    body=nameFormHTML();
   } else if(ph==="lobby"){
-    body=`<div class="card big-wait"><div class="pulse"></div><h2 style="font-size:24px">You're in</h2><p class="meta">Waiting for the presenter to start.${Q.length?` ${Q.length} ${Q.length===1?"question":"questions"} coming up.`:""}</p></div>`;
-  } else if(ph==="voting" && cfg.mode==="live"){
+    body=`<div class="card big-wait"><div class="pulse"></div><h2 style="font-size:24px">You're in</h2>${C.isNamed(namedMode())&&S.me.name?`<p style="margin:0">You are <b>${esc(S.me.name)}</b>.${namedMode()==="random"?` <span class="meta">This name is shown with your answers instead of your own.</span>`:""}</p>`:""}<p class="meta">Waiting for the presenter to start.${Q.length?` ${Q.length} ${Q.length===1?"question":"questions"} coming up.`:""}</p></div>`;
+  } else if(ph==="voting" && (cfg.mode==="live" || ses.revote)){
     const qu=Q[ses.current]; const chosen=mine.answers[qu.id]; const revealed=ses.revealed.includes(qu.id);
-    body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(tx(qu.text))}</div>${revealed?"":scaleHTML(qu,chosen)}</div>
+    body=`<div class="card p-q">${qnumHTML(ses.current,qu)}<div class="qtext">${esc(tx(qu.text))}</div>${revealed?"":scaleHTML(qu,chosen)}</div>
       ${revealed ? `<div class="card chart">${resultHTML(qu)}</div>` : (needsText(qu,chosen)?`<div class="toast wait">Required: answer the follow-up question above. Your vote counts once you have.</div>`:validAns(mine,qu)!=null?`<div class="toast">✓ Answer recorded${isOpen(qu)?"":`: ${esc(optLabel(qu,chosen))}`}. You can change it until results are revealed.</div>`:`<div class="toast wait">${answerHint(qu)}</div>`)}`;
   } else if(ph==="voting" && cfg.mode==="batch"){
     /* small phones: one question per screen, at the participant's own pace */
@@ -396,12 +461,12 @@ function participantHTML(){
       ${done===Q.length?`<div class="toast">✓ All ${Q.length} answered. Your answers are saved; you can still go back and change them until the reveal starts.</div>`:(needsText(qu,mine.answers[qu.id])?`<div class="toast wait">Required: answer the follow-up question above. Your vote counts once you have.</div>`:`<div class="toast wait">${Q.length-done} to go. Answers save automatically.</div>`)}`;
   } else if(ph==="results"){
     const qu=Q[ses.current];
-    body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(tx(qu.text))}</div></div><div class="card chart">${resultHTML(qu)}</div>${!isOpen(qu)&&validAns(mine,qu)!=null?`<div class="toast wait">You answered ${esc(optLabel(qu,mine.answers[qu.id]))}${isDilemma(qu)?`, confidence ${mine.conf[qu.id]}`:""}.</div>`:""}`;
+    body=`<div class="card p-q">${qnumHTML(ses.current,qu)}<div class="qtext">${esc(tx(qu.text))}</div></div><div class="card chart">${resultHTML(qu)}</div>${!isOpen(qu)&&validAns(mine,qu)!=null?`<div class="toast wait">You answered ${esc(optLabel(qu,mine.answers[qu.id]))}${isDilemma(qu)?`, confidence ${mine.conf[qu.id]}`:""}.</div>`:""}`;
   } else if(ph==="summary"){
     const rows=Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)})).sort((a,b)=>sumScore(b)-sumScore(a));
     body=`<div class="card" style="padding:20px"><div class="eyebrow">Summary</div>${rows.map(r=>`<div class="sum-row"><div class="t">${esc(tx(r.qu.text))}<small>Q${r.i+1} · ${r.st.n} answers${isOpt(r.qu)&&r.st.n?` · most chosen: ${esc(optLabel(r.qu,r.st.mode))}`:""}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${sumMetric(r)}</div></div>`).join("")}</div>`;
   }
-  return `<div class="p-wrap"><div class="topbar">${brand()}${connPill()}${fontCtl()}${back}</div>${ro}${body}</div>`;
+  return `<div class="p-wrap"><div class="topbar">${brand()}${connPill()}${nameTag()}${fontCtl()}${back}</div>${ro}${body}</div>`;
 }
 
 /* ---- config ---- */
@@ -497,11 +562,11 @@ function toLocalInput(ts){ const d=new Date(ts), p=n=>String(n).padStart(2,"0");
 function closeDlg(){ S.ui.dlg=null; render(); }
 function openSetDlg(id, focus){ const m=id?metaOf(id):null; if(id && !m) return;
   S.ui.dlg={ type:"set", id:id||null, focus:focus||(id?null:"dlgName"), title:id?"Settings of this question set":"New question set", imported:null,
-    f: m ? {...m} : {name:"", header:"", accent:C.DEFAULT_ACCENT, category:"generic", expiresAt:C.extendedExpiry(Date.now()), joinUrl:""} };
+    f: m ? {...m} : {name:"", header:"", accent:C.DEFAULT_ACCENT, category:"generic", named:"no", expiresAt:C.extendedExpiry(Date.now()), joinUrl:""} };
   render(); }
 function dlgHTML(){ const d=S.ui.dlg; if(!d) return "";
-  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : "";
-  return `<div class="modal" id="dlg"><div class="card dlg" role="dialog" aria-modal="true" aria-label="${esc(d.title)}">
+  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : "";
+  return `<div class="modal" id="dlg"><div class="card dlg${d.type==="edit"?" wide":""}" role="dialog" aria-modal="true" aria-label="${esc(d.title)}">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:22px;flex:1">${esc(d.title)}</h2><button class="btn sm ghost" data-act="dlgClose">Close</button></div>${body}</div></div>`; }
 function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEFAULT_ACCENT;
   return `<div class="field"><label for="dlgName">Name (only you see this, in the overview)</label><input type="text" id="dlgName" maxlength="60" value="${esc(tx(f.name))}" placeholder="MT offsite, team B"></div>
@@ -510,6 +575,8 @@ function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEF
       <label class="sw-custom">Other <input type="color" id="dlgColor" value="${acc.toLowerCase()}" aria-label="Pick another accent colour"></label></div></div>
     <div class="field"><label for="dlgCat">Category</label><select id="dlgCat">${C.CATEGORIES.map(c=>`<option value="${c}" ${f.category===c?"selected":""}>${cap(c)}</option>`).join("")}</select>
       <div class="meta">Decides which question types the set offers. Generic: scale, multiple choice, open. Consent adds the traffic light, Dilemma adds the dilemma question (choice plus confidence).</div></div>
+    <div class="field"><label for="dlgNamed">Named respondents</label><select id="dlgNamed">${[["no","No: participants answer anonymously"],["yes","Yes: participants type their name"],["random","Random: each participant gets a name such as k12"]].map(([val,l])=>`<option value="${val}" ${(f.named||"no")===val?"selected":""}>${l}</option>`).join("")}</select>
+      <div class="meta">With Yes or Random the presenter sees the name with comments and open answers, and in the exports.</div></div>
     <div class="field"><label for="dlgExp">Expires on</label><input type="datetime-local" id="dlgExp" value="${Number.isFinite(f.expiresAt)?toLocalInput(f.expiresAt):toLocalInput(C.extendedExpiry(Date.now()))}">
       <div class="controls"><span class="meta">From now:</span>${[[1,"1 day"],[3,"3 days"],[7,"1 week"],[30,"1 month"]].map(([n,l])=>`<button type="button" class="btn sm" data-act="dlgExpQuick" data-v="${n}">${l}</button>`).join("")}</div>
       <div class="meta">After this moment participants can no longer answer. Nothing is deleted and you can extend at any time.</div></div>
@@ -519,18 +586,23 @@ function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEF
 async function saveSetDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id), now=Date.now();
   const name=g("dlgName").value.trim(); if(!name){ alert("Give the set a name."); g("dlgName").focus(); return; }
   const exp=g("dlgExp").value ? new Date(g("dlgExp").value).getTime() : NaN; if(!Number.isFinite(exp)){ alert("Choose a valid expiry date and time."); g("dlgExp").focus(); return; }
-  const fields={ name, header:g("dlgHeader").value.trim().slice(0,80), accent:C.normHex(g("dlgColor").value)||C.DEFAULT_ACCENT, category:g("dlgCat").value, expiresAt:exp };
+  const fields={ name, header:g("dlgHeader").value.trim().slice(0,80), accent:C.normHex(g("dlgColor").value)||C.DEFAULT_ACCENT, category:g("dlgCat").value, named:g("dlgNamed").value, expiresAt:exp };
   try{
     if(d.id && fields.category!==d.f.category){ // a set can only move to a category that offers all its question types
       const qs=(S.route==="set" && S.cfg && !S.review) ? S.cfg.questions : C.normConfig((await S.be.readPoll(d.id)).config).questions;
       const bl=C.categoryBlockers(fields.category, qs); if(bl.length){ alert(C.blockerMessage(fields.category, bl)); return; } }
+    if(d.id && fields.named!==(d.f.named||"no")){ // changing who is named while people are in the set
+      const poll=await S.be.readPoll(d.id), votes=poll.votes||{}, n=Object.values(votes).filter(C.hasAnswers).length;
+      if(n && !confirm(fields.named==="no" ? `${n} ${n===1?"person has":"people have"} answered. Their names are removed and no longer shown or exported. Continue?`
+                                           : `${n} ${n===1?"person has":"people have"} answered already. They get a name (or are asked for one) the next time their screen changes; until then they show as "unnamed". Continue?`)) return;
+      if(fields.named==="no" && Object.values(votes).some(v=>v && v.name)){ const clean={}; Object.entries(votes).forEach(([pid,v])=>{ if(!v) return; const c={...v}; delete c.name; delete c.nameAt; clean[pid]=c; }); await S.be.poll(d.id).setAllVotes(clean); } }
     if(d.id){ await S.be.patchMeta(d.id, {...fields, joinUrl:g("dlgJoin")?g("dlgJoin").value.trim():"", updatedAt:now}); closeDlg(); return; }
     const id=freshSetId(), imp=d.imported, cfg=C.emptyConfig();
     if(imp){ const f=C.filterForCategory(fields.category, imp.questions), msg=C.skippedMessage(fields.category, f.skipped);
       if(msg && !confirm(msg+"\n\nCreate the set without them?")) return;
       cfg.questions=f.kept; cfg.tlYellow=imp.tlYellow; cfg.tlRed=imp.tlRed; if(imp.set && imp.set.mode) cfg.mode=imp.set.mode; }
     await S.be.writePoll(id, {config:cfg, session:{...DEFAULT_SESSION}});
-    await S.be.setMeta(id, C.newMeta({...fields, named:imp&&imp.set?imp.set.named:"no"}, now));
+    await S.be.setMeta(id, C.newMeta(fields, now));
     location.href=urlFor({set:id, edit:true});
   }catch(e){ alert("Saving failed: "+(e&&e.message||e)); } }
 function readSetFile(file){ const r=new FileReader(); r.onerror=()=>alert("Could not read that file.");
@@ -541,6 +613,7 @@ function readSetFile(file){ const r=new FileReader(); r.onerror=()=>alert("Could
     if(s.header && s.header!==s.name) g("dlgHeader").value=String(s.header).slice(0,80);
     if(C.normHex(s.accent)){ g("dlgColor").value=C.normHex(s.accent).toLowerCase(); markSwatch(); }
     if(C.CATEGORIES.includes(s.category)) g("dlgCat").value=s.category;
+    if(C.NAMED.includes(s.named)) g("dlgNamed").value=s.named;
     const note=g("dlgFileNote"); if(note) note.textContent=`${imp.questions.length} ${imp.questions.length===1?"question":"questions"} from ${file.name} will be added.`; };
   r.readAsText(file); }
 function markSwatch(){ const c=document.getElementById("dlgColor"), v=c?C.normHex(c.value):null; document.querySelectorAll("#dlg .sw").forEach(b=>b.classList.toggle("on", b.dataset.v===v)); }
@@ -569,9 +642,33 @@ async function duplicateSet(id){ const meta=metaOf(id); if(!meta) return;
   }catch(e){ alert("Duplicating failed: "+(e&&e.message||e)); } }
 function extendSet(id){ const now=Date.now(); return S.be.patchMeta(id, {expiresAt:C.extendedExpiry(now), updatedAt:now}).catch(e=>alert("Extending failed: "+(e&&e.message||e))); }
 /* ============ actions ============ */
+/* consent sets: fix the light of the given proposals as the votes stand now (backlog C2).
+   onlyMissing = leave lights that are already fixed for the current version; `always` = one proposal to fix anyway */
+function outcomePatch(qs, onlyMissing, always){ if(catNow()!=="consent" || S.review) return {};
+  let o={...(S.ses.outcome||{})}; const rv=currentRoundVotes(), now=Date.now();
+  qs.forEach(qu=>{ if(!isTraffic(qu)) return; const cur=o[qu.id];
+    if(onlyMissing && qu!==always && cur && (cur.rev||1)===(qu.rev||1)) return; o=C.fixOutcome(o,qu,rv,now); });
+  return {outcome:o}; }
+/* clearing the answers also clears the earlier versions of edited proposals; the last text stays */
+function dropHistory(){ if(S.review || !S.cfg.questions.some(qu=>qu.history||qu.rev)) return; setConfig(C.clearHistory(S.cfg)); }
+function editDlgHTML(d){ const i=S.cfg.questions.findIndex(x=>x.id===d.qid), qu=S.cfg.questions[i]; if(!qu) return "";
+  const cm=C.trafficComments(currentRoundVotes(),qu,namedMode()), red=cm.filter(c=>c.v===3), yel=cm.filter(c=>c.v===2), rev=qu.rev||1;
+  const blk=(v,list)=>list.length?`<div><h3 style="--c:${TL_COLORS[v-1]}">${esc(tlPrompt(v))} (${list.length})</h3><ul>${list.map(cmLi).join("")}</ul></div>`:"";
+  return `<div class="field"><label for="dlgText">Proposal text${rev>1?` (now version ${rev})`:""}</label><textarea id="dlgText" rows="7" style="font-size:17px">${esc(tx(qu.text))}</textarea></div>
+    <div class="tl-cm" style="padding:0">${blk(3,red)}${blk(2,yel)}</div>
+    <div class="meta">Saving starts a new vote on this proposal: every participant gets the new text and votes again. The current text, votes and comments are kept as version ${rev}.</div>
+    <div class="controls"><button class="btn primary" data-act="dlgSave">Save and re-vote</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
+function saveEditDlg(){ const d=S.ui.dlg, i=S.cfg.questions.findIndex(x=>x.id===d.qid); if(i<0){ closeDlg(); return; }
+  const qu=S.cfg.questions[i], el=document.getElementById("dlgText"), text=el?el.value.trim():""; if(!text){ alert("The proposal needs a text."); return; }
+  const nq=C.editQuestion(qu, text, currentRoundVotes(), namedMode(), Date.now()), qs=S.cfg.questions.slice(); qs[i]=nq;
+  const outcome={...(S.ses.outcome||{})}; delete outcome[qu.id]; // the light of the old version no longer stands
+  S.ui.dlg=null; if(S.ui.tx) Object.keys(S.ui.tx).forEach(k=>{ if(k.indexOf(":"+qu.id)>0) delete S.ui.tx[k]; });
+  setConfig({...S.cfg, questions:qs});
+  setSession({phase:"voting", current:i, revealed:S.ses.revealed.filter(x=>x!==qu.id), revote:{qid:qu.id, rev:nq.rev}, outcome, showLive:false}); }
 let writeChain=Promise.resolve();
 function write(fn){ writeChain = writeChain.then(fn).catch(e=>{ console.warn("write failed",e); if(e&&e.code==="invalid_argument"){ S.ui.readonly=true; render(); } }); return writeChain; }
-function setSession(patch){ const next={...S.ses,...patch}; S.ses=next; render(); if(S.review || expired()) return Promise.resolve(); return write(()=>S.backend.setSession(next)); }
+function setSession(patch){ const next={...S.ses,...patch}; if(!("revote" in patch) && ("current" in patch || "phase" in patch)) next.revote=null; // moving on ends a re-vote
+  S.ses=next; render(); if(S.review || expired()) return Promise.resolve(); return write(()=>S.backend.setSession(next)); }
 function setConfig(next){ S.cfg=next; render(); if(S.review || expired()) return Promise.resolve(); return write(()=>S.backend.setConfig(next)); }
 
 app.addEventListener("click", e=>{
@@ -579,17 +676,17 @@ app.addEventListener("click", e=>{
   const act=b.dataset.act, v=b.dataset.v, id=b.dataset.id, ses=S.ses, Q=S.cfg?S.cfg.questions:[];
   const menu=b.closest("details.menu"); if(menu) menu.removeAttribute("open");
   /* an expired set is read-only: paging through results stays local, nothing that changes the room is allowed */
-  if(S.route==="set" && expired() && ["start","reset","hardReset","config","mode","reviewPublish","vote","openSubmit","dlSubmit","rejoin"].includes(act)){ alert("This question set has expired. Extend it first."); return; }
+  if(S.route==="set" && expired() && ["start","reset","hardReset","config","mode","reviewPublish","vote","openSubmit","dlSubmit","rejoin","qEdit","nameSave"].includes(act)){ alert("This question set has expired. Extend it first."); return; }
   if(S.review && ["reset","hardReset","vote","openSubmit","dlSubmit"].includes(act)){ alert("Not while you are reviewing saved results. Exit review first."); return; }
   switch(act){
     case "mode": setConfig({...S.cfg, mode:v}); break;
     case "start": setSession({phase:"voting", current:0, revealed:[], showLive:false}); break;
-    case "startReveal": S.ui.tlPage=0; S.ui.sumSel=null; if(Q.every(isTraffic)) setSession({phase:"summary", current:0, revealed:Q.map(q=>q.id)}); else setSession({phase:"results", current:0, revealed:Q.map(q=>q.id)}); break;
-    case "reveal": setSession({revealed:[...new Set([...ses.revealed, Q[ses.current].id])]}); break;
-    case "next": { const c=Math.min(Q.length-1, ses.current+1); setSession({current:c, phase: ses.phase==="results"?"results":"voting"}); break; }
+    case "startReveal": S.ui.tlPage=0; S.ui.sumSel=null; if(Q.every(isTraffic)) setSession({phase:"summary", current:0, revealed:Q.map(q=>q.id), ...outcomePatch(Q,true)}); else setSession({phase:"results", current:0, revealed:Q.map(q=>q.id)}); break;
+    case "reveal": setSession({revealed:[...new Set([...ses.revealed, Q[ses.current].id])], revote:null, ...(ses.revote && S.cfg.mode==="batch" ? {phase:"results"} : {})}); break; // a re-vote in "answer all first" mode returns to the results
+    case "next": { const c=Math.min(Q.length-1, ses.current+1); setSession({current:c, phase: ses.phase==="results"?"results":"voting", ...outcomePatch([Q[ses.current]])}); break; }
     case "prev": { const c=Math.max(0, ses.current-1); setSession({current:c}); break; }
     case "gotoResults": S.ui.tlPage=0; setSession({phase:"results", current:+v||0}); break;
-    case "summary": S.ui.sumSel=null; S.ui.tlPage=0; setSession({phase:"summary"}); break;
+    case "summary": S.ui.sumSel=null; S.ui.tlPage=0; S.ui.closeTab="overview"; setSession({phase:"summary", ...outcomePatch(Q,true,Q[ses.current])}); break;
     case "tlSel": S.ui.sumSel = (S.ui.sumSel===b.dataset.q) ? null : b.dataset.q; render(); document.getElementById("tl-detail")?.scrollIntoView({behavior:reduced?"auto":"smooth", block:"start"}); break;
     case "lobby": setSession({phase:"lobby", current:0}); break;
     case "showLive": setSession({showLive: b.checked}); break;
@@ -606,17 +703,18 @@ app.addEventListener("click", e=>{
     case "expCSV": exportCSV(); break;
     case "hardReset": if(confirm("Reset the session? All answers are cleared, the round counter goes back to 1 and every device has to tap to rejoin.")){
       S.votes={};
-      setSession({phase:"lobby", current:0, revealed:[], showLive:false, round:1, resetAt:Date.now()});
+      setSession({phase:"lobby", current:0, revealed:[], showLive:false, round:1, resetAt:Date.now(), outcome:null}); dropHistory();
       write(()=>S.backend.clearVotes());
       setTimeout(()=>write(()=>S.backend.clearVotes()), 2500); // sweep answers that were already in flight
     } break;
     case "rejoin": S.me.ackReset=(S.ses.resetAt||0); render(); if(S.heartbeat) S.heartbeat(); break;
-    case "reset": if(confirm("Clear all answers and start a new round?")){ const r=(ses.round||1)+1; setSession({phase:"lobby", current:0, revealed:[], round:r}); write(()=>S.backend.clearVotes()); } break;
-    case "asParticipant": S.ui.view="participant"; render(); break;
+    case "reset": if(confirm("Clear all answers and start a new round?")){ const r=(ses.round||1)+1; setSession({phase:"lobby", current:0, revealed:[], round:r, outcome:null}); dropHistory(); write(()=>S.backend.clearVotes()); } break;
+    case "asParticipant": S.ui.view="participant"; render(); if(S.heartbeat) S.heartbeat(); break;
     case "asHost": S.ui.view=null; render(); break;
     case "vote": {
       const qid=b.dataset.q, val=+b.dataset.v; const mine=myVotes(); const texts={...(mine.texts||{})}; if(mine.answers[qid]!==val){ delete texts[qid]; if(S.ui.tx) delete S.ui.tx[txKey(qid)]; }
       const next={...mine, round:S.ses.round, answers:{...mine.answers,[qid]:val}, texts, t:Date.now()};
+      const vq=Q.find(x=>x.id===qid); if(isTraffic(vq) && (vq.rev||1)>1) next.revs={...(mine.revs||{}),[qid]:vq.rev}; // which version this answer is for
       S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next));
       if(mine.answers[qid]!==val && isTraffic(Q.find(x=>x.id===qid)) && val!==1){ const box=document.getElementById("fu_"+qid); if(box){ box.scrollIntoView({block:"center",behavior:reduced?"auto":"smooth"}); try{ box.focus({preventScroll:true}); }catch(e){} } }
       break; }
@@ -657,7 +755,19 @@ app.addEventListener("click", e=>{
     case "delConfirm": { const d=S.ui.dlg; if(!d || d.type!=="del") break;
       S.be.removeSet(d.id).then(()=>{ delete S.polls[d.id]; if(S.route==="set") location.href=urlFor(); else closeDlg(); }).catch(e=>alert("Deleting failed: "+(e&&e.message||e))); break; }
     case "dlgClose": closeDlg(); break;
-    case "dlgSave": saveSetDlg(); break;
+    case "dlgSave": if(S.ui.dlg && S.ui.dlg.type==="edit") saveEditDlg(); else saveSetDlg(); break;
+    /* ---- consent workflow ---- */
+    case "qEdit": { const i=Q.findIndex(x=>x.id===b.dataset.q); if(i<0) break; S.ui.dlg={type:"edit", qid:Q[i].id, title:`Edit proposal ${i+1}`, focus:"dlgText"}; render(); break; }
+    case "closeTab": S.ui.closeTab=v; S.ui.tlPage=0; render(); break;
+    case "expMD": exportMD(); break;
+    /* ---- named respondents ---- */
+    case "nameEdit": S.ui.nameEdit=true; S.ui.nameDraft=null; S.ui.nameErr=""; render(); document.getElementById("nameIn")?.focus(); break;
+    case "nameCancel": S.ui.nameEdit=false; S.ui.nameDraft=null; S.ui.nameErr=""; render(); break;
+    case "nameSave": { const el=document.getElementById("nameIn"), n=C.cleanName(el?el.value:""), prob=C.nameProblem(n, C.otherNames(S.votes,S.me.id));
+      if(prob){ S.ui.nameErr=prob; S.ui.nameDraft=el?el.value:""; render(); document.getElementById("nameIn")?.focus(); break; }
+      setName(n); render(); const cur=S.votes[S.me.id];
+      if(cur && cur.round===S.ses.round){ const next={...cur, t:Date.now()}; S.votes[S.me.id]=next; write(()=>S.backend.setVotes(S.me.id,next)); } else if(S.heartbeat) S.heartbeat(); // tell the room right away
+      break; }
     case "dlgAccent": { const c=document.getElementById("dlgColor"); if(c){ c.value=String(v).toLowerCase(); markSwatch(); } break; }
     case "dlgExpQuick": { const x=document.getElementById("dlgExp"); if(x) x.value=toLocalInput(C.extendedExpiry(Date.now(), +v)); break; }
     case "dlgFilePick": document.getElementById("dlgFile")?.click(); break;
@@ -682,13 +792,15 @@ app.addEventListener("change", e=>{ const inp=e.target;
   r.onload=()=>importResults(String(r.result||""), f.name); r.readAsText(f); });
 let fuTimer=null;
 app.addEventListener("input", e=>{ const t=e.target; if(t && t.id==="dlgColor"){ markSwatch(); return; }
+  if(t && t.id==="nameIn"){ S.ui.nameDraft=t.value; return; }
   if(t && t.classList && t.classList.contains("open-in")){ S.ui.tx=S.ui.tx||{}; S.ui.tx[txKey(t.dataset.q)]=t.value; const v=t.value.trim(), btn=document.getElementById("ops_"+t.dataset.q), n=document.getElementById("opn_"+t.dataset.q);
     if(btn) btn.disabled=!v || v===t.dataset.saved; if(n) n.textContent=`${t.value.length} / ${t.maxLength}`; return; }
   if(!t || !t.classList || !t.classList.contains("tl-fu-in")) return;
   S.ui.tx=S.ui.tx||{}; S.ui.tx[txKey(t.dataset.q)]=t.value; clearTimeout(fuTimer); const qid=t.dataset.q; fuTimer=setTimeout(()=>saveText(qid), 800); });
 app.addEventListener("focusout", e=>{ const t=e.target; if(S.rendering || !t || !t.isConnected) return; if(t.classList && t.classList.contains("tl-fu-in")){ clearTimeout(fuTimer); saveText(t.dataset.q); } });
-app.addEventListener("keydown", e=>{ if(e.key!=="Escape") return; if(S.ui.dlg){ closeDlg(); return; } if(S.ui.configOpen){ S.ui.configOpen=false; S.ui.jsonText=null; render(); } });
-app.addEventListener("toggle", e=>{ if(e.target && e.target.id==="cfgJsonBox") S.ui.jsonOpen=e.target.open; }, true);
+app.addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target && e.target.id==="nameIn"){ e.preventDefault(); document.querySelector('[data-act="nameSave"]')?.click(); return; }
+  if(e.key!=="Escape") return; if(S.ui.dlg){ closeDlg(); return; } if(S.ui.configOpen){ S.ui.configOpen=false; S.ui.jsonText=null; render(); } });
+app.addEventListener("toggle", e=>{ if(e.target && e.target.id==="cfgJsonBox") S.ui.jsonOpen=e.target.open; if(e.target && e.target.id==="waitBox" && !S.rendering) S.ui.waitOpen=e.target.open; }, true);
 document.addEventListener("keydown", e=>{ if(!S.me.isHost||S.route!=="set"||S.ui.configOpen||S.ui.dlg||S.ui.view==="participant") return; if(e.target.matches("input,textarea")) return;
   if(e.key==="ArrowRight"){ document.querySelector('[data-act="next"]:not([disabled])')?.click(); }
   if(e.key==="ArrowLeft"){ document.querySelector('[data-act="prev"]:not([disabled])')?.click(); }
@@ -723,19 +835,30 @@ function bootHome(be){
 }
 function bootSet(be){
   const p=be.poll(S.setId); S.backend=p;
-  const raw={cfg:undefined, ses:undefined}; let editDone=!params.has("edit");
+  const raw={cfg:undefined, ses:undefined}; let editDone=!params.has("edit"), votesIn=false;
   function settle(){ if(S.review) return;
     if(raw.cfg!==undefined) S.cfg=C.normConfig(raw.cfg);
     if(raw.ses!==undefined) S.ses={...DEFAULT_SESSION,...(raw.ses||{})};
     /* a set that was just created opens straight in the question editor */
     if(!editDone && S.me.isHost && S.meta && S.cfg && S.ses){ editDone=true; try{ history.replaceState(null,"",urlFor({set:S.setId})); }catch(e){}
       S.ui.draft=JSON.parse(JSON.stringify(S.cfg)); S.ui.configOpen=true; } }
-  p.onMeta((m,err)=>{ const was=expired(); S.metaErr=err||null; S.meta=err?undefined:C.normMeta(m); settle(); renderBg(); if(was && !expired()) heartbeat(); });
+  p.onMeta((m,err)=>{ const was=expired(); S.metaErr=err||null; S.meta=err?undefined:C.normMeta(m); settle(); ensureName(); renderBg(); if(was && !expired()) heartbeat(); });
   p.onConfig(c=>{ raw.cfg=c||null; if(S.review){ S.review.live.cfg=C.normConfig(c); return; } settle(); renderBg(); });
   p.onSession(s=>{ s=normSession(s); noteReset(s); raw.ses=s||null; if(S.review){ S.review.live.ses={...DEFAULT_SESSION,...(s||{})}; return; } settle(); renderBg(); });
-  p.onVotes(v=>{ if(S.review){ S.review.live.votes=v||{}; return; } S.votes=v||{}; renderBg(); });
+  p.onVotes(v=>{ if(S.review){ S.review.live.votes=v||{}; return; } S.votes=v||{}; votesIn=true; ensureName(); renderBg(); });
+  try{ const o=JSON.parse(localStorage.getItem("tr_name_"+S.setId)||"null"); if(o && o.n){ S.me.name=String(o.n); S.me.nameAt=o.at||0; } }catch(e){}
+  { const send=p.setVotes; p.setVotes=(pid,v)=>send(pid, pid===be.id ? stampDoc(v) : v); } // this device's doc always carries (or drops) its name
+  /* random names are handed out here; when two devices hold the same name the later one gives way */
+  function ensureName(){ if(!S.meta || !S.ses || !votesIn || S.review || expired()) return; const nm=S.meta.named; if(!C.isNamed(nm)) return;
+    const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
+    const clash = S.me.name && C.mustYieldName(S.votes, be.id, S.me.name, S.me.nameAt);
+    if(nm==="random" && (!S.me.name || clash)){ const n=C.randomName(new Set(C.otherNames(S.votes,be.id).map(x=>x.toLowerCase()))); if(!n) return;
+      setName(n); const cur=S.votes[be.id], doc=(cur && cur.round===S.ses.round) ? {...cur, t:Date.now()} : {round:S.ses.round, answers:{}, t:Date.now()};
+      S.votes[be.id]=doc; write(()=>p.setVotes(be.id,doc)); renderBg(); }
+    else if(nm==="yes" && clash){ setName(null); S.ui.nameErr="This name is already in use. Choose another."; renderBg(); } }
   // announce presence so the host sees who joined (a vote doc with no answers)
   function heartbeat(){ if(!S.ses || !S.meta || expired() || be.canWrite===false || isKicked() || S.review) return; const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
+    ensureName(); if(C.isNamed(S.meta.named) && !S.me.name) return; // in a named set you join once you have a name
     const cur=S.votes[be.id]; const doc = (cur && cur.round===S.ses.round) ? {...cur, t:Date.now()} : {round:S.ses.round, answers:{}, t:Date.now()};
     S.votes[be.id]=doc; write(()=>p.setVotes(be.id,doc)); }
   S.heartbeat=heartbeat;

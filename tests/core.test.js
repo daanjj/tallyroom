@@ -365,3 +365,132 @@ test("B2/B3 questions file and saved results: open and dilemma questions come ba
   assert.equal(C.kindOf(C.qFromObj({ text: "x", kind: "dilemma", options: ["only one"] })), "dilemma");
   assert.equal(C.qFromObj({ text: "x", kind: "dilemma", options: ["only one"] }).options.length, 2, "a dilemma always has at least two options");
 });
+
+/* ---------- named respondents (D1, D2) ---------- */
+test("D1 typed names: 2 to 30 characters, trimmed, unique without regard to case", () => {
+  assert.equal(C.cleanName("  Anna   de  Vries "), "Anna de Vries"); assert.equal(C.cleanName("x".repeat(50)).length, 30);
+  assert.match(C.nameProblem("a", []), /at least 2/); assert.match(C.nameProblem("   ", []), /at least 2/);
+  assert.match(C.nameProblem("anna", ["Bob", "ANNA"]), /already in use/);
+  assert.equal(C.nameProblem("Anna", ["Bob"]), "");
+  assert.deepEqual(C.otherNames({ me: { name: "Me" }, a: { name: "Anna" }, b: {}, c: null }, "me"), ["Anna"]);
+});
+test("D1 same name claimed twice at the same moment: the later claim gives way, the earlier keeps it", () => {
+  const votes = { p_a: { name: "k12", nameAt: 100 }, p_b: { name: "K12", nameAt: 200 }, p_c: { name: "b59", nameAt: 50 } };
+  assert.equal(C.mustYieldName(votes, "p_b", "K12", 200), true);
+  assert.equal(C.mustYieldName(votes, "p_a", "k12", 100), false);
+  assert.equal(C.mustYieldName(votes, "p_c", "b59", 50), false);
+  const tie = { p_a: { name: "k12", nameAt: 100 }, p_b: { name: "k12", nameAt: 100 } };
+  assert.equal(C.mustYieldName(tie, "p_a", "k12", 100), false); assert.equal(C.mustYieldName(tie, "p_b", "k12", 100), true, "exactly one of two gives way");
+});
+test("D1 thirty devices joining a random set get thirty different names", () => {
+  const votes = {};
+  for (let i = 0; i < 30; i++) { const pid = "p_" + i, n = C.randomName(new Set(C.otherNames(votes, pid))); votes[pid] = { name: n, nameAt: i }; }
+  const names = Object.values(votes).map(v => v.name);
+  assert.equal(new Set(names).size, 30); names.forEach(n => assert.match(n, /^[a-z][0-9]{2}$/));
+});
+test("D1 joined: in a named set a device without a name and without answers does not count", () => {
+  const votes = { a: vote(1, {}, {}, NOW), b: { ...vote(1, {}, {}, NOW), name: "k12" }, c: vote(1, { q: 1 }, {}, NOW) };
+  assert.deepEqual(Object.keys(C.roundVotes(votes, 1, NOW, null, "random")).sort(), ["b", "c"]);
+  assert.deepEqual(Object.keys(C.roundVotes(votes, 1, NOW, null, "no")).sort(), ["a", "b", "c"]);
+});
+test("D2 exports: names instead of R01 in a named set, and no name anywhere in an anonymous one", () => {
+  const t1 = tl("Proposal"), votes = { a: { ...vote(1, { [t1.id]: 3 }, { [t1.id]: "No budget" }, NOW - 2), name: "k12" }, b: { ...vote(1, { [t1.id]: 1 }, {}, NOW - 1), name: "b59" } };
+  const mk = named => C.resultsPayload({ setId: "s", meta: C.newMeta({ name: "S", category: "consent", named }, NOW), cfg: { questions: [t1] }, ses: { round: 1 }, votes, now: NOW });
+  const named = mk("random");
+  assert.deepEqual(named.answers.map(r => r.respondent), ["k12", "b59"]); assert.deepEqual(named.questions[0].comments, [{ v: 3, text: "No budget", name: "k12" }]);
+  assert.ok(C.resultsCSV(named).includes('"k12",1,"Proposal",3,"Bezwaar","No budget"')); assert.ok(C.consentMarkdown(named).includes("- (k12) No budget"));
+  const anon = mk("no"), all = JSON.stringify(anon) + C.resultsCSV(anon) + C.consentMarkdown(anon);
+  assert.deepEqual(anon.answers.map(r => r.respondent), ["R01", "R02"]); assert.ok(!/k12|b59/.test(all)); assert.ok(C.consentMarkdown(anon).includes("- No budget"));
+});
+
+/* ---------- consent workflow (C1 to C4) ---------- */
+const tv = (qu, a, text, extra) => ({ round: 1, answers: { [qu.id]: a }, texts: text ? { [qu.id]: text } : {}, t: NOW, ...(extra || {}) });
+test("C1 edit: old text, counts and comments go to the history, the new text is the next version and starts at zero", () => {
+  const qu = tl("Original text");
+  const votes = { a: tv(qu, 1), b: tv(qu, 3, "Too costly", { name: "k12", t: NOW - 5 }), c: tv(qu, 2, "Timing?", { name: "b59", t: NOW - 3 }), d: tv(qu, 2) };
+  const v2 = C.editQuestion(qu, "  Cheaper text ", votes, "random", NOW);
+  assert.equal(v2.text, "Cheaper text"); assert.equal(v2.rev, 2); assert.equal(v2.id, qu.id);
+  assert.deepEqual(v2.history, [{ rev: 1, text: "Original text", counts: { g: 1, y: 1, r: 1 }, comments: [{ v: 3, text: "Too costly", name: "k12" }, { v: 2, text: "Timing?", name: "b59" }], t: NOW }]);
+  assert.deepEqual(C.trafficCounts(votes, v2, v2.rev), { g: 0, y: 0, r: 0 }, "the counter starts at 0");
+  assert.deepEqual(C.trafficComments(votes, v2, "random"), [], "old comments do not show on the new version");
+  assert.equal(C.validAns(votes.a, v2), null);
+  const again = { ...votes, a: tv(v2, 1, "", { revs: { [qu.id]: 2 } }) };
+  assert.deepEqual(C.trafficCounts(again, v2, 2), { g: 1, y: 0, r: 0 });
+  const v3 = C.editQuestion(v2, "Third text", again, "no", NOW + 1);
+  assert.equal(v3.rev, 3); assert.equal(v3.history.length, 2); assert.deepEqual(v3.history[1].counts, { g: 1, y: 0, r: 0 });
+  assert.equal(C.editQuestion(qu, "   ", votes, "no", NOW).text, "Original text", "an empty text keeps the old one; the vote still starts again");
+});
+test("C1 the editor and a duplicate treat versions correctly", () => {
+  const v2 = C.editQuestion(tl("One"), "Two", {}, "no", NOW);
+  const kept = C.shapeQuestion(v2, "traffic"); assert.equal(kept.rev, 2); assert.equal(kept.history.length, 1);
+  assert.equal(C.shapeQuestion(v2, "scale").rev, undefined);
+  const copy = C.duplicateSet(C.newMeta({ name: "S" }, NOW), { questions: [v2] }, NOW).config.questions[0];
+  assert.equal(copy.rev, undefined); assert.equal(copy.history, undefined); assert.equal(copy.text, "Two");
+  const cfg = C.normConfig({ questions: [{ ...v2, history: { 0: { rev: 1, text: "One" } } }] });
+  assert.deepEqual(cfg.questions[0].history, [{ rev: 1, text: "One", counts: { g: 0, y: 0, r: 0 }, comments: [] }], "history from the database is repaired");
+  const cleared = C.clearHistory({ questions: [v2] }).questions[0]; assert.equal(cleared.rev, undefined); assert.equal(cleared.text, "Two");
+});
+test("C2 the light is fixed when the presenter leaves the proposal; a later vote does not change it", () => {
+  const qu = tl("P"), votes = { a: tv(qu, 1), b: tv(qu, 1), c: tv(qu, 2, "hmm") };
+  const outcome = C.fixOutcome({}, qu, votes, NOW);
+  assert.deepEqual(outcome[qu.id], { status: "yellow", rev: 1, counts: { g: 2, y: 1, r: 0 }, t: NOW });
+  const later = { ...votes, d: tv(qu, 3, "late objection") };
+  assert.equal(C.questionOutcome(qu, { outcome }, later).status, "yellow"); assert.equal(C.questionOutcome(qu, { outcome }, later).fixed, true);
+  assert.equal(C.questionOutcome(qu, {}, later).status, "red", "without a fixed light the votes as they stand decide");
+  assert.equal(C.fixOutcome(outcome, qu, later, NOW + 1)[qu.id].status, "red", "leaving the proposal again recalculates");
+  const v2 = C.editQuestion(qu, "P2", later, "no", NOW);
+  assert.equal(C.questionOutcome(v2, { outcome }, later).status, "none", "a light of an earlier version does not stand for the new one");
+});
+function consentSession() { // 8 proposals: 5 green, 2 yellow, 1 red (edited once)
+  const qs = Array.from({ length: 8 }, (_, i) => tl("Proposal " + (i + 1))), votes = { a: { round: 1, answers: {}, texts: {}, t: NOW - 3, name: "k12" }, b: { round: 1, answers: {}, texts: {}, t: NOW - 2, name: "b59" }, c: { round: 1, answers: {}, texts: {}, t: NOW - 1, name: "p03" } };
+  qs.forEach((qu, i) => { Object.values(votes).forEach(v => { v.answers[qu.id] = 1; }); });
+  votes.a.answers[qs[2].id] = 2; votes.a.texts[qs[2].id] = "Concern | with a pipe";
+  votes.b.answers[qs[5].id] = 2; votes.b.texts[qs[5].id] = "Second\nline";
+  qs[6] = C.editQuestion(qs[6], "Proposal 7, rewritten\nwith a second line", { x: { round: 1, answers: { [qs[6].id]: 3 }, texts: { [qs[6].id]: "First objection" }, t: NOW - 9, name: "k12" } }, "random", NOW - 8);
+  Object.values(votes).forEach(v => { v.revs = { [qs[6].id]: 2 }; });
+  votes.c.answers[qs[6].id] = 3; votes.c.texts[qs[6].id] = "Still too costly";
+  votes.a.answers[qs[6].id] = 2; votes.a.texts[qs[6].id] = "Needs a date";
+  let outcome = {}; qs.forEach(qu => { outcome = C.fixOutcome(outcome, qu, votes, NOW); });
+  return { cfg: { questions: [...qs, C.q("How was it?", 1, 5, "", "")] }, ses: { round: 1, outcome }, votes };
+}
+test("C3 closing overview: 8 proposals give 8 lights, 3 of them in the details, red first", () => {
+  const { cfg, ses, votes } = consentSession(), rows = C.consentRows(cfg, ses, votes, "random");
+  assert.equal(rows.length, 9); assert.equal(rows[8].status, undefined, "other question types have no light");
+  assert.deepEqual(C.consentTotals(rows), { green: 5, yellow: 2, red: 1, none: 0 });
+  assert.deepEqual(rows.filter(r => r.kind === "traffic").map(r => r.status), ["green", "green", "yellow", "green", "green", "yellow", "red", "green"]);
+  const r7 = rows[6]; assert.equal(r7.text, "Proposal 7, rewritten\nwith a second line"); assert.equal(r7.edited, true); assert.equal(r7.rev, 2);
+  assert.deepEqual(r7.comments, [{ v: 2, text: "Needs a date", name: "k12" }, { v: 3, text: "Still too costly", name: "p03" }]); assert.equal(r7.history.length, 1);
+  const allGreen = C.consentRows({ questions: [tl("x")] }, {}, { a: tv({ id: "nope" }, 1) }, "no"); assert.equal(C.consentTotals(allGreen).none, 1);
+});
+test("C4 Markdown export: overview table, details for yellow and red, earlier versions, all proposals", () => {
+  const { cfg, ses, votes } = consentSession();
+  const p = C.resultsPayload({ setId: "s", meta: C.newMeta({ name: "Board", header: "Board decisions", category: "consent", named: "random" }, NOW), cfg, ses, votes, now: NOW });
+  const md = C.consentMarkdown(JSON.parse(JSON.stringify(p))), lines = md.split("\n");
+  assert.equal(lines[0], "# Board decisions"); assert.match(lines[2], /^- Date: \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  assert.ok(lines.includes("- Question set: Board")); assert.ok(lines.includes("- Respondents: 3")); assert.ok(lines.includes("- Result: 5 green · 2 yellow · 1 red"));
+  assert.ok(lines.includes("| # | Proposal | Status | Green | Yellow | Red | Edited |"));
+  assert.ok(lines.includes("| 1 | Proposal 1 | green | 3 | 0 | 0 | no |"));
+  assert.ok(lines.includes("| 7 | Proposal 7, rewritten with a second line | red | 1 | 1 | 1 | yes (v2) |"), "line breaks are flattened inside the table");
+  assert.equal(lines.filter(l => /^\| \d+ \|/.test(l)).length, 8, "one table row per proposal, other question types are left out");
+  const heads = lines.filter(l => l.startsWith("### ")); assert.deepEqual(heads, ["### 7. Red", "### 3. Yellow", "### 6. Yellow"]);
+  assert.ok(md.includes("**Proposal (version 2)**\n\n> Proposal 7, rewritten\n> with a second line\n"), "block quotes keep their line breaks");
+  assert.ok(md.includes("**Objections (1)**\n\n- (p03) Still too costly\n")); assert.ok(md.includes("**Concerns (1)**\n\n- (k12) Needs a date\n"));
+  assert.ok(md.includes("**Earlier versions**\n\nVersion 1:\n\n> Proposal 7\n\n- Objection (k12): First objection\n"));
+  assert.ok(md.includes("- (k12) Concern | with a pipe")); assert.ok(md.includes("- (b59) Second line"));
+  assert.ok(md.includes("## All proposals\n\n1. Proposal 1\n")); assert.ok(md.includes("7. Proposal 7, rewritten\n   with a second line\n"));
+  const comments = p.questions.flatMap(q => q.comments || []); assert.equal(comments.length, 4); comments.forEach(c => assert.ok(md.includes(c.text.replace(/\n/g, " "))));
+  const long = C.consentMarkdown({ ...p, questions: [{ ...p.questions[0], text: "x".repeat(100) + " | y" }] });
+  assert.ok(long.includes("| 1 | " + "x".repeat(80) + "… | green |"), "long texts are cut to 80 characters in the table");
+  const green = C.consentMarkdown({ ...p, questions: p.questions.filter(q => q.status === "green") }); assert.ok(green.includes("## Details\n\nNo concerns or objections left.\n"));
+});
+test("C4 a saved results file gives the same Markdown again (review mode)", () => {
+  const { cfg, ses, votes } = consentSession();
+  const meta = C.newMeta({ name: "Board", category: "consent", named: "random" }, NOW);
+  const p = JSON.parse(JSON.stringify(C.resultsPayload({ setId: "s", meta, cfg, ses, votes, now: NOW })));
+  const qs = p.questions.map(C.reviveQuestion), outcome = C.reviveOutcome(p), back = {};
+  p.answers.forEach((r, i) => { const a = {}; qs.forEach(qu => { if (Number.isFinite(r.answers[qu.id])) a[qu.id] = r.answers[qu.id]; });
+    back["R" + i] = { round: 1, answers: a, texts: r.texts, revs: Object.fromEntries(qs.filter(qu => qu.rev > 1 && a[qu.id] != null).map(qu => [qu.id, qu.rev])), name: r.respondent, t: Date.parse(r.at) }; });
+  assert.equal(qs[6].rev, 2); assert.equal(qs[6].history.length, 1); assert.equal(outcome[qs[6].id].status, "red");
+  const p2 = C.resultsPayload({ setId: "s", meta, cfg: { questions: qs }, ses: { round: 1, outcome }, votes: back, now: NOW });
+  assert.equal(C.consentMarkdown(p2), C.consentMarkdown(p));
+});

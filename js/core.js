@@ -50,7 +50,7 @@ function qFromObj(x){ x=(x && typeof x==="object")?x:{}; const text=String(x.tex
   return q(text,min,max,x.lo||"",x.hi||"",x.options,traffic); }
 /* the editor's draft of a question, shaped for the chosen kind; keeps what carries over */
 function shapeQuestion(qu, kind){ const base={id:qu.id||newQid(), text:String(qu.text||"").trim()||"Untitled question"}, o=normOptions(qu.options);
-  if(kind==="traffic") return {...base, kind, options:(o.length===3?o:TL_LABELS.slice()), min:1, max:3, lo:"", hi:""};
+  if(kind==="traffic") return {...base, kind, options:(o.length===3?o:TL_LABELS.slice()), min:1, max:3, lo:"", hi:"", ...(qu.rev>1?{rev:qu.rev, history:qu.history||[]}:{})}; // an edited proposal keeps its versions
   if(kind==="options") return {...base, kind, options:o, min:1, max:Math.max(1,o.length), lo:"", hi:""};
   if(kind==="open") return {...base, kind, maxLen:clamp(Math.round(num(qu.maxLen,OPEN_MAX)),20,2000), min:1, max:1, lo:"", hi:""};
   if(kind==="dilemma") return {...base, kind, options:o, conf:normConf(qu.conf), min:1, max:Math.max(1,o.length), lo:"", hi:""};
@@ -84,9 +84,80 @@ function emptyConfig(){ return { mode:"batch", tlYellow:"", tlRed:"", questions:
 /* Firebase turns arrays into objects when they have gaps and drops empty ones, so always normalise what comes back */
 function normConfig(v){ if(!v || typeof v!=="object") return emptyConfig();
   let qs=v.questions; if(qs && !Array.isArray(qs)) qs=Object.values(qs); if(!Array.isArray(qs)) qs=[];
-  qs=qs.filter(Boolean); qs.forEach(qu=>{ if(qu.options && !Array.isArray(qu.options)) qu.options=Object.values(qu.options); });
+  qs=qs.filter(Boolean); qs.forEach(qu=>{ if(qu.options && !Array.isArray(qu.options)) qu.options=Object.values(qu.options);
+    if(qu.history){ if(!Array.isArray(qu.history)) qu.history=Object.values(qu.history);
+      qu.history=qu.history.filter(Boolean).map(h=>({...h, counts:{g:0,y:0,r:0,...(h.counts||{})}, comments:h.comments?(Array.isArray(h.comments)?h.comments:Object.values(h.comments)):[]})); } });
   return {...v, mode:v.mode==="live"?"live":"batch", tlYellow:v.tlYellow||"", tlRed:v.tlRed||"", questions:qs}; }
 function normSession(v){ if(v && v.revealed && !Array.isArray(v.revealed)) v.revealed=Object.values(v.revealed); if(v && !v.revealed) v.revealed=[]; return v; }
+
+/* ============ named respondents (backlog D) ============ */
+const isNamed = named => named==="yes" || named==="random";
+function cleanName(x){ return String(x||"").replace(/\s+/g," ").trim().slice(0,30); }
+/* why a typed name cannot be used; "" when it can. `taken` = names of the other devices in the set */
+function nameProblem(name, taken){ const n=cleanName(name); if(n.length<2) return "Type a name of at least 2 characters.";
+  const low=n.toLowerCase(); return (taken||[]).some(t=>String(t||"").toLowerCase()===low) ? "This name is already in use. Choose another." : ""; }
+function otherNames(votes, myPid){ return Object.entries(votes||{}).filter(([pid,v])=>pid!==myPid && v && v.name).map(([,v])=>String(v.name)); }
+/* two devices claimed the same name at the same moment: the one that claimed it last gives way (device id breaks a tie) */
+function mustYieldName(votes, myPid, myName, myNameAt){ const low=String(myName||"").toLowerCase(), at=myNameAt||0; if(!low) return false;
+  return Object.entries(votes||{}).some(([pid,v])=>pid!==myPid && v && String(v.name||"").toLowerCase()===low && ((v.nameAt||0)<at || ((v.nameAt||0)===at && pid<myPid))); }
+/* one lowercase letter plus two digits, not yet in `taken` (a Set or array); null when all 2,600 are in use */
+function randomName(taken, rnd){ rnd=rnd||Math.random; const has=n=>taken instanceof Set ? taken.has(n) : (taken||[]).includes(n);
+  const make=(l,n)=>String.fromCharCode(97+l)+String(n).padStart(2,"0");
+  for(let i=0;i<200;i++){ const n=make(Math.min(25,Math.floor(rnd()*26)), Math.min(99,Math.floor(rnd()*100))); if(!has(n)) return n; }
+  for(let l=0;l<26;l++) for(let n=0;n<100;n++){ const x=make(l,n); if(!has(x)) return x; }
+  return null; }
+
+/* ============ consent workflow (backlog C): versions of a proposal and its final light ============ */
+/* an answer only counts for the version of the proposal it was given on (version 1 when nothing is recorded) */
+function answerIsCurrent(vote, qid, rev){ const r=vote&&vote.revs?vote.revs[qid]:undefined; return (Number.isFinite(r)?r:1)===(Number.isFinite(rev)?rev:1); }
+function trafficCounts(votes, qu, rev){ const c={g:0,y:0,r:0}, q2={...qu, rev};
+  Object.values(votes||{}).forEach(v=>{ const a=validAns(v,q2); if(a===1) c.g++; else if(a===2) c.y++; else if(a===3) c.r++; }); return c; }
+/* the light of a proposal: any red = red, else any yellow = yellow, all green = green, no votes = none */
+function trafficStatus(counts){ const c=counts||{}; return (c.r>0) ? "red" : (c.y>0) ? "yellow" : (c.g>0) ? "green" : "none"; }
+/* yellow and red comments on the current version, oldest first; with the respondent's name in a named set */
+function trafficComments(votes, qu, named){ return Object.values(votes||{}).filter(v=>{ const a=validAns(v,qu); return a===2||a===3; }).sort((a,b)=>(a.t||0)-(b.t||0))
+  .map(v=>{ const c={v:v.answers[qu.id], text:String(v.texts[qu.id]).trim()}; if(isNamed(named)) c.name=String(v.name||"unnamed"); return c; }); }
+/* presenter rewrote a proposal: the old text, votes and comments go to its history, the new text is the next version */
+function editQuestion(qu, text, votes, named, now){ const rev=qu.rev||1;
+  const entry={rev, text:qu.text, counts:trafficCounts(votes,qu,rev), comments:trafficComments(votes,qu,named), t:now};
+  return {...qu, text:String(text||"").trim()||qu.text, rev:rev+1, history:[...(qu.history||[]), entry]}; }
+/* clearing the answers also clears the versions: the last text stays, as version 1 */
+function clearHistory(cfg){ return {...cfg, questions:(cfg.questions||[]).map(qu=>{ if(!qu.history && !qu.rev) return qu; const c={...qu}; delete c.history; delete c.rev; return c; })}; }
+/* session.outcome[qid] = the light as it stood when the presenter left the proposal */
+function fixOutcome(outcome, qu, votes, now){ const rev=qu.rev||1, counts=trafficCounts(votes,qu,rev);
+  return {...(outcome||{}), [qu.id]:{status:trafficStatus(counts), rev, counts, t:now}}; }
+/* the stored light when there is one for the current version, otherwise the light as the votes stand now */
+function questionOutcome(qu, ses, votes){ const rev=qu.rev||1, o=ses&&ses.outcome?ses.outcome[qu.id]:null;
+  if(o && (o.rev||1)===rev && o.status) return {status:o.status, counts:{g:0,y:0,r:0,...(o.counts||{})}, fixed:true};
+  const counts=trafficCounts(votes,qu,rev); return {status:trafficStatus(counts), counts, fixed:false}; }
+/* one row per question for the closing overview and the exports */
+function consentRows(cfg, ses, votes, named){ return (cfg.questions||[]).map((qu,i)=>{ const base={n:i+1, id:qu.id, text:qu.text, kind:kindOf(qu)};
+  if(!isTraffic(qu)) return base; const rev=qu.rev||1, o=questionOutcome(qu,ses,votes);
+  return {...base, rev, edited:rev>1, status:o.status, counts:o.counts, fixed:o.fixed, comments:trafficComments(votes,qu,named), history:qu.history||[]}; }); }
+function consentTotals(rows){ const t={green:0,yellow:0,red:0,none:0}; (rows||[]).forEach(r=>{ if(r.kind==="traffic") t[r.status||"none"]++; }); return t; }
+/* Markdown of the outcome, from a results payload (so it also works for a saved results file). Fixed English headings, content as typed. */
+function mdLine(x){ return String(x==null?"":x).replace(/\s*\r?\n\s*/g," ").trim(); }
+function mdCell(x,max){ let t=mdLine(x); if(max && t.length>max) t=t.slice(0,max).trimEnd()+"…"; return t.replace(/\|/g,"\\|"); }
+function mdQuote(x){ return String(x==null?"":x).split(/\r?\n/).map(l=>("> "+l).trimEnd()).join("\n"); }
+function consentMarkdown(p){ const T=(p.questions||[]).filter(q=>q.kind==="traffic"), tot=consentTotals(T), d=new Date(p.exportedAt), z=n=>String(n).padStart(2,"0");
+  const bullet=c=>`- ${c.name?`(${mdLine(c.name)}) `:""}${mdLine(c.text)}`, L=q=>q.lights||{g:0,y:0,r:0};
+  const out=[`# ${mdLine(p.title)}`,"",`- Date: ${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`,`- Question set: ${mdLine(p.set&&p.set.name)}`,`- Respondents: ${p.respondents}`,
+    `- Result: ${tot.green} green · ${tot.yellow} yellow · ${tot.red} red${tot.none?` · ${tot.none} without votes`:""}`,"","## Overview","",
+    "| # | Proposal | Status | Green | Yellow | Red | Edited |","|---|----------|--------|-------|--------|-----|--------|"];
+  T.forEach(q=>out.push(`| ${q.n} | ${mdCell(q.text,80)} | ${q.status} | ${L(q).g} | ${L(q).y} | ${L(q).r} | ${q.rev>1?`yes (v${q.rev})`:"no"} |`));
+  out.push("","## Details","");
+  const open=[...T.filter(q=>q.status==="red"), ...T.filter(q=>q.status==="yellow")];
+  if(!open.length) out.push("No concerns or objections left.","");
+  open.forEach(q=>{ const red=(q.comments||[]).filter(c=>c.v===3), yel=(q.comments||[]).filter(c=>c.v===2);
+    out.push(`### ${q.n}. ${q.status==="red"?"Red":"Yellow"}`,"",`**Proposal${q.rev>1?` (version ${q.rev})`:""}**`,"",mdQuote(q.text),"");
+    if(red.length) out.push(`**Objections (${red.length})**`,"",...red.map(bullet),"");
+    if(yel.length) out.push(`**Concerns (${yel.length})**`,"",...yel.map(bullet),"");
+    if((q.history||[]).length){ out.push("**Earlier versions**","");
+      q.history.forEach(h=>{ out.push(`Version ${h.rev}:`,"",mdQuote(h.text),"");
+        const cs=(h.comments||[]); if(cs.length) out.push(...cs.map(c=>`- ${c.v===3?"Objection":"Concern"}${c.name?` (${mdLine(c.name)})`:""}: ${mdLine(c.text)}`),""); }); } });
+  out.push("## All proposals","");
+  T.forEach(q=>out.push(`${q.n}. ${String(q.text||"").split(/\r?\n/).join("\n   ")}`));
+  return out.join("\n")+"\n"; }
 
 /* ============ votes and statistics ============ */
 const PRESENCE_MS = 150000; // a participant without answers counts as present for 2.5 min after their last heartbeat
@@ -94,11 +165,12 @@ function hasAnswers(v){ return !!(v && v.answers && Object.keys(v.answers).lengt
 function validAns(v,qu){
   if(isOpen(qu)) return String((v&&v.texts&&v.texts[qu.id])||"").trim() ? 1 : null; // an open answer is its text
   const a=v&&v.answers?v.answers[qu.id]:undefined; if(!Number.isFinite(a)) return null;
+  if(isTraffic(qu) && !answerIsCurrent(v,qu.id,qu.rev)) return null; // given on an earlier version of the proposal (backlog C1)
   if(isDilemma(qu)){ const c=v.conf?v.conf[qu.id]:undefined, cf=qu.conf||DEFAULT_CONF; if(!Number.isFinite(c) || c<cf.min || c>cf.max) return null; } // choice and confidence, or nothing
   if(isTraffic(qu) && a!==1 && !String(v.texts?.[qu.id]||"").trim()) return null; return a; } // yellow/red only count once the follow-up is filled in
-function roundVotes(votes, round, now, skipPid){ const out={};
+function roundVotes(votes, round, now, skipPid, named){ const out={};
   for(const [pid,v] of Object.entries(votes||{})){ if(!v || v.round!==round) continue;
-    if(!hasAnswers(v)){ if(pid===skipPid) continue; if(!v.t || now-v.t>PRESENCE_MS) continue; }
+    if(!hasAnswers(v)){ if(pid===skipPid) continue; if(!v.t || now-v.t>PRESENCE_MS) continue; if(isNamed(named) && !v.name) continue; } // in a named set you have joined once you have a name
     out[pid]=v; }
   return out; }
 function stats(vals,min,max){
@@ -180,7 +252,7 @@ function pollStats(poll){ const cfg=normConfig(poll&&poll.config), ses=(poll&&po
   return { questions:cfg.questions.length, respondents, phase: ph==="lobby"?"lobby":(ph==="summary"?"finished":"running") }; }
 function duplicateSet(meta, cfg, now){ const m=normMeta(meta), c=normConfig(cfg);
   return { meta:{...m, name:m.name+" (copy)", joinUrl:"", expiresAt:extendedExpiry(now), createdAt:now, updatedAt:now},
-    config:{ mode:c.mode, tlYellow:c.tlYellow, tlRed:c.tlRed, questions:JSON.parse(JSON.stringify(c.questions)).map(qu=>({...qu, id:newQid()})) } }; }
+    config:{ mode:c.mode, tlYellow:c.tlYellow, tlRed:c.tlRed, questions:JSON.parse(JSON.stringify(clearHistory(c).questions)).map(qu=>({...qu, id:newQid()})) } }; } // a copy starts without earlier versions
 /* one-off: the poll that lived at polls/{pollId} before sets existed gets a record in sets/ */
 function migrationMeta(pollId, cfg, now){ return newMeta({name:pollId, header:tx(cfg&&cfg.title)||pollId, category:"consent", named:"no"}, now); }
 
@@ -199,29 +271,35 @@ function parseQuestionsFile(obj){ let arr=obj, set=null, tlYellow="", tlRed="";
   return { set, tlYellow, tlRed, questions }; }
 
 /* a question from a saved results file, for review mode: same shape as qFromObj but it keeps its id */
-function reviveQuestion(x, i){ const qu=qFromObj(x); return {...qu, id:String((x&&x.id)||("q"+i)), text:String((x&&x.text)||("Question "+(i+1)))}; }
+function reviveQuestion(x, i){ const qu=qFromObj(x), out={...qu, id:String((x&&x.id)||("q"+i)), text:String((x&&x.text)||("Question "+(i+1)))};
+  if(x && x.kind==="traffic" && x.rev>1){ out.rev=x.rev; out.history=Array.isArray(x.history)?x.history:[]; } return out; }
+/* the lights stored in a saved results file, back as session.outcome */
+function reviveOutcome(p){ const o={}; ((p&&p.questions)||[]).forEach(q=>{ if(q && q.kind==="traffic" && q.status) o[q.id]={status:q.status, rev:q.rev||1, counts:{g:0,y:0,r:0,...(q.lights||{})}, t:Date.parse(p.exportedAt||"")||0}; }); return o; }
 
 /* ---- responses export ---- */
 function resultsPayload(o){ const cfg=normConfig(o.cfg), ses=o.ses||{}, round=ses.round||1, meta=normMeta(o.meta)||null;
+  const named=o.named||(meta?meta.named:"no"), category=o.category||(meta?meta.category:"generic");
   const rv=roundVotes(o.votes, round, o.now, null);
   const ids=Object.keys(rv).filter(k=>hasAnswers(rv[k])).sort((a,b)=>(rv[a].t||0)-(rv[b].t||0));
   const title=o.title || (meta?meta.header:"") || "Tally Room";
-  return { pollId:o.setId||"", set:{id:o.setId||"", name:meta?meta.name:title, header:title, category:meta?meta.category:"generic"},
-    title, mode:cfg.mode, round, exportedAt:new Date(o.now).toISOString(), respondents:ids.length,
+  return { pollId:o.setId||"", set:{id:o.setId||"", name:meta?meta.name:title, header:title, category},
+    title, named, mode:cfg.mode, round, exportedAt:new Date(o.now).toISOString(), respondents:ids.length,
     questions: cfg.questions.map((qu,i)=>{
       const vals=ids.map(k=>validAns(rv[k],qu)).filter(v=>Number.isFinite(v));
       const st=stats(vals,qu.min,qu.max); const num=!isOpt(qu)&&!isOpen(qu)&&st.n;
       const extra = isOpen(qu) ? { maxLen:qu.maxLen||OPEN_MAX, texts:ids.filter(k=>validAns(rv[k],qu)!=null).map(k=>String(rv[k].texts[qu.id]).trim()) }
         : isDilemma(qu) ? (()=>{ const ds=dilemmaStats(ids.map(k=>rv[k]),qu), r2=x=>x==null?null:+x.toFixed(2);
-            return { conf:normConf(qu.conf), confidence:{ mean:r2(ds.mean), byOption:qu.options.map((o,j)=>({option:o, count:ds.by[j+1].n, mean:r2(ds.by[j+1].mean)})) } }; })() : {};
+            return { conf:normConf(qu.conf), confidence:{ mean:r2(ds.mean), byOption:qu.options.map((o,j)=>({option:o, count:ds.by[j+1].n, mean:r2(ds.by[j+1].mean)})) } }; })()
+        : isTraffic(qu) ? (()=>{ const oc=questionOutcome(qu,ses,rv); // the light as fixed by the presenter, the comments on the final version, and the earlier versions
+            return { rev:qu.rev||1, status:oc.status, lights:oc.counts, comments:trafficComments(ids.map(k=>rv[k]),qu,named), history:qu.history||[] }; })() : {};
       return { n:i+1, id:qu.id, text:qu.text, kind:kindOf(qu), ...extra,
         options:isOpt(qu)?[...qu.options]:null, min:qu.min, max:qu.max, lo:qu.lo||"", hi:qu.hi||"",
         answers:st.n||0, counts:isOpen(qu)?{}:(st.counts||{}), mostChosen:(st.n&&!isOpen(qu))?optLabel(qu,st.mode):null,
         mean:num?+st.mean.toFixed(2):null, median:num?st.median:null, sd:num?+st.sd.toFixed(2):null }; }),
-    answers: ids.map((k,i)=>({ respondent:"R"+String(i+1).padStart(2,"0"), at:new Date(rv[k].t||0).toISOString(),
-      answers:Object.fromEntries(cfg.questions.map(qu=>[qu.id, Number.isFinite(rv[k].answers?.[qu.id])?rv[k].answers[qu.id]:null])),
+    answers: ids.map((k,i)=>({ respondent:(isNamed(named)&&rv[k].name) ? String(rv[k].name) : "R"+String(i+1).padStart(2,"0"), at:new Date(rv[k].t||0).toISOString(),
+      answers:Object.fromEntries(cfg.questions.map(qu=>[qu.id, (Number.isFinite(rv[k].answers?.[qu.id]) && !(isTraffic(qu)&&!answerIsCurrent(rv[k],qu.id,qu.rev)))?rv[k].answers[qu.id]:null])),
       confidence:Object.fromEntries(cfg.questions.filter(qu=>isDilemma(qu)&&Number.isFinite(rv[k].conf?.[qu.id])).map(qu=>[qu.id,rv[k].conf[qu.id]])),
-      texts:Object.fromEntries(cfg.questions.filter(qu=>((isTraffic(qu)&&[2,3].includes(rv[k].answers[qu.id]))||isOpen(qu))&&String(rv[k].texts?.[qu.id]||"").trim()).map(qu=>[qu.id,String(rv[k].texts[qu.id]).trim()])) })),
+      texts:Object.fromEntries(cfg.questions.filter(qu=>((isTraffic(qu)&&answerIsCurrent(rv[k],qu.id,qu.rev)&&[2,3].includes(rv[k].answers[qu.id]))||isOpen(qu))&&String(rv[k].texts?.[qu.id]||"").trim()).map(qu=>[qu.id,String(rv[k].texts[qu.id]).trim()])) })),
     followUps:{yellow:followUp(cfg,2), red:followUp(cfg,3)} };
 }
 function resultsCSV(p){ const qq=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`, s=p.set||{};
@@ -279,19 +357,6 @@ function themeCSS(accent){ const acc=normHex(accent); if(!acc || acc===DEFAULT_A
   const block=v=>Object.entries(v).map(([k,x])=>`--${k}:${x}`).join(";"), l=block(themeVars(acc,false)), d=block(themeVars(acc,true));
   return `:root{${l}}\n@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){${d}}}\n:root[data-theme="dark"]{${d}}`; }
 
-/* ============ rules for later backlog items (C1, C2, D1), kept here so they are tested from the start ============ */
-/* C2: final light of a proposal. counts = {g, y, r} */
-function trafficStatus(counts){ const c=counts||{}; return (c.r>0) ? "red" : (c.y>0) ? "yellow" : (c.g>0) ? "green" : "none"; }
-/* C1: an answer only counts for the version of the question it was given on (version 1 when nothing is recorded) */
-function answerIsCurrent(vote, qid, rev){ const r=vote&&vote.revs?vote.revs[qid]:undefined; return (Number.isFinite(r)?r:1)===(Number.isFinite(rev)?rev:1); }
-function trafficCounts(votes, qu, rev){ const c={g:0,y:0,r:0}; Object.values(votes||{}).forEach(v=>{ if(!answerIsCurrent(v,qu.id,rev)) return; const a=validAns(v,qu); if(a===1) c.g++; else if(a===2) c.y++; else if(a===3) c.r++; }); return c; }
-/* D1: one lowercase letter plus two digits, not yet in `taken` (a Set or array); null when all 2,600 are in use */
-function randomName(taken, rnd){ rnd=rnd||Math.random; const has=n=>taken instanceof Set ? taken.has(n) : (taken||[]).includes(n);
-  const make=(l,n)=>String.fromCharCode(97+l)+String(n).padStart(2,"0");
-  for(let i=0;i<200;i++){ const n=make(Math.min(25,Math.floor(rnd()*26)), Math.min(99,Math.floor(rnd()*100))); if(!has(n)) return n; }
-  for(let l=0;l<26;l++) for(let n=0;n<100;n++){ const x=make(l,n); if(!has(x)) return x; }
-  return null; }
-
 const api={ clamp, num, fmt, tx, slug, stamp,
   TL_LABELS, TL_COLORS, TL_Q_YELLOW, TL_Q_RED, normOptions, newQid, isTraffic, isOpen, isDilemma, isOpt, kindOf, KIND_LABEL, KIND_NAME, OPEN_MAX, DEFAULT_CONF, normConf,
   optLabel, q, qOpen, qDilemma, qNew, qFromObj, shapeQuestion, questionProblems, reviveQuestion, exportQ, followUp,
@@ -301,6 +366,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, SET_ID_RE, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,
-  trafficStatus, answerIsCurrent, trafficCounts, randomName };
+  isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,
+  answerIsCurrent, trafficCounts, trafficStatus, trafficComments, editQuestion, clearHistory, fixOutcome, questionOutcome, consentRows, consentTotals, consentMarkdown, reviveOutcome };
 if(typeof module!=="undefined" && module.exports) module.exports=api; else root.TRCore=api;
 })(typeof window!=="undefined" ? window : globalThis);

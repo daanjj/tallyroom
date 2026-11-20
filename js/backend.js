@@ -53,13 +53,14 @@ function makeDemoBackend(isHost){
     save(); }
   const names=["a","b","c","d","e","f","g","h"];
   function simulate(id){ const p=db.polls[id]; if(!isHost || !p || !p.session || !p.config) return; const ses=p.session, cfg=C.normConfig(p.config); if(!cfg.questions.length) return;
-    const put=(n,v)=>{ const pp=P(id); pp.votes=pp.votes||{}; pp.votes["demo_"+n]=v; save(); emit(id,"votes"); };
+    const put=(n,v)=>{ const pp=P(id); pp.votes=pp.votes||{}; if(C.isNamed((db.sets[id]||{}).named)){ v.name=n+String(11+names.indexOf(n)*7); v.nameAt=1; } else delete v.name; pp.votes["demo_"+n]=v; save(); emit(id,"votes"); };
     const get=n=>((db.polls[id]||{}).votes||{})["demo_"+n];
     if(ses.phase==="lobby"){ names.forEach((n,i)=>setTimeout(()=>{ const v=get(n); if(!v||v.round!==ses.round) put(n,{round:ses.round,answers:{},t:Date.now()}); }, 300*i)); return; }
-    if(ses.phase==="voting"){ const qs = cfg.mode==="live" ? [cfg.questions[ses.current]].filter(Boolean) : cfg.questions;
-      names.forEach((n,i)=>qs.forEach((qu,j)=>setTimeout(()=>{ const cur=get(n), v=(cur && cur.round===ses.round) ? {...cur, answers:{...(cur.answers||{})}} : {round:ses.round,answers:{}}; if(v.answers[qu.id]!=null) return;
+    if(ses.phase==="voting"){ const qs = (cfg.mode==="live"||ses.revote) ? [cfg.questions[ses.current]].filter(Boolean) : cfg.questions;
+      names.forEach((n,i)=>qs.forEach((qu,j)=>setTimeout(()=>{ const cur=get(n), v=(cur && cur.round===ses.round) ? {...cur, answers:{...(cur.answers||{})}} : {round:ses.round,answers:{}}; if(v.answers[qu.id]!=null && C.answerIsCurrent(v,qu.id,qu.rev)) return; // an edited proposal is voted on again
         const bias=(j%3===0?0.75:j%3===1?0.55:0.4); const r=(Math.random()+Math.random()+Math.random())/3; const val=Math.round(qu.min+(qu.max-qu.min)*C.clamp(r*1.1+bias*0.5-0.3,0,1));
-        v.answers[qu.id]=val; if(qu.kind==="traffic" && val!==1){ v.texts={...(v.texts||{})}; v.texts[qu.id]=(val===2?"Demo concern from ":"Demo objection from ")+n; }
+        v.answers[qu.id]=val; if(qu.kind==="traffic"){ if(v.texts){ v.texts={...v.texts}; delete v.texts[qu.id]; } if((qu.rev||1)>1) v.revs={...(v.revs||{}),[qu.id]:qu.rev}; }
+        if(qu.kind==="traffic" && val!==1){ v.texts={...(v.texts||{})}; v.texts[qu.id]=(val===2?"Demo concern from ":"Demo objection from ")+n; }
         if(qu.kind==="open"){ v.answers[qu.id]=1; v.texts={...(v.texts||{})}; v.texts[qu.id]="Demo answer from "+n+(i%3===0?", with a second line\nto show how longer answers wrap":""); }
         if(qu.kind==="dilemma"){ const cf=qu.conf||C.DEFAULT_CONF; v.conf={...(v.conf||{})}; v.conf[qu.id]=cf.min+Math.round(Math.random()*(cf.max-cf.min)); }
         v.t=Date.now(); put(n,v); }, 500+400*i+150*j))); } }
