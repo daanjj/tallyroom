@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<!-- Scripts come from this site only, and nothing inline runs (backlog G7). Connections go to the Firebase database
+<!-- Scripts come from this site only, and nothing inline runs (backlog G7). The one exception is reCAPTCHA, which App Check
+     (backlog G6) loads from Google when APPCHECK_SITE_KEY is set in config.js; it cannot be kept in this repository. Connections go to the Firebase database
      (https and wss) and to Firebase Authentication; fonts to Google Fonts. Inline styles stay allowed: the page sets
      colours and sizes that way. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.firebasedatabase.app wss://*.firebasedatabase.app https://*.firebaseio.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; object-src 'none'; base-uri 'none'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://www.gstatic.com/recaptcha/; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; connect-src 'self' https://*.firebasedatabase.app wss://*.firebasedatabase.app https://*.firebaseio.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://content-firebaseappcheck.googleapis.com https://www.google.com/recaptcha/; object-src 'none'; base-uri 'none'; form-action 'self'">
 <title>Tally Room</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
-<link rel="stylesheet" href="css/styles.css?v=20261120g">
+<link rel="stylesheet" href="css/styles.css?v=20261120h">
 </head>
 <body>
 <div id="app"></div>
@@ -22,11 +23,12 @@
      app.js      screens and actions -->
 <script src="vendor/qrcode.min.js"></script>
 <script src="vendor/firebase-app-compat.js"></script>
+<script src="vendor/firebase-app-check-compat.js"></script>
 <script src="vendor/firebase-auth-compat.js"></script>
 <script src="vendor/firebase-database-compat.js"></script>
-<script src="config.js?v=20261120g"></script>
-<script src="js/core.js?v=20261120g"></script>
-<script src="js/backend.js?v=20261120g"></script>
-<script src="js/app.js?v=20261120g"></script>
+<script src="config.js?v=20261120h"></script>
+<script src="js/core.js?v=20261120h"></script>
+<script src="js/backend.js?v=20261120h"></script>
+<script src="js/app.js?v=20261120h"></script>
 </body>
 </html>

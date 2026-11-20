@@ -99,12 +99,29 @@ Participants never see a sign-in: their phone signs in anonymously, which is how
 
 Anonymous users pile up under Users, one per phone per browser. That is harmless; a project upgraded to Identity Platform can delete them automatically after 30 days.
 
+## 1c. App Check (optional, later)
+
+App Check makes the database accept requests from your page only, so a script elsewhere cannot use it with a self-made anonymous sign-in. It raises the effort for misuse; the rules of step 1.3 remain the real protection. Do this after at least one session has run well with the rules. Without it everything works as described.
+
+It uses reCAPTCHA v3, which shows no puzzle. It does load a script from Google on every device and shows the small reCAPTCHA badge in a corner of the page; mention that where you have to account for third parties.
+
+1. Go to https://www.google.com/recaptcha/admin/create. Choose type **Score based (v3)**, add the domain of your page (`<yourname>.github.io`), and create. You get a **site key** (public) and a **secret key**.
+2. Firebase console: **App Check → Apps**. Open your web app, choose **reCAPTCHA** (v3, not Enterprise), paste the **secret key**, and save.
+3. In `config.js`, put the **site key** in `APPCHECK_SITE_KEY` and put the file online. The site key is not a secret.
+4. Run a session. Then look at **App Check → APIs → Realtime Database**: the graph should show nearly all requests as **verified**.
+5. Only then click **Enforce** for Realtime Database. From that moment requests without a valid App Check token are refused. Leave Authentication unenforced unless you have checked its graph the same way.
+
+**Working on `localhost`:** reCAPTCHA is not registered for it, so the page asks Firebase for a debug token instead. Open the page on `localhost` with the browser console open; a line "App Check debug token: …" appears once per browser. Add that token under **App Check → Apps → your web app → ⋮ → Manage debug tokens**. Treat the token as a password and never put it in a file of this repository. Demo mode (`?demo=1`) does not touch Firebase and needs none of this.
+
+To switch App Check off again: click **Unenforce** in the console first, then empty `APPCHECK_SITE_KEY`.
+
 ## 2. Put your settings in the file
 
 Open `config.js` in a text editor (Notepad, TextEdit, VS Code). Fill in:
 
 - `FIREBASE_CONFIG`: paste the values from step 1.5. Make sure `databaseURL` is filled in with the URL from step 1.4 (the console sometimes leaves it out).
 - Nothing in `config.js` is a secret. Visitors download it; what they may do is decided by sign-in and the database rules.
+- `APPCHECK_SITE_KEY`: leave it empty (`""`) unless you set up App Check in step 1c.
 - `MIGRATE_POLL_ID`: leave it empty (`""`) for a new database. Only when you upgrade from the version with one poll: the old `POLL_ID` (e.g. `workshop-4`). The first time the presenter opens the page, that poll becomes a question set with the same questions and answers.
 
 Save the file. There is no `POLL_ID` any more: question sets are created inside the tool.
@@ -154,6 +171,8 @@ Firebase Spark plan: free, no credit card, 1 GB storage and 100 simultaneous con
 ## Troubleshooting
 
 - Page shows "Connecting…" forever: `databaseURL` missing or wrong in `config.js`, or rules not published. Also when the folder `vendor` was not uploaded, or on a network that blocks WebSockets (the page connects through WebSockets only; try mobile data).
+- Everything is refused right after you clicked **Enforce** for App Check: `APPCHECK_SITE_KEY` is empty or wrong in the `config.js` that is online, the domain is not on the reCAPTCHA key, or the secret key in the Firebase console belongs to another reCAPTCHA key. Click **Unenforce** to get going again, then check these three.
+- Works online but not on `localhost` with App Check enforced: the debug token of that browser is not registered (step 1c).
 - The browser console shows "violates the following Content Security Policy directive": the page tried to load or connect to something the policy in `index.html` does not list. A database on another host than `*.firebasedatabase.app` or `*.firebaseio.com` has to be added to `connect-src` there.
 - "Could not connect. Check your connection and reload" on a phone: the **Anonymous** provider is off (step 1b), the phone blocks storage (some private modes), or there is no network.
 - Votes are refused ("Your answer could not be saved"): the rules are published but the Anonymous provider is off, or the page online is still the old version.

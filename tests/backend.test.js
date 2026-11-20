@@ -8,7 +8,7 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
 function fakeStorage(init) { const m = new Map(Object.entries(init || {}));
   return { get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), has: (k) => m.has(k) }; }
 /* data = the database; presenters = uids on the list; user = who is signed in when the page loads */
-function fakeFirebase({ data = {}, user = null, anonFails = false } = {}) {
+function fakeFirebase({ data = {}, user = null, anonFails = false, noAppCheck = false } = {}) {
   const log = { on: [], off: [], anon: 0, out: 0 }; let authCb = null, cur = user, n = 0;
   const get = (path) => path.split("/").reduce((o, k) => (o == null ? o : o[k]), data);
   const setUser = (u) => { cur = u; setTimeout(() => authCb && authCb(cur), 0); };
@@ -18,12 +18,14 @@ function fakeFirebase({ data = {}, user = null, anonFails = false } = {}) {
     signOut: async () => { log.out++; setUser(null); }, sendPasswordResetEmail: async () => {} };
   const db = { ref: (path) => ({ on: (ev, cb) => { if (path && path[0] !== ".") { log.on.push(path); setTimeout(() => cb({ val: () => get(path) ?? null }), 0); } return cb; },
     off: () => log.off.push(path), once: async () => ({ val: () => get(path) ?? null }) }) };
-  return { log, firebase: { initializeApp() {}, database: () => db, auth: () => auth } };
+  const appCheck = () => ({ activate: (key, refresh) => log.appCheck.push([key, refresh, global.FIREBASE_APPCHECK_DEBUG_TOKEN === true]), getToken: async () => ({ token: "ac-token" }) });
+  log.appCheck = [];
+  return { log, firebase: { initializeApp() {}, database: () => db, auth: () => auth, ...(noAppCheck ? {} : { appCheck }) } };
 }
-function load(opts, storage, query, anon) {
+function load(opts, storage, query, anon, appCheckKey) {
   const fb = fakeFirebase(opts); global.firebase = fb.firebase; global.localStorage = storage || fakeStorage(); global.TRCore = require("../js/core.js");
   delete require.cache[require.resolve("../js/backend.js")];
-  const be = require("../js/backend.js").make({ firebaseConfig: { apiKey: "k", databaseURL: "https://x.example" }, params: new URLSearchParams(query || ""), anon });
+  const be = require("../js/backend.js").make({ firebaseConfig: { apiKey: "k", databaseURL: "https://x.example" }, params: new URLSearchParams(query || ""), anon, appCheckKey });
   const states = []; be.onAuth((a) => states.push(a)); return { be, states, log: fb.log };
 }
 const DATA = { presenters: { u_ann: true }, sets: { a: { name: "A" } }, polls: { a: { config: { mode: "live" }, actions: { k: { action: "x" } } } } };
@@ -70,6 +72,23 @@ test("the old presenter flag and device id are removed from the device", async (
   const st = fakeStorage({ tr_host: "1", tr_host_workshop: "1", tr_pid: "p_old", tr_qs: "1", tr_name_a: "{}" });
   load({ data: DATA }, st, "", false); await tick();
   assert.deepEqual(["tr_host", "tr_host_workshop", "tr_pid", "tr_qs", "tr_name_a"].map((k) => st.has(k)), [false, false, false, true, true]);
+});
+test("App Check starts only with a site key, and plain HTTPS reads carry its token", async () => {
+  delete global.FIREBASE_APPCHECK_DEBUG_TOKEN; delete global.location;
+  const off = load({ data: DATA }, null, "", false, ""); await tick(); assert.deepEqual(off.log.appCheck, []);
+  const calls = []; global.fetch = async (url, o) => { calls.push([url, o]); return { ok: true, json: async () => ({ config: 1 }) }; };
+  const on = load({ data: DATA, user: { uid: "u_ann", isAnonymous: false, getIdToken: async () => "id-token" } }, null, "", false, " site-key "); await tick();
+  assert.deepEqual(on.log.appCheck, [["site-key", true, false]]); // reCAPTCHA, token kept fresh, no debug token away from localhost
+  await on.be.readPoll("a");
+  assert.match(calls[0][0], /^https:\/\/x\.example\/polls\/a\.json\?auth=id-token&/); assert.equal(calls[0][1].headers["X-Firebase-AppCheck"], "ac-token");
+  calls.length = 0; const plain = load({ data: DATA, user: { uid: "u_ann", isAnonymous: false, getIdToken: async () => "id-token" } }, null, "", false, ""); await tick();
+  await plain.be.readPoll("a"); assert.equal(calls[0][1].headers, undefined);
+});
+test("App Check on localhost asks for a debug token; a page without the App Check script runs without it", async () => {
+  global.location = { hostname: "localhost" };
+  const local = load({ data: DATA }, null, "", false, "site-key"); await tick(); assert.deepEqual(local.log.appCheck, [["site-key", true, true]]);
+  delete global.FIREBASE_APPCHECK_DEBUG_TOKEN; delete global.location;
+  const none = load({ data: DATA, noAppCheck: true }, null, "set=a", true, "site-key"); await tick(); assert.equal(none.be.id, "anon1");
 });
 test("demo mode has no sign-in: presenter unless ?host=off", async () => {
   global.localStorage = fakeStorage(); global.addEventListener = () => {};

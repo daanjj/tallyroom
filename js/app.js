@@ -941,7 +941,7 @@ async function boot(){
   S.ui.qs=getQS(); applyQS();
   render();
   /* a set page signs in anonymously by itself; the overview and the sign-in screen do not need an identity for that */
-  const be = B.make({ firebaseConfig:(typeof FIREBASE_CONFIG!=="undefined" ? FIREBASE_CONFIG : {}), params, anon: !!SET_ID && !SIGNIN });
+  const be = B.make({ firebaseConfig:(typeof FIREBASE_CONFIG!=="undefined" ? FIREBASE_CONFIG : {}), params, anon: !!SET_ID && !SIGNIN, appCheckKey:(typeof APPCHECK_SITE_KEY!=="undefined" ? APPCHECK_SITE_KEY : "") });
   S.be=be; S.ui.readonly = be.canWrite===false;
   let offTimer=null;
   function setOffline(off){ if(off===!!S.ui.offline) return; S.ui.offline=off; if(S.booted) renderBg(); }

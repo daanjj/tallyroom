@@ -15,7 +15,7 @@ const NOW = Date.UTC(2026, 10, 20, 12, 0, 0);
 test("index.html loads scripts from this site only, has no inline script, and carries the policy", () => {
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
-  assert.ok(scripts.length >= 7);
+  assert.ok(scripts.length >= 8);
   for (const [, attrs, body] of scripts) {
     const src = (attrs.match(/src="([^"]+)"/) || [])[1];
     assert.ok(src, "inline script"); assert.equal(body.trim(), "");
@@ -23,7 +23,9 @@ test("index.html loads scripts from this site only, has no inline script, and ca
     assert.ok(fs.existsSync(path.join(root, src.split("?")[0])), src + " is missing");
   }
   const csp = (html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/) || [])[1] || "";
-  assert.match(csp, /script-src 'self'(;|$)/); assert.doesNotMatch(csp, /unsafe-eval/);
+  /* the site itself, plus reCAPTCHA for App Check (G6): Google serves it and it cannot be kept here */
+  const scriptSrc = (csp.match(/script-src ([^;]+)/) || [])[1] || "";
+  assert.deepEqual(scriptSrc.split(" "), ["'self'", "https://www.google.com/recaptcha/", "https://www.gstatic.com/recaptcha/"]); assert.doesNotMatch(csp, /unsafe-eval/);
   assert.doesNotMatch(html, /\son[a-z]+="/); // no inline event handlers
 });
 test("the screens hold no inline event handlers (the policy would block them)", () => {

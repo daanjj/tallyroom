@@ -92,9 +92,18 @@ function makeDemoBackend(isHost){
      presenter    signed in with email and password, and listed in presenters/{uid}
      participant  signed in anonymously, without any screen; the uid is the device id and the key of its vote record
    The database rules (database.rules.json) decide what each of them may read and write.
-   opts.anon: sign in anonymously when nobody is signed in (a set page); opts.signOut: ?host=off */
+   opts.anon: sign in anonymously when nobody is signed in (a set page); opts.signOut: ?host=off
+   opts.appCheckKey: the reCAPTCHA v3 site key for App Check (backlog G6); without it the page runs without App Check */
+/* App Check proves to Firebase that a request comes from this page. It has to be switched on before the database and
+   the sign-in are used; they then send its token by themselves. On localhost a debug token stands in for reCAPTCHA:
+   the Firebase script prints it in the console once, and it is registered in the Firebase console (tallyroom-setup.md). */
+function startAppCheck(key){ if(!key || !root.firebase.appCheck) return null;
+  try{ const h=(root.location && root.location.hostname)||""; if(h==="localhost" || h==="127.0.0.1" || h==="[::1]") root.FIREBASE_APPCHECK_DEBUG_TOKEN=true;
+    const ac=root.firebase.appCheck(); ac.activate(key, true); return ac; }
+  catch(e){ console.warn("App Check could not be started", e); return null; } }
 function makeFirebaseBackend(config, opts){
   root.firebase.initializeApp(config);
+  const appCheck=startAppCheck(opts.appCheckKey);
   dropLegacyKeys();
   const db=root.firebase.database();
   /* WebSockets only: the other way the Firebase script connects (long polling) loads scripts from the database host,
@@ -109,7 +118,8 @@ function makeFirebaseBackend(config, opts){
   const now=()=>Date.now()+offset;
   /* plain HTTPS reads carry the ID token of the signed-in device; without it the rules refuse them */
   const rest=async path=>{ const u=auth.currentUser; if(!u) throw new Error("rest: not signed in"); const tok=await u.getIdToken();
-    const r=await fetch(BASE+"/"+path+".json?auth="+encodeURIComponent(tok)+"&_="+Date.now(), {cache:"no-store"}); if(!r.ok) throw new Error("rest "+r.status); return (await r.json())||{}; };
+    let headers; if(appCheck){ try{ const t=await appCheck.getToken(); if(t && t.token) headers={"X-Firebase-AppCheck":t.token}; }catch(e){} } // the socket sends it by itself, a plain read does not
+    const r=await fetch(BASE+"/"+path+".json?auth="+encodeURIComponent(tok)+"&_="+Date.now(), headers ? {cache:"no-store", headers} : {cache:"no-store"}); if(!r.ok) throw new Error("rest "+r.status); return (await r.json())||{}; };
 
   /* ---- sign-in state ---- */
   const st={ready:false, uid:null, isHost:false, anon:false, email:"", error:null}, authFns=[];
@@ -179,12 +189,12 @@ function makeFirebaseBackend(config, opts){
       clearActions:()=>node.child("actions").remove() }; } };
 }
 
-/* opts: {firebaseConfig, params, anon}. Demo when ?demo is in the address or Firebase is not configured. */
+/* opts: {firebaseConfig, params, anon, appCheckKey}. Demo when ?demo is in the address or Firebase is not configured. */
 function make(opts){ const fc=opts.firebaseConfig||{}, params=opts.params;
   const demo = params.has("demo") || !(root.firebase && root.firebase.auth && fc.apiKey && fc.databaseURL);
   if(demo){ if(!params.has("demo")) console.warn("Firebase not configured: running in single-browser demo mode.");
     return makeDemoBackend(params.get("host")!=="off"); } // demo: presenter unless asked otherwise, nothing is stored
-  return makeFirebaseBackend(fc, {anon:!!opts.anon, signOut:params.get("host")==="off"});
+  return makeFirebaseBackend(fc, {anon:!!opts.anon, signOut:params.get("host")==="off", appCheckKey:String(opts.appCheckKey||"").trim()});
 }
 root.TRBackend={ make };
 if(typeof module!=="undefined" && module.exports) module.exports=root.TRBackend;

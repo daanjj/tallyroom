@@ -9,7 +9,7 @@ There is no build step: the browser loads these files as they are.
 | File | What it holds |
 |---|---|
 | `index.html` | The page shell: it only loads the files below |
-| `config.js` | Your settings: the Firebase project. No secret in it |
+| `config.js` | Your settings: the Firebase project and, optionally, the App Check site key. No secret in it |
 | `database.rules.json` | The database rules: who may read and write what. Published by hand in the Firebase console |
 | `css/styles.css` | All styling. The purple values are the default accent |
 | `js/core.js` | Pure logic: questions, statistics, exports, expiry, colour palette. No screen, no network |
@@ -41,7 +41,7 @@ Needs Node 18 or newer, nothing to install.
 
 ## Third-party scripts and the security policy
 
-The page runs only scripts from its own folder. `index.html` carries a Content Security Policy that allows scripts from the site itself, connections to the Firebase database and Firebase Authentication, images from the site and `data:` (the QR code), and Google Fonts for the typefaces. Inline scripts and `eval` are not allowed; inline styles are, because the page sets colours and sizes that way.
+The page runs only scripts from its own folder, with one exception: when App Check is switched on (`APPCHECK_SITE_KEY` in `config.js`), Firebase loads reCAPTCHA v3 from Google, which cannot be kept here. The policy lists the reCAPTCHA addresses for that; without the key nothing is loaded from them. `index.html` carries a Content Security Policy that allows scripts from the site itself, connections to the Firebase database and Firebase Authentication, images from the site and `data:` (the QR code), and Google Fonts for the typefaces. Inline scripts and `eval` are not allowed; inline styles are, because the page sets colours and sizes that way.
 
 The files in `vendor/` are unchanged copies, fetched on 20 Nov 2026. To update one, download the new version from the same place, replace the file, and note the version and checksum here.
 
@@ -50,9 +50,10 @@ The files in `vendor/` are unchanged copies, fetched on 20 Nov 2026. To update o
 | `qrcode.min.js` | qrcodejs 1.0.0 | `https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js` | `c541ef06327885a8415bca8df6071e14189b4855336def4f36db54bde8484f36` |
 | `firebase-app-compat.js` | Firebase 10.12.0 | `https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js` | `367d0b9aef0a8c08717135c67d4bcc26a5d4a7103e228a1da7c33aedb91e285f` |
 | `firebase-auth-compat.js` | Firebase 10.12.0 | `https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js` | `53de4f22563944851e5cbde4d89e930996b00301904adb69767d9e8b814c8247` |
+| `firebase-app-check-compat.js` | Firebase 10.12.0 | `https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js` | `3897630a79b188ddb4e69005057c63dae211a052a5887262d9f3e3d2166e0a19` |
 | `firebase-database-compat.js` | Firebase 10.12.0 | `https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js` | `274e3b01a7b86dc52441f9d0980ba765b7df6e5eff6e2d05a5ae62980140eca8` |
 
-The three Firebase files must stay on the same version. The database connection uses WebSockets only: Firebase's other way of connecting (long polling) loads scripts from the database host, which the policy does not allow.
+The four Firebase files must stay on the same version. The database connection uses WebSockets only: Firebase's other way of connecting (long polling) loads scripts from the database host, which the policy does not allow.
 
 ### Hostile test set
 
@@ -65,7 +66,8 @@ In the exports, a CSV cell that starts with `=`, `+`, `-` or `@` gets an apostro
 - **Presenters** sign in at `?host` with an email and password account made in the Firebase console, and are listed by hand in `presenters/{uid}: true`. All presenters see and manage all sets.
 - **Participants** sign in anonymously, without noticing. The uid of that sign-in is the device id and the key of the vote record.
 - `database.rules.json` enforces it: a presenter reads and writes everything; a participant reads `sets/{id}`, `config`, `session` and `votes` of the set whose link it has, and writes only `votes/{own uid}`, in a set that exists and has not expired, in the shape the page writes. The list of sets and the follow-up actions are for presenters only.
-- Not covered (see Epic G in `BACKLOG.md`): participants of a set can read each other's answers in the database (G5), and the database accepts requests from outside the page by anyone who signs in anonymously (G6).
+- **App Check** (optional, `tallyroom-setup.md` step 1c): with a site key in `config.js` and enforcement switched on in the console, the database accepts requests from this page only.
+- Not covered (see Epic G in `BACKLOG.md`): participants of a set can read each other's answers in the database (G5).
 
 ## Data layout
 
