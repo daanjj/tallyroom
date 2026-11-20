@@ -453,7 +453,7 @@ function myText(qu){ const k=txKey(qu.id); return String(S.ui.tx && S.ui.tx[k]!=
 function needsText(qu,chosen){ return isTraffic(qu) && (chosen===2||chosen===3) && !myText(qu); }
 /* the follow-up text of a yellow or red vote. It is sent when the participant stops typing for FU_IDLE, leaves the box
    or taps Done; until then the presenter only hears that someone is writing (see TYPING_MS in core.js) */
-const FU_IDLE=4000, FU_PING=5000;
+const FU_IDLE=10000, FU_PING=5000;
 let typingOff=false, lastPing={};
 function fuState(qid){ const k=txKey(qid), saved=String(myVotes().texts?.[qid]||""), draft = S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : saved;
   return !draft.trim() ? "req" : (draft===saved ? "sent" : "draft"); }

@@ -133,7 +133,7 @@ function trafficComments(votes, qu, named, now){ return Object.values(votes||{})
    While a participant types a comment the page holds the text back and sends typing/{qid} = the time of typing instead,
    refreshed every few seconds. The presenter shows a placeholder until the text arrives, so no half sentences on screen.
    A flag that is not refreshed (the phone went to sleep) stops counting after TYPING_MS. */
-const TYPING_MS=15000;
+const TYPING_MS=20000; // longer than FU_IDLE + FU_PING in app.js, so the flag outlives the pause before sending
 function isWriting(v, qid, now){ const t=v&&v.typing?v.typing[qid]:undefined; return Number.isFinite(t) && now-t<TYPING_MS; }
 function withoutTyping(doc, qid){ if(!doc || !doc.typing) return doc; const ty={...doc.typing}; delete ty[qid]; const out={...doc}; if(Object.keys(ty).length) out.typing=ty; else delete out.typing; return out; }
 /* how many chose yellow or red on this version and have no finished comment: nothing sent yet, or typing again */
