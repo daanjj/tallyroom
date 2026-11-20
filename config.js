@@ -15,5 +15,5 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "107998744016",
   appId: "1:107998744016:web:72bcb2dbc4e702a0857dd5"
 };
-const APPCHECK_SITE_KEY = "";
+const APPCHECK_SITE_KEY = "6LdvqCouAAAAAAFG3sxI7MO7qEhyP_HCH7u9MblZ";
 const MIGRATE_POLL_ID = "workshop-4";
