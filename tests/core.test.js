@@ -254,15 +254,15 @@ test("C1 revision filter: only answers given on the current version of a proposa
   assert.equal(C.trafficStatus(C.trafficCounts(votes, qu, 2)), "yellow");
   assert.equal(C.answerIsCurrent({}, qu.id, undefined), true);
 });
-test("D1 random names: letter plus two digits, unique within the set", () => {
-  assert.equal(C.randomName(new Set(), seq(1 / 26 + 0.001, 0.59)), "b59");
-  assert.equal(C.randomName([], seq(15 / 26 + 0.001, 0.03)), "p03");
-  assert.equal(C.randomName(new Set(["b59"]), seq(1 / 26 + 0.001, 0.59, 10 / 26 + 0.001, 0.12)), "k12", "draws again on a collision");
+test("D1 random names: letter plus one digit, unique within the set", () => {
+  assert.equal(C.randomName(new Set(), seq(1 / 26 + 0.001, 0.59)), "b5");
+  assert.equal(C.randomName([], seq(15 / 26 + 0.001, 0.03)), "p0");
+  assert.equal(C.randomName(new Set(["b5"]), seq(1 / 26 + 0.001, 0.59, 10 / 26 + 0.001, 0.12)), "k1", "draws again on a collision");
   const taken = new Set();
-  for (let i = 0; i < 300; i++) { const n = C.randomName(taken); assert.match(n, /^[a-z][0-9]{2}$/); assert.ok(!taken.has(n)); taken.add(n); }
-  const all = new Set(); for (let l = 0; l < 26; l++) for (let n = 0; n < 100; n++) all.add(String.fromCharCode(97 + l) + String(n).padStart(2, "0"));
-  assert.equal(C.randomName(all), null, "all 2,600 names in use");
-  all.delete("z99"); assert.equal(C.randomName(all), "z99", "finds the last free name");
+  for (let i = 0; i < 200; i++) { const n = C.randomName(taken); assert.match(n, /^[a-z][0-9]$/); assert.ok(!taken.has(n)); taken.add(n); }
+  const all = new Set(); for (let l = 0; l < 26; l++) for (let n = 0; n < 10; n++) all.add(String.fromCharCode(97 + l) + String(n));
+  assert.equal(C.randomName(all), null, "all 260 names in use");
+  all.delete("z9"); assert.equal(C.randomName(all), "z9", "finds the last free name");
 });
 
 /* ---------- categories (B1) ---------- */
@@ -386,7 +386,7 @@ test("D1 thirty devices joining a random set get thirty different names", () => 
   const votes = {};
   for (let i = 0; i < 30; i++) { const pid = "p_" + i, n = C.randomName(new Set(C.otherNames(votes, pid))); votes[pid] = { name: n, nameAt: i }; }
   const names = Object.values(votes).map(v => v.name);
-  assert.equal(new Set(names).size, 30); names.forEach(n => assert.match(n, /^[a-z][0-9]{2}$/));
+  assert.equal(new Set(names).size, 30); names.forEach(n => assert.match(n, /^[a-z][0-9]$/));
 });
 test("D1 joined: in a named set a device without a name and without answers does not count", () => {
   const votes = { a: vote(1, {}, {}, NOW), b: { ...vote(1, {}, {}, NOW), name: "k12" }, c: vote(1, { q: 1 }, {}, NOW) };

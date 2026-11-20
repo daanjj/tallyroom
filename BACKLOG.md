@@ -4,7 +4,7 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 
 ## How to read this
 
-- Items are grouped in four epics. IDs are stable (`A1`, `B3`, …) so they can be referenced in commits.
+- Items are grouped in epics A to F (E is parked for later). IDs are stable (`A1`, `B3`, …) so they can be referenced in commits.
 - Each item has: a user story, the specification, acceptance criteria (AC), dependencies and a rough size (S = up to half a day, M = about a day, L = several days).
 - **Assumption** marks a choice I made where your description left room. They are collected again in [Open decisions](#open-decisions); check those before starting the item.
 - "Set" means question set. "Presenter" is the device that opened the page with `?host=…`.
@@ -37,6 +37,7 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 | 5 | D1, D2 | Named respondents; small, and the consent overviews benefit from names |
 | 6 | C1, C2, C3, C4 | Consent workflow |
 | 7 | B3 | Dilemma question |
+| 8 | F1, F2 | Follow-up actions for concerns and objections; builds on the closing overview |
 
 ---
 
@@ -480,6 +481,7 @@ Version 1:
 > **Status: built on 20 Nov 2026**, tried in demo mode (`?demo=1`); not yet run against the live Firebase database.
 >
 > Differences from the specification below:
+> - **Random names are one letter plus one digit** (`k1`, `b5`, `p0`), changed on request on 20 Nov 2026 from the two digits specified below. That gives 260 names, still more than the 100 connections of the free Firebase plan.
 > - **Who gives way on a clash** is decided by the moment the name was claimed (`nameAt` in the vote doc), not by the last activity, so the outcome does not flip while people keep voting.
 > - **Changing the setting from the overview or Settings** asks for confirmation when people have already answered. Switching to No removes the names from the stored answers at once.
 > - **Someone who answered before names were switched on** shows as "unnamed" until their device has a name.
@@ -531,6 +533,117 @@ Applies when `named` is `yes` or `random`.
 - In a `no` set, no name appears anywhere and the exports still use `R01`, `R02`.
 
 **Depends on:** D1; B2 and C3/C4 for the places where names appear.
+
+---
+
+## Epic F: follow-up actions for concerns and objections
+
+Added 20 Nov 2026. Not built yet. Applies to sets of category `consent`.
+
+### F1. Action list on the presenter screen — M
+
+**Story.** As a presenter I want to go through all yellow and red remarks at the end of the session and record per remark what we do about it, who owns it and by when, so that the session ends with agreed follow-up instead of a list of comments.
+
+**Specification**
+
+- A third tab **Actions** in the closing overview (C3), next to Overview and Details. It is available as soon as the closing overview is, so after **Finish**. The tab label shows the progress: "Actions (4 / 9)".
+- The list holds one row per yellow or red remark on the **final version** of each proposal. Remarks on earlier versions are not listed. **Assumption:** an objection that led to a rewrite is considered handled by the rewrite.
+- Rows are grouped per proposal, in question order, with the proposal number, its text and its light as group heading. Within a proposal: red remarks first, then yellow, each oldest first.
+- Each row shows: a red or yellow dot, the respondent name when named respondents is on (D1), the remark text, and three fields:
+  - **Follow-up action**: free text, up to 300 characters, grows with its content.
+  - **Owner**: free text, up to 60 characters. In a named set the field suggests the names of the people in the room; any other text is allowed.
+  - **Deadline**: a date field (browser date picker), stored as `YYYY-MM-DD`. Optional.
+- Fields save automatically (on leaving the field, and two seconds after the last keystroke), with a small "Saved" mark. There is no Save button.
+- A row counts as done when it has an action text. A checkbox **No action needed** per row also makes it done; it greys out the three fields and keeps what was typed.
+- Above the list: "{done} of {total} remarks handled", and a filter **Show: all / open only**.
+- Only the presenter sees and edits this tab. Participants never see it.
+- The font size control applies to the remark texts; the list scrolls, it does not paginate, because rows are being typed in.
+- A session without yellow or red remarks shows "No concerns or objections to follow up."
+- Read-only cases: an expired set and review mode ("Open saved results") show the list without editable fields.
+
+**Storage**
+
+- `polls/{setId}/actions/{key}` = `{action, owner, due, none, t}`. The existing database rules already cover this path.
+- `key` = question id + `_` + device id of the respondent + `_v` + version of the proposal. It stays the same when the list is rebuilt, and an action never attaches to a remark on another version.
+- An action whose remark no longer exists (the respondent changed their vote after Finish, or the proposal was edited again) is not shown and not exported, but it is kept in the database until the answers are cleared.
+- **Clear all answers** and **Reset session** remove all actions, after the existing confirmation. The confirmation text mentions it when actions exist: "… and 6 recorded actions are removed."
+- **Duplicate** does not copy actions. **Delete** removes them with the rest of the set.
+
+**AC**
+
+- A session with 2 red and 3 yellow remarks on final versions shows exactly 5 rows, red before yellow within each proposal.
+- Typing an action, an owner and a deadline and reloading the presenter page shows the same values.
+- The counter goes from "0 of 5" to "5 of 5" when each row has an action text or is marked "No action needed".
+- A second presenter device that has the Actions tab open sees a change within a few seconds, without losing what is being typed there in another row.
+- A participant device never receives the Actions tab.
+
+**Depends on:** C2, C3; D1 for names and owner suggestions.
+
+### F2. Markdown export of the action list — S
+
+**Story.** As a presenter I want the action list as a Markdown file, so that I can paste it into minutes or a task tracker, or hand it to an AI assistant.
+
+**Specification**
+
+- Button **Export actions as Markdown** on the Actions tab. It works at any moment, also when not every remark is handled. File name `tallyroom-{name}-actions-{stamp}.md`.
+- Fixed English headings and column names; proposals, remarks, actions and owners as typed (see Language).
+- Structure:
+
+```markdown
+# {header}: follow-up actions
+
+- Date: 2026-11-20 14:32
+- Question set: {name}
+- Remarks: 5 (2 objections, 3 concerns)
+- Handled: 4 with an action, 1 no action needed, 0 open
+
+## Actions by proposal
+
+### 2. Red
+
+> Full text of the proposal as voted on last.
+
+| Type | Remark | By | Action | Owner | Deadline |
+|------|--------|----|--------|-------|----------|
+| Objection | Text of the objection | k1 | Recalculate the business case | Anna | 2026-12-01 |
+| Concern | Text of the concern | b5 | No action needed | | |
+
+### 5. Yellow
+
+> Full text of proposal 5.
+
+| Type | Remark | By | Action | Owner | Deadline |
+|------|--------|----|--------|-------|----------|
+| Concern | Text of the concern | p0 | (open) | | |
+
+## Actions by deadline
+
+| Deadline | Owner | Action | Proposal |
+|----------|-------|--------|----------|
+| 2026-12-01 | Anna | Recalculate the business case | 2 |
+```
+
+- The column **By** is left out when named respondents is `no`.
+- A remark without action and without "No action needed" gets `(open)` in the Action column.
+- "Actions by deadline" lists only rows with an action text, sorted by deadline (rows without deadline last), then by owner.
+- Pipes and line breaks inside table cells are escaped, as in C4.
+- The existing **Export as Markdown** (C4) gets an extra section "## Actions" with the "Actions by deadline" table when at least one action exists, so one file can hold the whole outcome.
+- The JSON results export carries the actions per remark, so "Open saved results" can show the list and export it again. The CSV export gets three extra columns `action`, `owner`, `deadline` on the rows of yellow and red answers.
+
+**AC**
+
+- The file renders correctly in a Markdown viewer; every listed remark appears exactly once under "Actions by proposal".
+- The counts in the header match the counter on the Actions tab.
+- A saved results JSON, opened in review mode, gives the same actions Markdown as the live session did.
+
+**Depends on:** F1; C4 for the shared Markdown rules.
+
+**Open points for this epic**
+
+1. **One action per remark.** Several people often raise the same concern. An option to give one action to several remarks ("same as above") would save typing, at the cost of a more complex list. Left out for now.
+2. **Only final versions.** If you also want to record actions for objections that were resolved by a rewrite, the list needs the earlier versions too.
+3. **Owner is free text.** It is not checked against the participants, so an owner can be someone outside the room.
+4. **Other categories.** Generic and dilemma sets have no yellow or red remarks. Open answers could get the same three fields later.
 
 ---
 

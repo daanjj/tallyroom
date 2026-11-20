@@ -48,7 +48,7 @@ Per set (Settings → Named respondents):
 
 - **No**: anonymous, as before. No name is stored.
 - **Yes**: a participant types a name (2 to 30 characters, unique in the set) before joining, and can change it.
-- **Random**: each device gets a name such as `k12` (one letter, two digits), unique in the set.
+- **Random**: each device gets a name such as `k1` (one letter, one digit), unique in the set. 260 names are possible.
 
 With Yes or Random the presenter sees names in front of comments and open answers, as chips under "In the room", and behind "Waiting for …" while answers come in. Exports use the name instead of `R01`. Charts stay aggregated.
 

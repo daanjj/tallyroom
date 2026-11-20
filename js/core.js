@@ -100,11 +100,11 @@ function otherNames(votes, myPid){ return Object.entries(votes||{}).filter(([pid
 /* two devices claimed the same name at the same moment: the one that claimed it last gives way (device id breaks a tie) */
 function mustYieldName(votes, myPid, myName, myNameAt){ const low=String(myName||"").toLowerCase(), at=myNameAt||0; if(!low) return false;
   return Object.entries(votes||{}).some(([pid,v])=>pid!==myPid && v && String(v.name||"").toLowerCase()===low && ((v.nameAt||0)<at || ((v.nameAt||0)===at && pid<myPid))); }
-/* one lowercase letter plus two digits, not yet in `taken` (a Set or array); null when all 2,600 are in use */
+/* one lowercase letter plus one digit (k1, b5), not yet in `taken` (a Set or array); null when all 260 are in use */
 function randomName(taken, rnd){ rnd=rnd||Math.random; const has=n=>taken instanceof Set ? taken.has(n) : (taken||[]).includes(n);
-  const make=(l,n)=>String.fromCharCode(97+l)+String(n).padStart(2,"0");
-  for(let i=0;i<200;i++){ const n=make(Math.min(25,Math.floor(rnd()*26)), Math.min(99,Math.floor(rnd()*100))); if(!has(n)) return n; }
-  for(let l=0;l<26;l++) for(let n=0;n<100;n++){ const x=make(l,n); if(!has(x)) return x; }
+  const make=(l,n)=>String.fromCharCode(97+l)+String(n);
+  for(let i=0;i<200;i++){ const n=make(Math.min(25,Math.floor(rnd()*26)), Math.min(9,Math.floor(rnd()*10))); if(!has(n)) return n; }
+  for(let l=0;l<26;l++) for(let n=0;n<10;n++){ const x=make(l,n); if(!has(x)) return x; }
   return null; }
 
 /* ============ consent workflow (backlog C): versions of a proposal and its final light ============ */
