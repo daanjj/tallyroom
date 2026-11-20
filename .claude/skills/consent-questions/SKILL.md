@@ -5,7 +5,7 @@ description: Create a Tallyroom questions file (JSON) for a consent round from a
 
 # Consent questions → Tallyroom import file
 
-Tallyroom's "Create from file" reads a JSON object (`parseQuestionsFile` in `js/core.js`):
+Tallyroom's "Create from file" reads a JSON object:
 
 ```json
 {
@@ -20,10 +20,10 @@ Tallyroom's "Create from file" reads a JSON object (`parseQuestionsFile` in `js/
 ## Steps
 
 1. Ask the user to paste their consent questions, one per line (bullets/numbering are stripped). Also ask, in the same message, for: a set name (default "Consent round"), optional header, and whether votes are named (`named`: "no" = anonymous, default). Keep the default Dutch follow-ups unless they want others.
-2. Save the pasted lines to a scratchpad text file (e.g. `questions.txt`).
-3. Run:
+2. Save the pasted lines to a temporary text file (e.g. `questions.txt`).
+3. Run `make_questions.py`, which sits in the same folder as this `SKILL.md`. Use that folder's real path for `SKILL_DIR`; the skill works from any location and does not need the Tallyroom repository:
    ```bash
-   python3 .claude/skills/consent-questions/make_questions.py questions.txt YYYYMMDD-tallyroom-questions.json --name "NAME" [--header "…"] [--named yes] [--yellow "…"] [--red "…"]
+   python3 SKILL_DIR/make_questions.py questions.txt YYYYMMDD-tallyroom-questions.json --name "NAME" [--header "…"] [--named yes] [--yellow "…"] [--red "…"]
    ```
-   Write the output in the repo root (today's date as prefix, like the existing `2026…-tallyroom-questions.json` files).
+   Use today's date as the prefix. Write the output where the user can reach it: the current working directory, or, in a chat without a working directory, the folder for downloadable files, and offer the file for download.
 4. Report the path and question count, and say: New question set → Create from file → pick the file (category Consent is set by the file). Questions are kept verbatim; don't rewrite them.
