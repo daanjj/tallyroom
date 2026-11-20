@@ -126,8 +126,8 @@ test("responses export: only the current round, yellow and red need their commen
   assert.deepEqual(p.answers.map(r => r.respondent), ["R01", "R02", "R03"]);
   assert.equal(p.answers[1].texts[t1.id], "Too costly");
   const csv = C.resultsCSV(p).replace(/^﻿/, "").split("\r\n");
-  assert.equal(csv[0], "respondent,question_nr,question,value,label,comment,set,header,category");
-  assert.ok(csv.includes('"R02",1,"Proposal",3,"Bezwaar","Too costly","Team B","Team B session","consent"'));
+  assert.equal(csv[0], "respondent,question_nr,question,value,label,comment,confidence,set,header,category");
+  assert.ok(csv.includes('"R02",1,"Proposal",3,"Bezwaar","Too costly",,"Team B","Team B session","consent"'));
   assert.equal(csv.length, 1 + 5);
 });
 test("file names: a set name becomes a safe slug", () => {
@@ -263,4 +263,105 @@ test("D1 random names: letter plus two digits, unique within the set", () => {
   const all = new Set(); for (let l = 0; l < 26; l++) for (let n = 0; n < 100; n++) all.add(String.fromCharCode(97 + l) + String(n).padStart(2, "0"));
   assert.equal(C.randomName(all), null, "all 2,600 names in use");
   all.delete("z99"); assert.equal(C.randomName(all), "z99", "finds the last free name");
+});
+
+/* ---------- categories (B1) ---------- */
+const kinds = { scale: () => C.q("S", 1, 5, "", ""), options: () => C.q("O", 1, 2, "", "", ["A", "B"]), open: () => C.qOpen("Open"),
+  traffic: () => tl("T"), dilemma: () => C.qDilemma("D", ["A", "B"]) };
+test("B1 category table: which question types each category offers and what '+ Add question' gives", () => {
+  assert.deepEqual(C.catRules("generic").kinds, ["scale", "options", "open"]);
+  assert.deepEqual(C.catRules("consent").kinds, ["scale", "options", "open", "traffic"]);
+  assert.deepEqual(C.catRules("dilemma").kinds, ["scale", "options", "open", "dilemma"]);
+  assert.equal(C.kindOf(C.qNew(C.catRules("generic").add)), "scale");
+  assert.equal(C.kindOf(C.qNew(C.catRules("consent").add)), "traffic");
+  assert.equal(C.kindOf(C.qNew(C.catRules("dilemma").add)), "dilemma");
+  assert.deepEqual(C.catRules("unknown"), C.catRules("generic"));
+  for (const k of Object.keys(kinds)) assert.equal(C.kindOf(kinds[k]()), k);
+});
+test("B1 imports: questions of a type the category lacks are skipped, with a message that says how many and why", () => {
+  const all = [kinds.scale(), kinds.traffic(), kinds.traffic(), kinds.dilemma(), kinds.open(), kinds.options()];
+  const g = C.filterForCategory("generic", all);
+  assert.deepEqual(g.kept.map(C.kindOf), ["scale", "open", "options"]); assert.deepEqual(g.skipped, { traffic: 2, dilemma: 1 });
+  assert.equal(C.skippedMessage("generic", g.skipped), "2 traffic light questions and 1 dilemma question skipped: that type is not available in a Generic set.");
+  assert.deepEqual(C.filterForCategory("consent", all).skipped, { dilemma: 1 });
+  assert.deepEqual(C.filterForCategory("dilemma", all).skipped, { traffic: 2 });
+  assert.equal(C.skippedMessage("consent", {}), "");
+});
+test("B1 changing category: only when every existing question fits, otherwise it names the questions", () => {
+  const qs = [kinds.scale(), kinds.traffic(), kinds.open(), kinds.traffic()];
+  assert.deepEqual(C.categoryBlockers("consent", qs), []);
+  assert.deepEqual(C.categoryBlockers("generic", qs), [{ n: 2, kind: "traffic" }, { n: 4, kind: "traffic" }]);
+  assert.equal(C.blockerMessage("generic", C.categoryBlockers("generic", qs)), "This set cannot become Generic: question 2, 4 are traffic light questions. Change or remove them first.");
+  assert.match(C.blockerMessage("dilemma", C.categoryBlockers("dilemma", [kinds.traffic()])), /question 1 is a traffic light question/);
+});
+test("B1 CSV import knows the new types", () => {
+  const qs = C.csvToQuestions("text,type,options\nWhy?,open,\nWhich way?,dilemma,Left|Right\nVote,traffic,\n");
+  assert.deepEqual(qs.map(C.kindOf), ["open", "dilemma", "traffic"]); assert.deepEqual(qs[1].options, ["Left", "Right"]); assert.deepEqual(qs[1].conf, C.DEFAULT_CONF);
+  assert.deepEqual(C.filterForCategory("generic", qs).kept.map(C.kindOf), ["open"]);
+});
+test("editor: changing the type reshapes a question and keeps what carries over", () => {
+  const s = C.q("Text", 0, 10, "lo", "hi");
+  const o = C.shapeQuestion({ ...s, options: ["A", "B"] }, "options");
+  assert.equal(o.kind, "options"); assert.equal(o.max, 2); assert.equal(o.id, s.id); assert.equal(o.text, "Text");
+  const d = C.shapeQuestion(o, "dilemma"); assert.deepEqual(d.options, ["A", "B"]); assert.deepEqual(d.conf, C.DEFAULT_CONF);
+  const back = C.shapeQuestion(d, "scale"); assert.equal(back.kind, undefined); assert.equal(back.min, 1); assert.equal(back.max, 5); assert.equal(back.options, undefined);
+  assert.deepEqual(C.shapeQuestion(s, "scale"), { id: s.id, text: "Text", min: 0, max: 10, lo: "lo", hi: "hi" });
+  assert.equal(C.shapeQuestion({ id: "x", text: "  " }, "open").text, "Untitled question");
+  assert.equal(C.shapeQuestion({ id: "x", text: "t", maxLen: 5 }, "open").maxLen, 20);
+  assert.deepEqual(C.questionProblems([C.qNew("options"), s, C.qNew("dilemma"), d]), ["Question 1: add at least two options.", "Question 3: add at least two options."]);
+});
+
+/* ---------- open question (B2) ---------- */
+test("B2 open question: an answer is its text; empty or blank does not count", () => {
+  const qu = C.qOpen("Why?");
+  assert.equal(qu.maxLen, 500); assert.equal(C.isOpt(qu), false);
+  assert.equal(C.validAns({ answers: { [qu.id]: 1 }, texts: { [qu.id]: "Because" } }, qu), 1);
+  assert.equal(C.validAns({ answers: { [qu.id]: 1 }, texts: { [qu.id]: "   " } }, qu), null);
+  assert.equal(C.validAns({ answers: { [qu.id]: 1 } }, qu), null);
+});
+test("B2 open answers survive JSON and CSV with line breaks, quotes and emoji", () => {
+  const qu = C.qOpen("Feedback"), text = 'Line one\nLine "two", with a comma 🎉';
+  const votes = { a: vote(1, { [qu.id]: 1 }, { [qu.id]: text }, NOW - 20), b: vote(1, { [qu.id]: 1 }, { [qu.id]: "Short" }, NOW - 10), c: vote(1, {}, {}, NOW) };
+  const p = JSON.parse(JSON.stringify(C.resultsPayload({ setId: "s", meta: C.newMeta({ name: "S" }, NOW), cfg: { questions: [qu] }, ses: { round: 1 }, votes, now: NOW })));
+  assert.equal(p.questions[0].kind, "open"); assert.equal(p.questions[0].answers, 2); assert.deepEqual(p.questions[0].texts, [text, "Short"]);
+  assert.equal(p.questions[0].mean, null); assert.equal(p.questions[0].mostChosen, null);
+  assert.equal(p.answers[0].texts[qu.id], text);
+  const rows = C.parseCSV(C.resultsCSV(p));
+  assert.equal(rows.length, 3); assert.deepEqual(rows[1].slice(0, 7), ["R01", "1", "Feedback", "", "", text, ""]);
+});
+
+/* ---------- dilemma question (B3) ---------- */
+test("B3 dilemma: counts only with both the choice and a confidence inside the scale", () => {
+  const qu = C.qDilemma("Which way?", ["A", "B"]);
+  assert.equal(C.validAns({ answers: { [qu.id]: 1 }, conf: { [qu.id]: 4 } }, qu), 1);
+  assert.equal(C.validAns({ answers: { [qu.id]: 1 } }, qu), null, "no confidence");
+  assert.equal(C.validAns({ conf: { [qu.id]: 4 } }, qu), null, "no choice");
+  assert.equal(C.validAns({ answers: { [qu.id]: 1 }, conf: { [qu.id]: 9 } }, qu), null, "confidence outside the scale");
+});
+test("B3 dilemma result: 3 on A (5, 4, 3) and 1 on B (2) gives A 3 / 4.0, B 1 / 2.0, overall 3.5", () => {
+  const qu = C.qDilemma("Which way?", ["A", "B"]), v = (a, c) => ({ round: 1, answers: { [qu.id]: a }, conf: { [qu.id]: c }, t: NOW });
+  const votes = { p1: v(1, 5), p2: v(1, 4), p3: v(1, 3), p4: v(2, 2), half: { round: 1, answers: { [qu.id]: 2 }, t: NOW } };
+  const ds = C.dilemmaStats(votes, qu);
+  assert.equal(ds.n, 4); assert.equal(ds.mean, 3.5); assert.equal(ds.mode, 1);
+  assert.equal(ds.by[1].n, 3); assert.equal(ds.by[1].mean, 4); assert.equal(ds.by[2].n, 1); assert.equal(ds.by[2].mean, 2);
+  assert.deepEqual(ds.by[1].dist, { 1: 0, 2: 0, 3: 1, 4: 1, 5: 1 });
+  const p = C.resultsPayload({ setId: "s", meta: C.newMeta({ name: "S", category: "dilemma" }, NOW), cfg: { questions: [qu] }, ses: { round: 1 }, votes, now: NOW });
+  assert.equal(p.questions[0].kind, "dilemma"); assert.equal(p.questions[0].answers, 4);
+  assert.deepEqual(p.questions[0].confidence, { mean: 3.5, byOption: [{ option: "A", count: 3, mean: 4 }, { option: "B", count: 1, mean: 2 }] });
+  assert.equal(p.answers.filter(r => r.confidence[qu.id] != null).length, 4);
+  const rows = C.parseCSV(C.resultsCSV(p)).slice(1).filter(r => r[6] !== "");
+  assert.equal(rows.length, 4); assert.deepEqual(rows[0].slice(3, 7), ["1", "A", "", "5"]);
+  assert.deepEqual(C.dilemmaStats({}, qu).mean, null);
+});
+test("B2/B3 questions file and saved results: open and dilemma questions come back the same", () => {
+  const cfg = { questions: [C.qOpen("Why?", 300), C.qDilemma("Which?", ["Left", "Right", "Wait"], { text: "Sure?", min: 1, max: 7, lo: "no", hi: "yes" })] };
+  const back = C.parseQuestionsFile(JSON.parse(JSON.stringify(C.questionsExport(C.newMeta({ name: "D", category: "dilemma" }, NOW), cfg))));
+  assert.deepEqual(back.questions.map(C.exportQ), cfg.questions.map(C.exportQ));
+  assert.deepEqual(back.questions[1].conf, { text: "Sure?", min: 1, max: 7, lo: "no", hi: "yes" }); assert.equal(back.questions[0].maxLen, 300);
+  const p = C.resultsPayload({ setId: "s", meta: C.newMeta({ name: "D" }, NOW), cfg, ses: { round: 1 }, votes: {}, now: NOW });
+  const revived = p.questions.map(C.reviveQuestion);
+  assert.deepEqual(revived.map(q => q.id), cfg.questions.map(q => q.id), "review mode keeps the ids, so answers still match");
+  assert.deepEqual(revived.map(C.exportQ), cfg.questions.map(C.exportQ));
+  assert.equal(C.kindOf(C.qFromObj({ text: "x", kind: "dilemma", options: ["only one"] })), "dilemma");
+  assert.equal(C.qFromObj({ text: "x", kind: "dilemma", options: ["only one"] }).options.length, 2, "a dilemma always has at least two options");
 });

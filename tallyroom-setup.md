@@ -60,7 +60,7 @@ To change questions or create sets later you do not need to re-upload: that happ
 ## 4. Question sets
 
 - **Presenter**: open `https://your-link/?host=paars2026` once on your laptop (your own HOST_KEY). That browser is now the presenter for all question sets; from then on the plain link opens the overview of sets on that device. `?host=off` switches it back.
-- **New question set** asks for a name (for your own overview), a header (what the audience sees), an accent colour, a category and an expiry date (3 days from now unless you change it). It then opens the question editor. **Create from file** starts the set from a questions file you exported earlier.
+- **New question set** asks for a name (for your own overview), a header (what the audience sees), an accent colour, a category and an expiry date (3 days from now unless you change it). The category decides which question types the set offers: *Generic* has scale, multiple choice and open questions; *Consent* adds the traffic light; *Dilemma* adds the dilemma question (a choice plus a confidence rating). It then opens the question editor. **Create from file** starts the set from a questions file you exported earlier.
 - Each set has its own link (`https://your-link/?set=…`) and QR code. **Show QR** in the overview gives a large code, **Copy link** and **Download PNG** for slides or print.
 - **More** per set: Settings, Other expiry date, Duplicate, Export questions, Export responses (JSON or CSV), Delete. These work without opening the set.
 - **Expiry**: after the expiry moment participants see "This question set has expired" and can no longer answer; the presenter sees the set read-only. Nothing is deleted. **Extend** in the overview (or **Extend 3 days** in the set) switches it back on for every device within a few seconds.
@@ -68,7 +68,7 @@ To change questions or create sets later you do not need to re-upload: that happ
 
 ## 5. Run a session
 
-- Open the set from the overview. In the lobby choose the mode: *one question at a time* or *answer all first, then reveal*. Click **Edit questions** to change texts, scales and labels; the JSON import lets you paste a whole list at once. **Settings** changes the header, colour and expiry date, live on every device.
+- Open the set from the overview. In the lobby choose the mode: *one question at a time* or *answer all first, then reveal*. Click **Edit questions** to change texts, types, scales and labels (each question has a **Type** list with the types of the set's category); the JSON import lets you paste a whole list at once. **Settings** changes the header, colour and expiry date, live on every device.
 - **Participants**: scan the QR code of the set or open its link on their phone. Each device counts as one participant per set. Nothing to install, no login.
 - **Back to lobby** sits in the top bar of the presenter view in every phase, so you can break off and restart at any moment. Answers are kept, so the lobby then also offers **Clear previous answers**. **All question sets** takes you back to the overview.
 - Keyboard on the presenter laptop: → next, ← previous, space = reveal.

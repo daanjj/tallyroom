@@ -211,3 +211,20 @@ a{color:var(--accent-text)}
 .sw.on{box-shadow:0 0 0 3px var(--ink)}
 .sw-custom{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--ink-2);margin-left:6px}
 .sw-custom input{width:44px;height:34px;padding:2px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface)}
+
+/* open question: answers as a list; dilemma: one bar per option, confidence stacked inside */
+.open-in{width:100%;min-height:110px;padding:10px 12px;border:1px solid var(--line-2);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:16px;resize:vertical}
+.open-list{list-style:none;margin:0;padding:0;display:grid;gap:8px;max-height:62vh;overflow:auto;font-size:calc(17px*var(--qs,.75)*1.25)}
+.open-list li{padding:10px 14px;border-radius:12px;background:var(--surface-2);white-space:pre-wrap;overflow-wrap:anywhere}
+.dl{display:grid;gap:12px;margin-top:6px}
+.dl-row{display:grid;grid-template-columns:minmax(120px,1.1fr) 2fr minmax(110px,auto);gap:12px;align-items:center}
+.dl-lab{font-weight:600;font-size:calc(16px*var(--qs,.75)*1.25);overflow-wrap:anywhere}
+.dl-lab b{font-family:var(--display);font-weight:800;color:var(--muted);margin-right:8px}
+.dl-track{height:26px;border-radius:8px;background:var(--surface-2);overflow:hidden}
+.dl-bar{display:flex;height:100%;gap:2px;min-width:0;transition:width .5s cubic-bezier(.2,.8,.2,1)}
+.dl-bar i{display:block;height:100%;background:var(--c)}
+.dl-num{font-family:var(--display);font-weight:800;font-size:18px;font-variant-numeric:tabular-nums;text-align:right}
+.dl-num small{font-size:13px;color:var(--muted);font-weight:600}
+.dl-num span{display:block;font-family:var(--body);font-weight:400;font-size:13px;color:var(--muted)}
+.dl-conf{margin-top:20px;font-weight:600;font-size:16px}
+@media (max-width:560px){.dl-row{grid-template-columns:1fr auto}.dl-track{grid-column:1/-1;grid-row:2}}

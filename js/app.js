@@ -1,7 +1,7 @@
 (function(){
 "use strict";
 const C=window.TRCore, B=window.TRBackend;
-const { clamp, fmt, tx, normOptions, isTraffic, isOpt, optLabel, q, exportQ, stats, hasAnswers, validAns, normSession, csvToQuestions, TL_LABELS, TL_COLORS, TL_Q_YELLOW, TL_Q_RED, DEFAULT_SESSION } = C;
+const { clamp, fmt, tx, normOptions, isTraffic, isOpen, isDilemma, kindOf, isOpt, optLabel, q, exportQ, stats, hasAnswers, validAns, normSession, csvToQuestions, TL_LABELS, TL_COLORS, TL_Q_YELLOW, TL_Q_RED, DEFAULT_SESSION } = C;
 const tlPrompt = v => C.followUp(S.cfg, v);
 const qColor = (qu,i,n) => (isTraffic(qu) && TL_COLORS[i]) ? TL_COLORS[i] : rampColor(i,n);
 const qInk = (qu,i,n) => isTraffic(qu) ? (i===1?"#1E1838":"#FFFFFF") : selInk(i,n);
@@ -95,8 +95,36 @@ function chartHTML(qu, vals, opts={}){
       : `<div class="empty">No answers yet.</div><div class="ends"><span>${esc(tx(qu.lo))}</span><span>${esc(tx(qu.hi))}</span></div>`}
   <div class="strip">${strip.join("")}</div>`;
 }
-function sumScore(r){ if(!r.st.n) return -1; return isOpt(r.qu) ? r.st.counts[r.st.mode]/r.st.n : r.st.mean/r.qu.max; }
-function sumMetric(r){ if(!r.st.n) return "–"; return isOpt(r.qu) ? `${r.st.counts[r.st.mode]}<small> /${r.st.n}</small>` : `${fmt(r.st.mean)}<small> /${r.qu.max}</small>`; }
+/* the result of one question, whatever its kind */
+function resultHTML(qu){ return isOpen(qu) ? openAnswersHTML(qu) : isDilemma(qu) ? dilemmaChartHTML(qu) : chartHTML(qu, answersFor(qu.id)); }
+function openAnswersHTML(qu){
+  const list=Object.values(currentRoundVotes()).filter(v=>validAns(v,qu)!=null).sort((a,b)=>(a.t||0)-(b.t||0)).map(v=>String(v.texts[qu.id]).trim());
+  return `<div class="chart-head"><div class="hero"><span class="num">${list.length}</span><span class="den">${list.length===1?"answer":"answers"}</span></div></div>
+  ${list.length ? `<ul class="open-list">${list.map(t=>`<li>${esc(t)}</li>`).join("")}</ul>` : `<div class="empty">No answers yet.</div>`}`;
+}
+function dilemmaChartHTML(qu){
+  const ds=C.dilemmaStats(currentRoundVotes(),qu), cf=qu.conf||C.DEFAULT_CONF, n=ds.n, cpts=cf.max-cf.min+1;
+  const most=Math.max(1,...Object.values(ds.by).map(o=>o.n)), top=n?ds.by[ds.mode].n:0;
+  const modes=n?Object.keys(ds.by).filter(k=>ds.by[k].n===top).map(k=>optLabel(qu,+k)):[];
+  const rows=qu.options.map((o,i)=>{ const b=ds.by[i+1]; let seg="";
+    for(let c=cf.min,j=0;c<=cf.max;c++,j++){ if(b.dist[c]) seg+=`<i style="--c:${rampColor(j,cpts)};flex-grow:${b.dist[c]}" title="Confidence ${c}: ${b.dist[c]}"></i>`; }
+    return `<div class="dl-row"><div class="dl-lab"><b>${i+1}</b>${esc(tx(o))}</div><div class="dl-track"><div class="dl-bar" style="width:${Math.round(100*b.n/most)}%">${seg}</div></div>
+      <div class="dl-num">${b.n}<small> · ${n?Math.round(100*b.n/n):0}%</small><span>${b.n?`confidence ${fmt(b.mean)}`:"–"}</span></div></div>`; }).join("");
+  let legend=""; for(let c=cf.min,j=0;c<=cf.max;c++,j++) legend+=`<span><i style="--c:${rampColor(j,cpts)}"></i>${c}${c===cf.min&&tx(cf.lo)?` ${esc(tx(cf.lo))}`:""}${c===cf.max&&tx(cf.hi)?` ${esc(tx(cf.hi))}`:""}</span>`;
+  return `<div class="chart-head">
+    <div class="hero"><span class="num">${n?top:"–"}</span><span class="den">/ ${n||"–"} ${n?"chose":""}</span></div>
+    <div class="stat"><span class="v" style="font-size:17px;max-width:360px">${n?esc(modes.length>1?"Tie: "+modes.join(" · "):modes[0]):"–"}</span><span class="l">most chosen</span></div>
+    <div class="stat"><span class="v">${n?fmt(ds.mean):"–"}<small style="font-size:13px;color:var(--muted)"> / ${cf.max}</small></span><span class="l">mean confidence</span></div>
+  </div>
+  ${n?"":`<div class="empty">No answers yet.</div>`}<div class="dl">${rows}</div>
+  <div class="legend"><span>${esc(tx(cf.text))}</span>${legend}</div>`;
+}
+function sumNote(r){ const qu=r.qu;
+  if(isOpen(qu)) return "open question";
+  if(isDilemma(qu)){ const ds=C.dilemmaStats(currentRoundVotes(),qu); return `dilemma, ${qu.options.length} options${r.st.n?` · most chosen: ${esc(optLabel(qu,r.st.mode))} · mean confidence ${fmt(ds.mean)}`:""}`; }
+  return isOpt(qu) ? `${qu.options.length} options${r.st.n?` · most chosen: ${esc(optLabel(qu,r.st.mode))}`:""}` : `scale ${qu.min}–${qu.max}`; }
+function sumScore(r){ if(!r.st.n || isOpen(r.qu)) return -1; return isOpt(r.qu) ? r.st.counts[r.st.mode]/r.st.n : r.st.mean/r.qu.max; }
+function sumMetric(r){ if(!r.st.n) return "–"; if(isOpen(r.qu)) return `${r.st.n}<small> ${r.st.n===1?"answer":"answers"}</small>`; return isOpt(r.qu) ? `${r.st.counts[r.st.mode]}<small> /${r.st.n}</small>` : `${fmt(r.st.mean)}<small> /${r.qu.max}</small>`; }
 function trafficTable(Q, curId, allShown, pick){
   const ses=S.ses, rows=Q.map((qu,i)=>({qu,i})).filter(r=>isTraffic(r.qu));
   if(!rows.length) return "";
@@ -110,7 +138,7 @@ function trafficTable(Q, curId, allShown, pick){
     return `<tr class="${qu.id===curId?"cur":""}${pick?" pick":""}"${pick?` data-act="tlSel" data-q="${qu.id}" title="Show details"`:""}><td class="n">${i+1}</td><td>${esc(tx(qu.text))}</td><td class="r">${cell}</td></tr>`; }).join("");
   return `<div class="card" style="padding:18px 20px"><table class="tl-table"><thead><tr><th>#</th><th>Statement</th><th>${esc(((Q.find(isTraffic)||{}).options||TL_LABELS).join(" / "))}</th></tr></thead><tbody>${body}</tbody></table><div class="tl-pager" hidden></div></div>`;
 }
-function miniStrip(qu, vals){
+function miniStrip(qu, vals){ if(isOpen(qu)) return `<div class="mini" style="visibility:hidden"></div>`;
   const pts=qu.max-qu.min+1, st=stats(vals,qu.min,qu.max); let s="";
   for(let v=qu.min,i=0;v<=qu.max;v++,i++){ const c=st.counts?.[v]||0; if(c) s+=`<i style="--c:${qColor(qu,i,pts)};flex:${c}"></i>`; }
   return `<div class="mini">${s}</div>`;
@@ -143,15 +171,13 @@ async function exportSet(id, kind){ const meta=metaOf(id); if(!meta) return;
 function importResults(text, fname){
   let p=null; try{ p=JSON.parse(text); }catch(e){ alert("That file is not valid JSON."); return; }
   if(!p || !Array.isArray(p.questions) || !p.questions.length){ alert("No questions found in that file. Load a JSON saved by Tally Room."); return; }
-  const qs=p.questions.map((q,i)=>{ const o=normOptions(q.options), id=String(q.id||("q"+i)), text=String(q.text||("Question "+(i+1)));
-    if(q.kind==="traffic" || q.traffic) return {id, text, kind:"traffic", options:(o.length===3?o:TL_LABELS.slice()), min:1, max:3, lo:"", hi:""};
-    return o.length>=2 ? {id, text, kind:"options", options:o, min:1, max:o.length, lo:"", hi:""}
-                       : {id, text, min:clamp(Math.round(C.num(q.min,1)),0,10), max:clamp(Math.round(C.num(q.max,5)),1,11), lo:q.lo||"", hi:q.hi||""}; });
+  const qs=p.questions.map(C.reviveQuestion);
   const votes={};
   (Array.isArray(p.answers)?p.answers:[]).forEach((r,i)=>{ const a={};
     qs.forEach(qu=>{ const v=r && r.answers ? r.answers[qu.id] : null; if(Number.isFinite(v)) a[qu.id]=v; });
     const tx={}; qs.forEach(qu=>{ const t=r&&r.texts?r.texts[qu.id]:null; if(typeof t==="string"&&t.trim()) tx[qu.id]=t; });
-    if(Object.keys(a).length) votes[String((r&&r.respondent)||("R"+(i+1)))]={round:1, answers:a, texts:tx, t:Date.parse((r&&r.at)||"")||Date.now()}; });
+    const cf={}; qs.forEach(qu=>{ const c=r&&r.confidence?r.confidence[qu.id]:null; if(Number.isFinite(c)) cf[qu.id]=c; });
+    if(Object.keys(a).length) votes[String((r&&r.respondent)||("R"+(i+1)))]={round:1, answers:a, texts:tx, conf:cf, t:Date.parse((r&&r.at)||"")||Date.now()}; });
   if(!Object.keys(votes).length && !confirm("That file has questions but no answers. Open it anyway?")) return;
   S.review={ live:{cfg:S.cfg, ses:S.ses, votes:S.votes},
     info:{ title:String(p.title||"Saved results"), n:Object.keys(votes).length, file:String(fname||""),
@@ -183,7 +209,7 @@ function render(){
     html=notice("This question set does not exist (any more)", "Ask the presenter for a new link or QR code."+(S.me.isHost?` <a href="${esc(urlFor())}">All question sets</a>`:"")); }
   else if(S.meta===undefined || !S.cfg || !S.ses){ html=notice("", "Connecting…", true); }
   else { applyTheme(S.meta.accent); document.title=header(); host = S.me.isHost && S.ui.view!=="participant"; }
-  const ae=document.activeElement, keep = (ae && ae.classList && ae.classList.contains("tl-fu-in")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
+  const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in"))) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
   const mc=document.querySelector("#modal .card"), mTop=mc?mc.scrollTop:0, wTop=window.scrollY;
   S.rendering=true; try{ app.innerHTML = html!=null ? html : (host ? hostHTML() : (expired() ? expiredHTML() : participantHTML())); } finally { S.rendering=false; }
   if(keep){ const el=document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.a,keep.b); }catch(e){} } }
@@ -224,7 +250,7 @@ function hostHTML(){
     const qu=Q[ses.current]; const vals=answersFor(qu.id); const revealed=ses.revealed.includes(qu.id);
     main=`<div class="card" style="padding:26px 26px 20px"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(tx(qu.text))}</div>
       <div class="progress" style="margin:20px 0 6px"><div class="bar"><i style="width:${joined?Math.round(100*vals.length/joined):0}%"></i></div><b>${vals.length} / ${joined} answered</b></div></div>
-      <div class="card chart">${revealed||ses.showLive ? chartHTML(qu,vals) : `<div class="hidden-note"><div class="pulse"></div><div>Answers are hidden until you reveal them. <span class="meta">${vals.length} in so far.</span></div></div>`}</div>
+      <div class="card chart">${revealed||ses.showLive ? resultHTML(qu) : `<div class="hidden-note"><div class="pulse"></div><div>Answers are hidden until you reveal them. <span class="meta">${vals.length} in so far.</span></div></div>`}</div>
       ${isTraffic(qu)?trafficTable(Q,qu.id,false):""}${isTraffic(qu)&&(revealed||ses.showLive)?commentsHTML(qu):""}
       <div class="controls"><button class="btn" data-act="prev" ${ses.current===0?"disabled":""}>← Previous</button>
         ${revealed?"":`<button class="btn primary" data-act="reveal">Reveal results</button>`}
@@ -242,7 +268,7 @@ function hostHTML(){
   } else if(ph==="results"){
     const qu=Q[ses.current]; const vals=answersFor(qu.id);
     main=`<div class="card" style="padding:26px 26px 20px"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(tx(qu.text))}</div></div>
-      <div class="card chart">${chartHTML(qu,vals)}</div>
+      <div class="card chart">${resultHTML(qu)}</div>
       ${isTraffic(qu)?trafficTable(Q,qu.id,true)+commentsHTML(qu):""}
       <div class="controls"><button class="btn" data-act="prev" ${ses.current===0?"disabled":""}>← Previous</button>
         ${ses.current<Q.length-1?`<button class="btn primary" data-act="next">Next question →</button>`:`<button class="btn primary" data-act="summary">Show summary</button>`}</div>`;
@@ -253,7 +279,7 @@ function hostHTML(){
     const tlT=trafficTable(Q,selQ?selQ.id:null,true,true);
     const detail=selQ?`<div class="card" id="tl-detail" style="padding:26px 26px 20px"><div class="qnum">Question ${Q.indexOf(selQ)+1} of ${Q.length}</div><div class="qtext">${esc(tx(selQ.text))}</div></div><div class="card chart">${chartHTML(selQ,answersFor(selQ.id))}</div>${commentsHTML(selQ,true)}`:"";
     main=`${detail}${tlT}${tlT&&!selQ?`<div class="meta" style="margin:-6px 4px 0">Click a row for the detailed view.</div>`:""}<div class="card" style="padding:26px"><div class="eyebrow">Summary</div>${sorted.length?`<h2 style="font-size:28px;margin-top:6px">${tlT?"Other questions":`All ${Q.length} questions`}, highest average or agreement first</h2>`:""}
-      <div style="margin-top:14px">${sorted.map(r=>`<div class="sum-row"><div class="t">${esc(tx(r.qu.text))}<small>Q${r.i+1} · ${r.st.n} answers · ${isOpt(r.qu)?`${r.qu.options.length} options${r.st.n?` · most chosen: ${esc(optLabel(r.qu,r.st.mode))}`:""}`:`scale ${r.qu.min}–${r.qu.max}`}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${sumMetric(r)}</div></div>`).join("")}</div>
+      <div style="margin-top:14px">${sorted.map(r=>`<div class="sum-row"><div class="t">${esc(tx(r.qu.text))}<small>Q${r.i+1} · ${r.st.n} answers · ${sumNote(r)}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${sumMetric(r)}</div></div>`).join("")}</div>
       <div class="controls" style="margin-top:18px"><button class="btn" data-act="gotoResults" data-v="0">Back to question 1</button><button class="btn ghost" data-act="lobby">Back to lobby</button>${exportBtns()}<span class="spacer"></span>${expired()?"":`<button class="btn danger" data-act="reset">Clear all answers</button>`}</div></div>`;
   }
   return `<div class="wrap">${topbar(controls)}${reviewBanner()}${expiredBanner()}${S.ui.readonly?`<div class="banner" style="margin-bottom:12px">You can see this session but this account is not allowed to change it.</div>`:""}<div class="stage two"><div class="stage">${main}</div>${side}</div></div>`;
@@ -296,7 +322,25 @@ function afterHost(){
 /* ---- participant ---- */
 function myVotes(){ const v=S.votes[S.me.id]; /* Firebase drops empty objects, so a vote doc from the lobby comes back without answers/texts */
   return (v && v.round===S.ses.round) ? {...v, answers:v.answers||{}, texts:v.texts||{}} : {round:S.ses.round, answers:{}, texts:{}}; }
+function openDraft(qu){ const k=txKey(qu.id); return S.ui.tx && S.ui.tx[k]!=null ? S.ui.tx[k] : String(myVotes().texts?.[qu.id]||""); }
+function openInputHTML(qu){ const val=openDraft(qu), saved=String(myVotes().texts?.[qu.id]||"").trim(), max=qu.maxLen||C.OPEN_MAX;
+  return `<div class="tl-fu"><label for="op_${qu.id}">Your answer</label><textarea class="open-in" id="op_${qu.id}" data-q="${qu.id}" data-saved="${esc(saved)}" maxlength="${max}" rows="4" placeholder="Type your answer here">${esc(val)}</textarea>
+    <div class="controls"><button class="btn primary" data-act="openSubmit" data-q="${qu.id}" id="ops_${qu.id}" ${val.trim()&&val.trim()!==saved?"":"disabled"}>${saved?"Update answer":"Submit"}</button><small id="opn_${qu.id}">${val.length} / ${max}</small></div></div>`; }
+/* dilemma: the choice and the confidence are picked first and sent together with Submit */
+function dlDraft(qu){ const d=(S.ui.dl||{})[txKey(qu.id)]||{}, m=myVotes(); return { a:d.a!=null?d.a:m.answers[qu.id], c:d.c!=null?d.c:(m.conf||{})[qu.id] }; }
+function dilemmaInputHTML(qu){ const d=dlDraft(qu), m=myVotes(), cf=qu.conf||C.DEFAULT_CONF, cpts=cf.max-cf.min+1;
+  const saved=validAns(m,qu)!=null, dirty=d.a!==m.answers[qu.id] || d.c!==(m.conf||{})[qu.id], ready=Number.isFinite(d.a)&&Number.isFinite(d.c);
+  let ob="", cb="";
+  qu.options.forEach((o,i)=>{ const v=i+1; ob+=`<button data-act="dlPick" data-q="${qu.id}" data-v="${v}" class="${d.a===v?"on":""}" style="--c:var(--accent);--sel-ink:var(--accent-ink)" aria-pressed="${d.a===v}"><b>${v}</b><span>${esc(tx(o))}</span></button>`; });
+  for(let c=cf.min,j=0;c<=cf.max;c++,j++) cb+=`<button data-act="dlConf" data-q="${qu.id}" data-v="${c}" class="${d.c===c?"on":""}" style="--c:${rampColor(j,cpts)};--sel-ink:${selInk(j,cpts)}" aria-pressed="${d.c===c}">${c}</button>`;
+  return `<div class="scale opts" style="grid-template-columns:1fr">${ob}</div>
+    <div class="dl-conf">${esc(tx(cf.text))}</div>
+    <div class="scale" style="margin-top:8px;grid-template-columns:repeat(${cpts>6?Math.ceil(cpts/2):cpts},minmax(0,1fr))">${cb}</div><div class="scale-ends"><span>${esc(tx(cf.lo))}</span><span>${esc(tx(cf.hi))}</span></div>
+    <div class="controls" style="margin-top:16px"><button class="btn primary" data-act="dlSubmit" data-q="${qu.id}" ${ready&&(dirty||!saved)?"":"disabled"}>${saved?"Update answer":"Submit"}</button>${saved&&dirty?`<small style="color:var(--warn);font-weight:700">Changed, not sent yet.</small>`:""}</div>`; }
+function answerHint(qu){ return isOpen(qu) ? "Type your answer and tap Submit." : isDilemma(qu) ? "Choose an option and your confidence, then tap Submit." : isOpt(qu) ? "Tap an option to answer." : "Tap a number to answer."; }
 function scaleHTML(qu, chosen){
+  if(isOpen(qu)) return openInputHTML(qu);
+  if(isDilemma(qu)) return dilemmaInputHTML(qu);
   const pts=qu.max-qu.min+1; let b="";
   if(isOpt(qu)){
     for(let v=qu.min,i=0;v<=qu.max;v++,i++){ b+=`<button data-act="vote" data-q="${qu.id}" data-v="${v}" class="${chosen===v?"on":""}" style="--c:${qColor(qu,i,pts)};--sel-ink:${qInk(qu,i,pts)}" aria-pressed="${chosen===v}"><b>${v}</b><span>${esc(tx(qu.options[i]))}</span></button>`; }
@@ -316,7 +360,7 @@ function followUpHTML(qu, chosen){
 }
 function saveText(qid){ const val=(S.ui.tx||{})[txKey(qid)]; if(val==null || S.review) return; const mine=myVotes();
   if(!Number.isFinite(mine.answers[qid]) || (mine.texts&&mine.texts[qid])===val) return;
-  const next={round:S.ses.round, answers:{...mine.answers}, texts:{...(mine.texts||{}),[qid]:val}, t:Date.now()};
+  const next={...mine, round:S.ses.round, answers:{...mine.answers}, texts:{...(mine.texts||{}),[qid]:val}, t:Date.now()};
   S.votes[S.me.id]=next; write(()=>S.backend.setVotes(S.me.id,next)); }
 function commentsHTML(qu, always){
   if(!isTraffic(qu)) return "";
@@ -340,7 +384,7 @@ function participantHTML(){
   } else if(ph==="voting" && cfg.mode==="live"){
     const qu=Q[ses.current]; const chosen=mine.answers[qu.id]; const revealed=ses.revealed.includes(qu.id);
     body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(tx(qu.text))}</div>${revealed?"":scaleHTML(qu,chosen)}</div>
-      ${revealed ? `<div class="card chart">${chartHTML(qu,answersFor(qu.id))}</div>` : (needsText(qu,chosen)?`<div class="toast wait">Required: answer the follow-up question above. Your vote counts once you have.</div>`:Number.isFinite(chosen)?`<div class="toast">✓ Answer recorded: ${esc(optLabel(qu,chosen))}. You can change it until results are revealed.</div>`:`<div class="toast wait">${isOpt(qu)?"Tap an option to answer.":"Tap a number to answer."}</div>`)}`;
+      ${revealed ? `<div class="card chart">${resultHTML(qu)}</div>` : (needsText(qu,chosen)?`<div class="toast wait">Required: answer the follow-up question above. Your vote counts once you have.</div>`:validAns(mine,qu)!=null?`<div class="toast">✓ Answer recorded${isOpen(qu)?"":`: ${esc(optLabel(qu,chosen))}`}. You can change it until results are revealed.</div>`:`<div class="toast wait">${answerHint(qu)}</div>`)}`;
   } else if(ph==="voting" && cfg.mode==="batch"){
     /* small phones: one question per screen, at the participant's own pace */
     const ok=Q.map(qu=>validAns(mine,qu)!=null), done=ok.filter(Boolean).length;
@@ -352,7 +396,7 @@ function participantHTML(){
       ${done===Q.length?`<div class="toast">✓ All ${Q.length} answered. Your answers are saved; you can still go back and change them until the reveal starts.</div>`:(needsText(qu,mine.answers[qu.id])?`<div class="toast wait">Required: answer the follow-up question above. Your vote counts once you have.</div>`:`<div class="toast wait">${Q.length-done} to go. Answers save automatically.</div>`)}`;
   } else if(ph==="results"){
     const qu=Q[ses.current];
-    body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(tx(qu.text))}</div></div><div class="card chart">${chartHTML(qu,answersFor(qu.id))}</div>${Number.isFinite(mine.answers[qu.id])?`<div class="toast wait">You answered ${esc(optLabel(qu,mine.answers[qu.id]))}.</div>`:""}`;
+    body=`<div class="card p-q"><div class="qnum">Question ${ses.current+1} of ${Q.length}</div><div class="qtext">${esc(tx(qu.text))}</div></div><div class="card chart">${resultHTML(qu)}</div>${!isOpen(qu)&&validAns(mine,qu)!=null?`<div class="toast wait">You answered ${esc(optLabel(qu,mine.answers[qu.id]))}${isDilemma(qu)?`, confidence ${mine.conf[qu.id]}`:""}.</div>`:""}`;
   } else if(ph==="summary"){
     const rows=Q.map((qu,i)=>({qu,i,st:stats(answersFor(qu.id),qu.min,qu.max)})).sort((a,b)=>sumScore(b)-sumScore(a));
     body=`<div class="card" style="padding:20px"><div class="eyebrow">Summary</div>${rows.map(r=>`<div class="sum-row"><div class="t">${esc(tx(r.qu.text))}<small>Q${r.i+1} · ${r.st.n} answers${isOpt(r.qu)&&r.st.n?` · most chosen: ${esc(optLabel(r.qu,r.st.mode))}`:""}</small></div>${miniStrip(r.qu,answersFor(r.qu.id))}<div class="m">${sumMetric(r)}</div></div>`).join("")}</div>`;
@@ -361,22 +405,31 @@ function participantHTML(){
 }
 
 /* ---- config ---- */
+function qFieldsHTML(qu,i,cat){ const k=kindOf(qu), kinds=[...C.catRules(cat).kinds]; if(!kinds.includes(k)) kinds.push(k); // a type from before the category applied stays selectable
+  const opts=(label,ph)=>`<div class="field"><label for="qopt${i}">${label}</label><textarea data-q="${i}" data-k="options" id="qopt${i}" rows="${Math.min(((qu.options||[]).length||2)+1,8)}" placeholder="${ph}">${esc((qu.options||[]).map(tx).join("\n"))}</textarea></div>`;
+  const scale=(o,p,lab)=>`<div class="row"><div class="field"><label for="q${p}min${i}">${lab} from</label><input type="number" id="q${p}min${i}" data-q="${i}" data-k="${p}min" value="${o.min}" min="0" max="10"></div><div class="field"><label for="q${p}max${i}">to</label><input type="number" id="q${p}max${i}" data-q="${i}" data-k="${p}max" value="${o.max}" min="2" max="11"></div>
+      <div class="field"><label for="q${p}lo${i}">Low end label</label><input type="text" id="q${p}lo${i}" data-q="${i}" data-k="${p}lo" value="${esc(tx(o.lo))}"></div><div class="field"><label for="q${p}hi${i}">High end label</label><input type="text" id="q${p}hi${i}" data-q="${i}" data-k="${p}hi" value="${esc(tx(o.hi))}"></div></div>`;
+  let body="";
+  if(k==="scale") body=scale(qu,"","Scale");
+  else if(k==="options") body=opts("Options, one per line (2 to 11)","Option A&#10;Option B&#10;Option C");
+  else if(k==="traffic") body=opts("Button labels for green, yellow, red (3 lines, optional)",esc(TL_LABELS.join("\n")).replace(/\n/g,"&#10;"));
+  else if(k==="open") body=`<div class="row"><div class="field"><label for="qml${i}">Longest answer allowed (characters)</label><input type="number" id="qml${i}" data-q="${i}" data-k="maxLen" value="${qu.maxLen||C.OPEN_MAX}" min="20" max="2000"></div></div>`;
+  else if(k==="dilemma"){ const cf=qu.conf||C.DEFAULT_CONF; body=opts("Options to choose from, one per line (2 to 11)","Option A&#10;Option B")
+    +`<div class="field"><label for="qct${i}">Confidence question (answered together with the choice)</label><input type="text" id="qct${i}" data-q="${i}" data-k="ctext" value="${esc(tx(cf.text))}"></div>`+scale(cf,"c","Confidence scale"); }
+  return `<div class="field"><label for="qk${i}">Type</label><select id="qk${i}" data-q="${i}" data-k="kind">${kinds.map(x=>`<option value="${x}" ${x===k?"selected":""}>${C.KIND_LABEL[x]}</option>`).join("")}</select></div>${body}`; }
 function configHTML(){
-  const d=S.ui.draft;
+  const d=S.ui.draft, cat=S.meta?S.meta.category:"generic";
   return `<div class="modal" id="modal"><div class="card" role="dialog" aria-label="Edit questions">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:22px;flex:1">Questions</h2><button class="btn sm ghost" data-act="cfgClose">Close</button></div>
     <div class="field"><label>Mode</label><div class="seg"><button data-act="cfgMode" data-v="live" class="${d.mode==="live"?"on":""}">One question at a time</button><button data-act="cfgMode" data-v="batch" class="${d.mode==="batch"?"on":""}">Answer all first, then reveal</button></div></div>
-    ${d.questions.some(isTraffic)?`<div class="field"><label for="cfgTlY">Traffic light: follow-up question when someone answers yellow</label><input type="text" id="cfgTlY" value="${esc(d.tlYellow||TL_Q_YELLOW)}"></div>
+    ${cat==="consent"||d.questions.some(isTraffic)?`<div class="field"><label for="cfgTlY">Traffic light: follow-up question when someone answers yellow</label><input type="text" id="cfgTlY" value="${esc(d.tlYellow||TL_Q_YELLOW)}"></div>
     <div class="field"><label for="cfgTlR">Traffic light: follow-up question when someone answers red</label><input type="text" id="cfgTlR" value="${esc(d.tlRed||TL_Q_RED)}"></div>`:""}
     <div style="display:grid;gap:12px">${d.questions.map((qu,i)=>`<div class="qcard" data-i="${i}">
       <div class="head"><span class="qnum">Question ${i+1}</span><button class="btn sm ghost" data-act="qUp" data-i="${i}" ${i===0?"disabled":""} title="Move up">↑</button><button class="btn sm ghost" data-act="qDown" data-i="${i}" ${i===d.questions.length-1?"disabled":""} title="Move down">↓</button><button class="btn sm danger" data-act="qDel" data-i="${i}">Remove</button></div>
       <textarea data-q="${i}" data-k="text" id="qt${i}" placeholder="Statement or question">${esc(tx(qu.text))}</textarea>
-      <label class="meta" style="display:flex;gap:8px;align-items:center;margin:2px 0 8px"><input type="checkbox" data-act="qTL" data-q="${i}" data-k="tl" ${isTraffic(qu)?"checked":""}> Traffic light: ${esc(TL_LABELS.join(" / "))} (green, yellow, red)</label>
-      <div class="field"><label for="qopt${i}">${isTraffic(qu)?"Button labels for green, yellow, red (3 lines, optional)":"Named options, one per line (leave empty for a numeric scale)"}</label><textarea data-q="${i}" data-k="options" id="qopt${i}" rows="${isOpt(qu)?Math.min(qu.options.length+1,8):2}" placeholder="Option A&#10;Option B&#10;Option C">${esc(isOpt(qu)?qu.options.join("\n"):"")}</textarea></div>
-      <div class="row" style="${isOpt(qu)?"display:none":""}"><div class="field"><label for="qmin${i}">Scale from</label><input type="number" id="qmin${i}" data-q="${i}" data-k="min" value="${qu.min}" min="0" max="10"></div><div class="field"><label for="qmax${i}">to</label><input type="number" id="qmax${i}" data-q="${i}" data-k="max" value="${qu.max}" min="2" max="11"></div>
-      <div class="field"><label for="qlo${i}">Low end label</label><input type="text" id="qlo${i}" data-q="${i}" data-k="lo" value="${esc(tx(qu.lo))}"></div><div class="field"><label for="qhi${i}">High end label</label><input type="text" id="qhi${i}" data-q="${i}" data-k="hi" value="${esc(tx(qu.hi))}"></div></div></div>`).join("")}</div>
-    <div class="controls"><button class="btn" data-act="qAdd">+ Add question</button><button class="btn ghost" data-act="qAdd5">+ Add five (1–5, agree scale)</button><button class="btn ghost" data-act="qAddTL">+ Add traffic-light row</button><button class="btn ghost" data-act="csvPick">Import questions from CSV</button><input type="file" id="cfgCsv" accept=".csv,.txt,text/csv,text/plain" style="display:none"></div><div class="meta">CSV: one question per row, appended to the list. First column is the statement; with no other columns every row becomes a 1–5 scale question. Optional header columns: <b>text, type</b> (scale (default), traffic or options), <b>options</b> (separated by |), <b>min, max, lo, hi</b>. Comma or semicolon both work.</div>
-    <details id="cfgJsonBox" ${S.ui.jsonOpen?"open":""}><summary>Import / export as JSON</summary><div class="field" style="margin-top:10px"><textarea id="cfgJson" rows="8" style="font-family:ui-monospace,monospace;font-size:13px">${esc(S.ui.jsonText ?? questionsJSON(d))}</textarea><div class="meta">Numeric: {"text","min","max","lo","hi"}. Named options: {"text","options":["…","…"]}. Traffic light: {"text","kind":"traffic"}. With traffic-light questions the JSON is {"followUps":{"yellow":"…","red":"…"},"questions":[…]}; a plain list also works.</div><div class="controls"><button class="btn sm" data-act="cfgImport">Replace questions with this JSON</button></div></div></details>
+      ${qFieldsHTML(qu,i,cat)}</div>`).join("")}</div>
+    <div class="controls"><button class="btn" data-act="qAdd">+ Add question</button><span class="meta">${esc(C.catName(cat))} set: new questions start as ${C.KIND_NAME[C.catRules(cat).add]}.</span><button class="btn ghost" data-act="qAdd5">+ Add five (1–5, agree scale)</button><button class="btn ghost" data-act="csvPick">Import questions from CSV</button><input type="file" id="cfgCsv" accept=".csv,.txt,text/csv,text/plain" style="display:none"></div><div class="meta">CSV: one question per row, appended to the list. First column is the statement; with no other columns every row becomes a 1–5 scale question. Optional header columns: <b>text, type</b> (scale (default), options, open, traffic or dilemma; types this set does not offer are skipped), <b>options</b> (separated by |), <b>min, max, lo, hi</b>. Comma or semicolon both work.</div>
+    <details id="cfgJsonBox" ${S.ui.jsonOpen?"open":""}><summary>Import / export as JSON</summary><div class="field" style="margin-top:10px"><textarea id="cfgJson" rows="8" style="font-family:ui-monospace,monospace;font-size:13px">${esc(S.ui.jsonText ?? questionsJSON(d))}</textarea><div class="meta">Numeric: {"text","min","max","lo","hi"}. Named options: {"text","options":["…","…"]}. Open: {"text","kind":"open"}. Traffic light: {"text","kind":"traffic"}. Dilemma: {"text","kind":"dilemma","options":[…],"conf":{"text","min","max","lo","hi"}}. Types this set does not offer are skipped. With traffic-light questions the JSON is {"followUps":{"yellow":"…","red":"…"},"questions":[…]}; a plain list also works.</div><div class="controls"><button class="btn sm" data-act="cfgImport">Replace questions with this JSON</button></div></div></details>
     <div class="meta">Header, colour and expiry date are under Settings in the top bar. Changing a question's scale after people answered keeps their answers; removing a question drops its answers.</div>
     <div class="controls"><button class="btn primary" data-act="cfgSave">Save</button><button class="btn ghost" data-act="cfgClose">Cancel</button></div>
   </div></div>`;
@@ -386,12 +439,13 @@ function questionsJSON(d){ const qs=d.questions.map(exportQ);
 function readDraftFromDOM(){
   const d=S.ui.draft; const jb=document.getElementById("cfgJsonBox"); if(jb) S.ui.jsonOpen=jb.open; const jt=document.getElementById("cfgJson"); if(jt && jb && jb.open) S.ui.jsonText=jt.value;
   const ty=document.getElementById("cfgTlY"), tr=document.getElementById("cfgTlR"); if(ty) d.tlYellow=ty.value.trim(); if(tr) d.tlRed=tr.value.trim();
-  document.querySelectorAll("[data-q][data-k]").forEach(el=>{ const qu=d.questions[+el.dataset.q]; if(!qu) return; const k=el.dataset.k; if(k==="options"){ qu.options=normOptions(el.value); return; } if(k==="tl"){ qu.tl=el.checked; return; } qu[k] = (k==="min"||k==="max") ? +el.value : el.value; });
-  d.questions.forEach(qu=>{ qu.text=(qu.text||"").trim()||"Untitled question";
-    if(qu.tl){ qu.kind="traffic"; if(!qu.options||qu.options.length!==3) qu.options=TL_LABELS.slice(); qu.min=1; qu.max=3; qu.lo=""; qu.hi=""; }
-    else if(qu.options && qu.options.length>=2){ qu.kind="options"; qu.min=1; qu.max=qu.options.length; qu.lo=""; qu.hi=""; }
-    else { delete qu.kind; delete qu.options; qu.min=clamp(Math.round(qu.min||1),0,10); qu.max=clamp(Math.round(qu.max||5),qu.min+1,11); }
-    delete qu.tl; });
+  const CK={ctext:"text",cmin:"min",cmax:"max",clo:"lo",chi:"hi"}, picked={};
+  document.querySelectorAll("#modal [data-q][data-k]").forEach(el=>{ const i=+el.dataset.q, qu=d.questions[i]; if(!qu) return; const k=el.dataset.k;
+    if(k==="options"){ qu.options=normOptions(el.value); return; }
+    if(k==="kind"){ picked[i]=el.value; return; }
+    if(CK[k]){ qu.conf={...(qu.conf||C.DEFAULT_CONF), [CK[k]]:(k==="cmin"||k==="cmax")?+el.value:el.value}; return; }
+    qu[k] = (k==="min"||k==="max"||k==="maxLen") ? +el.value : el.value; });
+  d.questions=d.questions.map((qu,i)=>C.shapeQuestion(qu, picked[i]||kindOf(qu)));
 }
 
 /* ============ overview of all question sets (presenter home) ============ */
@@ -455,7 +509,7 @@ function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEF
     <div class="field"><label>Accent colour</label><div class="swatches">${C.ACCENT_PRESETS.map(([n,hex])=>`<button type="button" class="sw${hex===acc?" on":""}" data-act="dlgAccent" data-v="${hex}" style="background:${hex}" title="${n}" aria-label="${n}"></button>`).join("")}
       <label class="sw-custom">Other <input type="color" id="dlgColor" value="${acc.toLowerCase()}" aria-label="Pick another accent colour"></label></div></div>
     <div class="field"><label for="dlgCat">Category</label><select id="dlgCat">${C.CATEGORIES.map(c=>`<option value="${c}" ${f.category===c?"selected":""}>${cap(c)}</option>`).join("")}</select>
-      <div class="meta">For now this is a label in the overview. Later it decides which question types the set offers.</div></div>
+      <div class="meta">Decides which question types the set offers. Generic: scale, multiple choice, open. Consent adds the traffic light, Dilemma adds the dilemma question (choice plus confidence).</div></div>
     <div class="field"><label for="dlgExp">Expires on</label><input type="datetime-local" id="dlgExp" value="${Number.isFinite(f.expiresAt)?toLocalInput(f.expiresAt):toLocalInput(C.extendedExpiry(Date.now()))}">
       <div class="controls"><span class="meta">From now:</span>${[[1,"1 day"],[3,"3 days"],[7,"1 week"],[30,"1 month"]].map(([n,l])=>`<button type="button" class="btn sm" data-act="dlgExpQuick" data-v="${n}">${l}</button>`).join("")}</div>
       <div class="meta">After this moment participants can no longer answer. Nothing is deleted and you can extend at any time.</div></div>
@@ -467,9 +521,14 @@ async function saveSetDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id)
   const exp=g("dlgExp").value ? new Date(g("dlgExp").value).getTime() : NaN; if(!Number.isFinite(exp)){ alert("Choose a valid expiry date and time."); g("dlgExp").focus(); return; }
   const fields={ name, header:g("dlgHeader").value.trim().slice(0,80), accent:C.normHex(g("dlgColor").value)||C.DEFAULT_ACCENT, category:g("dlgCat").value, expiresAt:exp };
   try{
+    if(d.id && fields.category!==d.f.category){ // a set can only move to a category that offers all its question types
+      const qs=(S.route==="set" && S.cfg && !S.review) ? S.cfg.questions : C.normConfig((await S.be.readPoll(d.id)).config).questions;
+      const bl=C.categoryBlockers(fields.category, qs); if(bl.length){ alert(C.blockerMessage(fields.category, bl)); return; } }
     if(d.id){ await S.be.patchMeta(d.id, {...fields, joinUrl:g("dlgJoin")?g("dlgJoin").value.trim():"", updatedAt:now}); closeDlg(); return; }
     const id=freshSetId(), imp=d.imported, cfg=C.emptyConfig();
-    if(imp){ cfg.questions=imp.questions; cfg.tlYellow=imp.tlYellow; cfg.tlRed=imp.tlRed; if(imp.set && imp.set.mode) cfg.mode=imp.set.mode; }
+    if(imp){ const f=C.filterForCategory(fields.category, imp.questions), msg=C.skippedMessage(fields.category, f.skipped);
+      if(msg && !confirm(msg+"\n\nCreate the set without them?")) return;
+      cfg.questions=f.kept; cfg.tlYellow=imp.tlYellow; cfg.tlRed=imp.tlRed; if(imp.set && imp.set.mode) cfg.mode=imp.set.mode; }
     await S.be.writePoll(id, {config:cfg, session:{...DEFAULT_SESSION}});
     await S.be.setMeta(id, C.newMeta({...fields, named:imp&&imp.set?imp.set.named:"no"}, now));
     location.href=urlFor({set:id, edit:true});
@@ -520,8 +579,8 @@ app.addEventListener("click", e=>{
   const act=b.dataset.act, v=b.dataset.v, id=b.dataset.id, ses=S.ses, Q=S.cfg?S.cfg.questions:[];
   const menu=b.closest("details.menu"); if(menu) menu.removeAttribute("open");
   /* an expired set is read-only: paging through results stays local, nothing that changes the room is allowed */
-  if(S.route==="set" && expired() && ["start","reset","hardReset","config","mode","reviewPublish","vote","rejoin"].includes(act)){ alert("This question set has expired. Extend it first."); return; }
-  if(S.review && (act==="reset"||act==="hardReset"||act==="vote")){ alert("Not while you are reviewing saved results. Exit review first."); return; }
+  if(S.route==="set" && expired() && ["start","reset","hardReset","config","mode","reviewPublish","vote","openSubmit","dlSubmit","rejoin"].includes(act)){ alert("This question set has expired. Extend it first."); return; }
+  if(S.review && ["reset","hardReset","vote","openSubmit","dlSubmit"].includes(act)){ alert("Not while you are reviewing saved results. Exit review first."); return; }
   switch(act){
     case "mode": setConfig({...S.cfg, mode:v}); break;
     case "start": setSession({phase:"voting", current:0, revealed:[], showLive:false}); break;
@@ -557,25 +616,33 @@ app.addEventListener("click", e=>{
     case "asHost": S.ui.view=null; render(); break;
     case "vote": {
       const qid=b.dataset.q, val=+b.dataset.v; const mine=myVotes(); const texts={...(mine.texts||{})}; if(mine.answers[qid]!==val){ delete texts[qid]; if(S.ui.tx) delete S.ui.tx[txKey(qid)]; }
-      const next={round:S.ses.round, answers:{...mine.answers,[qid]:val}, texts, t:Date.now()};
+      const next={...mine, round:S.ses.round, answers:{...mine.answers,[qid]:val}, texts, t:Date.now()};
       S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next));
       if(mine.answers[qid]!==val && isTraffic(Q.find(x=>x.id===qid)) && val!==1){ const box=document.getElementById("fu_"+qid); if(box){ box.scrollIntoView({block:"center",behavior:reduced?"auto":"smooth"}); try{ box.focus({preventScroll:true}); }catch(e){} } }
       break; }
+    case "openSubmit": { const qid=b.dataset.q, val=String((S.ui.tx||{})[txKey(qid)] ?? "").trim(); if(!val) break; const mine=myVotes();
+      const next={...mine, round:S.ses.round, answers:{...mine.answers,[qid]:1}, texts:{...(mine.texts||{}),[qid]:val}, t:Date.now()};
+      S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next)); break; }
+    case "dlPick": case "dlConf": { const qu=Q.find(x=>x.id===b.dataset.q); if(!qu) break; S.ui.dl=S.ui.dl||{};
+      S.ui.dl[txKey(qu.id)]={...dlDraft(qu), [act==="dlPick"?"a":"c"]:+v}; render(); break; }
+    case "dlSubmit": { const qu=Q.find(x=>x.id===b.dataset.q); if(!qu) break; const d=dlDraft(qu), mine=myVotes(); if(!Number.isFinite(d.a) || !Number.isFinite(d.c)) break;
+      const next={...mine, round:S.ses.round, answers:{...mine.answers,[qu.id]:d.a}, conf:{...(mine.conf||{}),[qu.id]:d.c}, t:Date.now()}; // both parts in one write
+      if(S.ui.dl) delete S.ui.dl[txKey(qu.id)];
+      S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next)); break; }
     case "config": S.ui.draft=JSON.parse(JSON.stringify(S.cfg)); S.ui.configOpen=true; render(); break;
     case "cfgClose": S.ui.configOpen=false; S.ui.draft=null; S.ui.jsonText=null; S.ui.jsonOpen=false; render(); break;
     case "cfgMode": readDraftFromDOM(); S.ui.draft.mode=v; render(); break;
     case "qUp": case "qDown": { readDraftFromDOM(); const i=+b.dataset.i, j=act==="qUp"?i-1:i+1; const a=S.ui.draft.questions; [a[i],a[j]]=[a[j],a[i]]; render(); break; }
     case "qDel": readDraftFromDOM(); S.ui.draft.questions.splice(+b.dataset.i,1); render(); break;
-    case "qAdd": readDraftFromDOM(); S.ui.draft.questions.push(q("",1,5,"Strongly disagree","Strongly agree")); render(); setTimeout(()=>{ if(S.ui.draft) document.getElementById("qt"+(S.ui.draft.questions.length-1))?.focus(); },0); break;
+    case "qAdd": readDraftFromDOM(); S.ui.draft.questions.push(C.qNew(C.catRules(S.meta.category).add)); render(); setTimeout(()=>{ if(S.ui.draft) document.getElementById("qt"+(S.ui.draft.questions.length-1))?.focus(); },0); break;
     case "fontUp": case "fontDown": { const i=QS_STEPS.indexOf(S.ui.qs), j=clamp(i+(act==="fontUp"?1:-1),0,QS_STEPS.length-1); S.ui.qs=QS_STEPS[j]; try{ localStorage.setItem("tr_qs",String(S.ui.qs)); }catch(e){} applyQS(); render(); break; }
     case "pqPrev": case "pqNext": S.ui.pq=Math.max(0,(S.ui.pq||0)+(act==="pqNext"?1:-1)); render(); window.scrollTo(0,0); break;
     case "tlPrev": case "tlNext": { const y=scrollY; S.ui.tlPage=(S.ui.tlPage||0)+(act==="tlNext"?1:-1); render(); scrollTo(0,y); break; }
     case "csvPick": document.getElementById("cfgCsv")?.click(); break;
-    case "qTL": readDraftFromDOM(); render(); break;
-    case "qAddTL": readDraftFromDOM(); const have=S.ui.draft.questions.filter(isTraffic).length; const add=have===0?2:1; for(let k=0;k<add;k++) S.ui.draft.questions.push(q("",1,3,"","",null,true)); render(); break;
     case "qAdd5": readDraftFromDOM(); for(let k=0;k<5;k++) S.ui.draft.questions.push(q("",1,5,"Strongly disagree","Strongly agree")); render(); break;
-    case "cfgImport": { readDraftFromDOM(); try{ let arr=JSON.parse(document.getElementById("cfgJson").value); if(arr && !Array.isArray(arr) && Array.isArray(arr.questions)){ const f=arr.followUps||{}; if(typeof f.yellow==="string"&&f.yellow.trim()) S.ui.draft.tlYellow=f.yellow.trim(); if(typeof f.red==="string"&&f.red.trim()) S.ui.draft.tlRed=f.red.trim(); arr=arr.questions; } if(!Array.isArray(arr)) throw 0; S.ui.draft.questions=arr.map(x=>q(x.text||"",C.num(x.min,1),C.num(x.max,5),x.lo||"",x.hi||"",x.options,x.kind==="traffic"||x.traffic===true)); S.ui.jsonText=null; render(); }catch(err){ alert("That JSON could not be read. Expected a list like [{\"text\":\"…\",\"min\":1,\"max\":5,\"lo\":\"…\",\"hi\":\"…\"}] or [{\"text\":\"…\",\"options\":[\"…\",\"…\"]}]"); } break; }
-    case "cfgSave": { readDraftFromDOM(); const d=S.ui.draft; if(!d.questions.length){ alert("Add at least one question."); break; } S.ui.configOpen=false; S.ui.draft=null; S.ui.jsonText=null; S.ui.jsonOpen=false; const cur=Math.min(S.ses.current, d.questions.length-1); setConfig(d); if(cur!==S.ses.current) setSession({current:cur}); if(!S.review) S.be.patchMeta(S.setId,{updatedAt:Date.now()}).catch(()=>{}); break; }
+    case "cfgImport": { readDraftFromDOM(); try{ let arr=JSON.parse(document.getElementById("cfgJson").value); if(arr && !Array.isArray(arr) && Array.isArray(arr.questions)){ const f=arr.followUps||{}; if(typeof f.yellow==="string"&&f.yellow.trim()) S.ui.draft.tlYellow=f.yellow.trim(); if(typeof f.red==="string"&&f.red.trim()) S.ui.draft.tlRed=f.red.trim(); arr=arr.questions; } if(!Array.isArray(arr)) throw 0; const f=C.filterForCategory(S.meta.category, arr.map(C.qFromObj)); S.ui.draft.questions=f.kept; S.ui.jsonText=null; render(); const msg=C.skippedMessage(S.meta.category, f.skipped); if(msg) alert(msg); }catch(err){ alert("That JSON could not be read. Expected a list like [{\"text\":\"…\",\"min\":1,\"max\":5,\"lo\":\"…\",\"hi\":\"…\"}] or [{\"text\":\"…\",\"options\":[\"…\",\"…\"]}]"); } break; }
+    case "cfgSave": { readDraftFromDOM(); const d=S.ui.draft; if(!d.questions.length){ alert("Add at least one question."); break; }
+      const probs=C.questionProblems(d.questions); if(probs.length){ alert(probs.join("\n")); break; } S.ui.configOpen=false; S.ui.draft=null; S.ui.jsonText=null; S.ui.jsonOpen=false; const cur=Math.min(S.ses.current, d.questions.length-1); setConfig(d); if(cur!==S.ses.current) setSession({current:cur}); if(!S.review) S.be.patchMeta(S.setId,{updatedAt:Date.now()}).catch(()=>{}); break; }
     /* ---- question sets ---- */
     case "setNew": openSetDlg(null); break;
     case "setSettings": openSetDlg(id, b.dataset.focus); break;
@@ -602,17 +669,22 @@ app.addEventListener("click", e=>{
   }
 });
 app.addEventListener("change", e=>{ const inp=e.target;
+  if(inp && inp.dataset && inp.dataset.k==="kind" && S.ui.configOpen){ readDraftFromDOM(); render(); return; } // another type: other fields
   if(inp && inp.id==="dlgFile"){ const f=inp.files&&inp.files[0]; inp.value=""; if(f) readSetFile(f); return; }
   if(inp && inp.id==="dlgColor"){ markSwatch(); return; }
   if(inp && inp.id==="cfgCsv"){ const f=inp.files&&inp.files[0]; inp.value=""; if(!f) return; const r=new FileReader(); r.onerror=()=>alert("Could not read that file.");
     r.onload=()=>{ const qs=csvToQuestions(String(r.result||"")); if(!qs.length){ alert("No questions found in that CSV."); return; }
-      readDraftFromDOM(); S.ui.draft.questions.push(...qs); render(); }; r.readAsText(f); return; }
+      const f=C.filterForCategory(S.meta.category, qs), msg=C.skippedMessage(S.meta.category, f.skipped);
+      readDraftFromDOM(); S.ui.draft.questions.push(...f.kept); render(); if(msg) alert(msg); }; r.readAsText(f); return; }
   if(!inp || inp.id!=="impFile") return;
   const f=inp.files && inp.files[0]; inp.value="";
   if(!f) return; const r=new FileReader(); r.onerror=()=>alert("Could not read that file.");
   r.onload=()=>importResults(String(r.result||""), f.name); r.readAsText(f); });
 let fuTimer=null;
-app.addEventListener("input", e=>{ const t=e.target; if(t && t.id==="dlgColor"){ markSwatch(); return; } if(!t || !t.classList || !t.classList.contains("tl-fu-in")) return;
+app.addEventListener("input", e=>{ const t=e.target; if(t && t.id==="dlgColor"){ markSwatch(); return; }
+  if(t && t.classList && t.classList.contains("open-in")){ S.ui.tx=S.ui.tx||{}; S.ui.tx[txKey(t.dataset.q)]=t.value; const v=t.value.trim(), btn=document.getElementById("ops_"+t.dataset.q), n=document.getElementById("opn_"+t.dataset.q);
+    if(btn) btn.disabled=!v || v===t.dataset.saved; if(n) n.textContent=`${t.value.length} / ${t.maxLength}`; return; }
+  if(!t || !t.classList || !t.classList.contains("tl-fu-in")) return;
   S.ui.tx=S.ui.tx||{}; S.ui.tx[txKey(t.dataset.q)]=t.value; clearTimeout(fuTimer); const qid=t.dataset.q; fuTimer=setTimeout(()=>saveText(qid), 800); });
 app.addEventListener("focusout", e=>{ const t=e.target; if(S.rendering || !t || !t.isConnected) return; if(t.classList && t.classList.contains("tl-fu-in")){ clearTimeout(fuTimer); saveText(t.dataset.q); } });
 app.addEventListener("keydown", e=>{ if(e.key!=="Escape") return; if(S.ui.dlg){ closeDlg(); return; } if(S.ui.configOpen){ S.ui.configOpen=false; S.ui.jsonText=null; render(); } });

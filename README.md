@@ -41,15 +41,27 @@ Needs Node 18 or newer, nothing to install.
 - `polls/{setId}/session`: where the session stands (phase, current question, round).
 - `polls/{setId}/votes/{deviceId}`: one record per device, so a phone counts once per set.
 
-## Question types
+## Categories and question types
 
-Three kinds of question, mixable in one set:
+Each set has a category, which decides which question types its editor offers and what "+ Add question" creates:
 
-- **Numeric scale**: `{"text": "…", "min": 1, "max": 5, "lo": "Strongly disagree", "hi": "Strongly agree"}`. Shows mean, median and spread.
-- **Named options**: `{"text": "…", "options": ["Alex", "Team", "…"]}`. Two to eleven options. Participants tap a labelled button; the presenter sees per-option counts, the most chosen option (ties are shown) and how many different options were chosen. No mean or median, since the options have no order.
-- **Traffic light**: `{"text": "…", "kind": "traffic", "options": ["Consent", "Zorg", "Bezwaar"]}`. Green, yellow, red; yellow and red require a written follow-up answer.
+| Category | Question types | "+ Add question" gives |
+|---|---|---|
+| Generic | scale, multiple choice, open | scale |
+| Consent | the generic types + traffic light | traffic light |
+| Dilemma | the generic types + dilemma | dilemma |
 
-In the editor each question has a field "Named options, one per line"; leave it empty for a numeric scale. Import / export as JSON accepts all shapes. Votes are stored as the option's position (1 = first option), so reordering options after people answered changes what their answers mean.
+Imports (JSON, CSV, "Create from file") skip questions of a type the category does not offer and say how many. A set can only change category when all its questions fit the new one.
+
+The question types, as they appear in the JSON import / export:
+
+- **Scale**: `{"text": "…", "min": 1, "max": 5, "lo": "Strongly disagree", "hi": "Strongly agree"}`. Shows mean, median and spread.
+- **Multiple choice**: `{"text": "…", "options": ["Alex", "Team", "…"]}`. Two to eleven options. The presenter sees per-option counts, the most chosen option (ties are shown) and how many different options were chosen. No mean or median, since the options have no order.
+- **Open**: `{"text": "…", "kind": "open", "maxLen": 500}`. One text box and a Submit button; the presenter sees the number of answers before the reveal and the list of answers after it.
+- **Traffic light** (consent sets): `{"text": "…", "kind": "traffic", "options": ["Consent", "Zorg", "Bezwaar"]}`. Green, yellow, red; yellow and red require a written follow-up answer.
+- **Dilemma** (dilemma sets): `{"text": "…", "kind": "dilemma", "options": ["Build", "Buy"], "conf": {"text": "How confident are you in your choice?", "min": 1, "max": 5, "lo": "Not at all", "hi": "Very"}}`. A choice plus a confidence rating, sent together. The presenter sees per option the count, the share and the mean confidence, with the confidence distribution inside each bar.
+
+Votes are stored as the option's position (1 = first option), so reordering options after people answered changes what their answers mean. An open answer is stored as text; a dilemma answer as the option's position plus the confidence value.
 
 A questions file exported from the overview also carries a `set` block (`name`, `header`, `accent`, `category`, `named`); "New question set → Create from file" reads it back.
 

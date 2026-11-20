@@ -45,7 +45,7 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 > **Status: built on 20 Nov 2026**, tried in demo mode (`?demo=1`); not yet run against the live Firebase database. Before going live: add the `sets` block to the database rules (`tallyroom-setup.md`, step 1.3).
 >
 > Differences from the specification below:
-> - **Category** is stored and shown as a label, but does not restrict question types yet (that is B1).
+> - **Category** was a label only until B1 was built (see Epic B).
 > - **Named respondents** is stored (`no` for new sets) but has no field in the dialogs yet (that is D1).
 > - The accent palette is calculated in `js/core.js` (`themeVars`) instead of with CSS `color-mix` / `oklch(from …)`, so it can be tested and the contrast can be guaranteed. Text in the accent colour uses a separate variable `--accent-text`, so a light accent such as yellow stays readable.
 > - Migration takes the old poll id from `MIGRATE_POLL_ID` in `config.js` (now `workshop-4`), and the migrated set keeps that id instead of getting an 8-character one, so its data stays where it is.
@@ -230,6 +230,15 @@ All actions sit in the menu per set in the overview (A2). Settings are also reac
 ---
 
 ## Epic B: categories
+
+> **Status: built on 20 Nov 2026**, tried in demo mode (`?demo=1`); not yet run against the live Firebase database.
+>
+> Differences from the specification below:
+> - **Sets from before B1** that hold a question type their category does not offer (for example a Generic set with a traffic light question) keep working; that type stays selectable for those questions only, and no new ones can be added.
+> - **Editor:** each question has a "Type" list instead of the old traffic light checkbox and the "leave options empty for a scale" rule. "+ Add traffic-light row" is gone; in a consent set "+ Add question" does that.
+> - **Dilemma answers in the JSON export:** a respondent's choice stays in `answers[questionId]` and the confidence is in a separate `confidence[questionId]`, instead of one `{choice, confidence}` object, so older results files and review mode keep one shape.
+> - **CSV export** has a new `confidence` column, placed before the set columns.
+> - **Open answers on the presenter screen** scroll inside the card when the list is long; there is no paging.
 
 ### B1. Category per set — M
 

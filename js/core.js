@@ -20,13 +20,63 @@ const TL_Q_YELLOW="Welke zorg heb je en wat stel je voor om te doen?", TL_Q_RED=
 function normOptions(x){ if(!x) return []; if(typeof x==="string") x=x.split(/\r?\n/); if(!Array.isArray(x)) x=Object.values(x); return x.map(o=>String((o&&typeof o==="object")?(o.label??o.text??""):o??"").trim()).filter(Boolean).slice(0,11); }
 const newQid = () => "q"+Math.random().toString(36).slice(2,8);
 const isTraffic = qu => !!qu && qu.kind==="traffic";
-const isOpt = qu => !!qu && (qu.kind==="options"||qu.kind==="traffic") && Array.isArray(qu.options) && qu.options.length>=2;
+const isOpen = qu => !!qu && qu.kind==="open";
+const isDilemma = qu => !!qu && qu.kind==="dilemma";
+/* questions answered by picking one labelled option (a dilemma adds a confidence rating on top) */
+const isOpt = qu => !!qu && (qu.kind==="options"||qu.kind==="traffic"||qu.kind==="dilemma") && Array.isArray(qu.options) && qu.options.length>=2;
+const kindOf = qu => isTraffic(qu) ? "traffic" : isDilemma(qu) ? "dilemma" : isOpen(qu) ? "open" : (qu && qu.kind==="options") ? "options" : "scale";
+const KIND_LABEL={scale:"Scale (Likert)", options:"Multiple choice", open:"Open question", traffic:"Traffic light", dilemma:"Dilemma (choice + confidence)"};
+const KIND_NAME={scale:"scale", options:"multiple choice", open:"open", traffic:"traffic light", dilemma:"dilemma"};
+const OPEN_MAX=500;
+const DEFAULT_CONF={text:"How confident are you in your choice?", min:1, max:5, lo:"Not at all", hi:"Very"};
+function normConf(c){ if(!c || typeof c!=="object") return {...DEFAULT_CONF};
+  const min=clamp(Math.round(num(c.min,1)),0,10), max=clamp(Math.round(num(c.max,5)),min+1,11);
+  return {text:String(c.text||"").trim()||DEFAULT_CONF.text, min, max, lo:c.lo==null?DEFAULT_CONF.lo:String(c.lo), hi:c.hi==null?DEFAULT_CONF.hi:String(c.hi)}; }
 const optLabel = (qu,v) => isOpt(qu) ? tx(qu.options[v-1] ?? String(v)) : String(v);
 function q(text,min,max,lo,hi,options,traffic){ const id=newQid(); const o=normOptions(options);
   if(traffic) return {id, text, kind:"traffic", options:(o.length===3?o:TL_LABELS.slice()), min:1, max:3, lo:"", hi:""};
   if(o.length>=2) return {id, text, kind:"options", options:o, min:1, max:o.length, lo:"", hi:""};
   return {id, text, min, max, lo, hi}; }
-function exportQ(qu){ if(isTraffic(qu)) return {text:qu.text, kind:"traffic", options:[...qu.options]}; return isOpt(qu) ? {text:qu.text, options:[...qu.options]} : {text:qu.text,min:qu.min,max:qu.max,lo:qu.lo,hi:qu.hi}; }
+function qOpen(text,maxLen){ return {id:newQid(), text, kind:"open", maxLen:clamp(Math.round(num(maxLen,OPEN_MAX)),20,2000), min:1, max:1, lo:"", hi:""}; }
+function qDilemma(text,options,conf){ const o=normOptions(options); return {id:newQid(), text, kind:"dilemma", options:o, conf:normConf(conf), min:1, max:Math.max(1,o.length), lo:"", hi:""}; }
+/* an empty question of a kind, for "+ Add question" in the editor */
+function qNew(kind){ return kind==="traffic" ? q("",1,3,"","",null,true) : kind==="open" ? qOpen("") : kind==="dilemma" ? qDilemma("",[])
+  : kind==="options" ? {id:newQid(), text:"", kind:"options", options:[], min:1, max:1, lo:"", hi:""} : q("",1,5,"Strongly disagree","Strongly agree"); }
+/* a question from a file (questions JSON, results JSON); gets a new id */
+function qFromObj(x){ x=(x && typeof x==="object")?x:{}; const text=String(x.text||""), traffic=x.kind==="traffic"||x.traffic===true;
+  if(x.kind==="open") return qOpen(text,x.maxLen);
+  if(x.kind==="dilemma"){ const o=normOptions(x.options); return qDilemma(text, o.length>=2?o:["Option A","Option B"], x.conf); }
+  const min=clamp(Math.round(num(x.min,1)),0,10), max=clamp(Math.round(num(x.max,5)),min+1,11);
+  return q(text,min,max,x.lo||"",x.hi||"",x.options,traffic); }
+/* the editor's draft of a question, shaped for the chosen kind; keeps what carries over */
+function shapeQuestion(qu, kind){ const base={id:qu.id||newQid(), text:String(qu.text||"").trim()||"Untitled question"}, o=normOptions(qu.options);
+  if(kind==="traffic") return {...base, kind, options:(o.length===3?o:TL_LABELS.slice()), min:1, max:3, lo:"", hi:""};
+  if(kind==="options") return {...base, kind, options:o, min:1, max:Math.max(1,o.length), lo:"", hi:""};
+  if(kind==="open") return {...base, kind, maxLen:clamp(Math.round(num(qu.maxLen,OPEN_MAX)),20,2000), min:1, max:1, lo:"", hi:""};
+  if(kind==="dilemma") return {...base, kind, options:o, conf:normConf(qu.conf), min:1, max:Math.max(1,o.length), lo:"", hi:""};
+  const was=kindOf(qu)==="scale", min=clamp(Math.round(num(was?qu.min:1,1)),0,10), max=clamp(Math.round(num(was?qu.max:5,5)),min+1,11);
+  return {...base, min, max, lo:was?String(qu.lo||""):"Strongly disagree", hi:was?String(qu.hi||""):"Strongly agree"}; }
+/* what stops a list of questions from being saved; [] when fine */
+function questionProblems(questions){ const out=[]; (questions||[]).forEach((qu,i)=>{ const k=kindOf(qu);
+  if((k==="options"||k==="dilemma") && normOptions(qu.options).length<2) out.push(`Question ${i+1}: add at least two options.`); }); return out; }
+
+/* ============ categories: which question types a set offers (backlog B1) ============ */
+const BASE_KINDS=["scale","options","open"];
+const CATEGORY_RULES={ generic:{kinds:BASE_KINDS, add:"scale"}, consent:{kinds:[...BASE_KINDS,"traffic"], add:"traffic"}, dilemma:{kinds:[...BASE_KINDS,"dilemma"], add:"dilemma"} };
+const catRules = cat => CATEGORY_RULES[cat] || CATEGORY_RULES.generic;
+const catName = cat => { const c=CATEGORY_RULES[cat]?cat:"generic"; return c.charAt(0).toUpperCase()+c.slice(1); };
+function kindAllowed(cat, qu){ return catRules(cat).kinds.includes(kindOf(qu)); }
+function filterForCategory(cat, questions){ const kept=[], skipped={}; (questions||[]).forEach(qu=>{ if(kindAllowed(cat,qu)) kept.push(qu); else { const k=kindOf(qu); skipped[k]=(skipped[k]||0)+1; } }); return {kept, skipped}; }
+function skippedMessage(cat, skipped){ const parts=Object.entries(skipped||{}).map(([k,n])=>`${n} ${KIND_NAME[k]} ${n===1?"question":"questions"}`);
+  return parts.length ? `${parts.join(" and ")} skipped: that type is not available in a ${catName(cat)} set.` : ""; }
+/* questions that stop a set from changing to category `cat`: [{n, kind}] */
+function categoryBlockers(cat, questions){ return (questions||[]).map((qu,i)=>({n:i+1, kind:kindOf(qu)})).filter(x=>!catRules(cat).kinds.includes(x.kind)); }
+function blockerMessage(cat, blockers){ if(!blockers.length) return ""; const by={}; blockers.forEach(b=>{ (by[b.kind]=by[b.kind]||[]).push(b.n); });
+  return `This set cannot become ${catName(cat)}: `+Object.entries(by).map(([k,ns])=>`question ${ns.join(", ")} ${ns.length===1?"is a":"are"} ${KIND_NAME[k]} ${ns.length===1?"question":"questions"}`).join("; ")+`. Change or remove ${blockers.length===1?"it":"them"} first.`; }
+
+function exportQ(qu){ if(isOpen(qu)) return {text:qu.text, kind:"open", maxLen:qu.maxLen||OPEN_MAX};
+  if(isDilemma(qu)) return {text:qu.text, kind:"dilemma", options:[...qu.options], conf:normConf(qu.conf)};
+  if(isTraffic(qu)) return {text:qu.text, kind:"traffic", options:[...qu.options]}; return isOpt(qu) ? {text:qu.text, options:[...qu.options]} : {text:qu.text,min:qu.min,max:qu.max,lo:qu.lo,hi:qu.hi}; }
 const followUp = (cfg,v) => v===2 ? ((cfg&&cfg.tlYellow)||TL_Q_YELLOW) : v===3 ? ((cfg&&cfg.tlRed)||TL_Q_RED) : "";
 
 const DEFAULT_SESSION = { phase:"lobby", current:0, revealed:[], round:1, showLive:false, resetAt:0 };
@@ -41,7 +91,10 @@ function normSession(v){ if(v && v.revealed && !Array.isArray(v.revealed)) v.rev
 /* ============ votes and statistics ============ */
 const PRESENCE_MS = 150000; // a participant without answers counts as present for 2.5 min after their last heartbeat
 function hasAnswers(v){ return !!(v && v.answers && Object.keys(v.answers).length); }
-function validAns(v,qu){ const a=v&&v.answers?v.answers[qu.id]:undefined; if(!Number.isFinite(a)) return null;
+function validAns(v,qu){
+  if(isOpen(qu)) return String((v&&v.texts&&v.texts[qu.id])||"").trim() ? 1 : null; // an open answer is its text
+  const a=v&&v.answers?v.answers[qu.id]:undefined; if(!Number.isFinite(a)) return null;
+  if(isDilemma(qu)){ const c=v.conf?v.conf[qu.id]:undefined, cf=qu.conf||DEFAULT_CONF; if(!Number.isFinite(c) || c<cf.min || c>cf.max) return null; } // choice and confidence, or nothing
   if(isTraffic(qu) && a!==1 && !String(v.texts?.[qu.id]||"").trim()) return null; return a; } // yellow/red only count once the follow-up is filled in
 function roundVotes(votes, round, now, skipPid){ const out={};
   for(const [pid,v] of Object.entries(votes||{})){ if(!v || v.round!==round) continue;
@@ -58,6 +111,15 @@ function stats(vals,min,max){
   let mode=min, best=-1; for(let v=min;v<=max;v++){ if(counts[v]>best){best=counts[v];mode=v;} }
   return {n,mean,median,sd,counts,mode};
 }
+
+/* dilemma: per option how many chose it, their mean confidence and its distribution; plus the overall mean */
+function dilemmaStats(votes, qu){ const cf=qu.conf||DEFAULT_CONF, by={};
+  for(let v=qu.min;v<=qu.max;v++){ by[v]={n:0,sum:0,mean:null,dist:{}}; for(let c=cf.min;c<=cf.max;c++) by[v].dist[c]=0; }
+  let n=0, sum=0;
+  Object.values(votes||{}).forEach(vt=>{ const a=validAns(vt,qu); if(a==null || !by[a]) return; const c=vt.conf[qu.id];
+    by[a].n++; by[a].sum+=c; if(by[a].dist[c]!=null) by[a].dist[c]++; n++; sum+=c; });
+  let mode=qu.min; for(let v=qu.min;v<=qu.max;v++){ by[v].mean=by[v].n?by[v].sum/by[v].n:null; if(by[v].n>by[mode].n) mode=v; }
+  return {n, mean:n?sum/n:null, by, mode}; }
 
 /* ============ CSV ============ */
 function parseCSV(text){
@@ -80,6 +142,8 @@ function csvToQuestions(text){
   const body=hasHead?rows.slice(1):rows, get=(r,k)=>col[k]==null?"":String(r[col[k]]??"").trim();
   return body.map(r=>{ const text=get(r,"text"); if(!text) return null; const type=get(r,"type").toLowerCase(), opts=get(r,"options").split("|");
     if(type==="traffic") return q(text,1,3,"","",null,true);
+    if(type==="open") return qOpen(text);
+    if(type==="dilemma") return qFromObj({text, kind:"dilemma", options:opts});
     if(type==="options"||(type===""&&get(r,"options"))) return q(text,1,5,"","",opts);
     return q(text,clamp(Math.round(num(get(r,"min"),1)),0,10),clamp(Math.round(num(get(r,"max"),5)),2,11),get(r,"lo")||"Strongly disagree",get(r,"hi")||"Strongly agree"); }).filter(Boolean);
 }
@@ -131,8 +195,11 @@ function parseQuestionsFile(obj){ let arr=obj, set=null, tlYellow="", tlRed="";
     if(obj.mode==="live"||obj.mode==="batch") set={...(set||{}), mode:obj.mode};
     arr=obj.questions; }
   if(!Array.isArray(arr)) throw new Error("No questions found");
-  const questions=arr.filter(x=>x && typeof x==="object").map(x=>q(String(x.text||""),num(x.min,1),num(x.max,5),x.lo||"",x.hi||"",x.options,x.kind==="traffic"||x.traffic===true));
+  const questions=arr.filter(x=>x && typeof x==="object").map(qFromObj);
   return { set, tlYellow, tlRed, questions }; }
+
+/* a question from a saved results file, for review mode: same shape as qFromObj but it keeps its id */
+function reviveQuestion(x, i){ const qu=qFromObj(x); return {...qu, id:String((x&&x.id)||("q"+i)), text:String((x&&x.text)||("Question "+(i+1)))}; }
 
 /* ---- responses export ---- */
 function resultsPayload(o){ const cfg=normConfig(o.cfg), ses=o.ses||{}, round=ses.round||1, meta=normMeta(o.meta)||null;
@@ -143,20 +210,25 @@ function resultsPayload(o){ const cfg=normConfig(o.cfg), ses=o.ses||{}, round=se
     title, mode:cfg.mode, round, exportedAt:new Date(o.now).toISOString(), respondents:ids.length,
     questions: cfg.questions.map((qu,i)=>{
       const vals=ids.map(k=>validAns(rv[k],qu)).filter(v=>Number.isFinite(v));
-      const st=stats(vals,qu.min,qu.max); const num=!isOpt(qu)&&st.n;
-      return { n:i+1, id:qu.id, text:qu.text, kind:isTraffic(qu)?"traffic":(isOpt(qu)?"options":"scale"),
+      const st=stats(vals,qu.min,qu.max); const num=!isOpt(qu)&&!isOpen(qu)&&st.n;
+      const extra = isOpen(qu) ? { maxLen:qu.maxLen||OPEN_MAX, texts:ids.filter(k=>validAns(rv[k],qu)!=null).map(k=>String(rv[k].texts[qu.id]).trim()) }
+        : isDilemma(qu) ? (()=>{ const ds=dilemmaStats(ids.map(k=>rv[k]),qu), r2=x=>x==null?null:+x.toFixed(2);
+            return { conf:normConf(qu.conf), confidence:{ mean:r2(ds.mean), byOption:qu.options.map((o,j)=>({option:o, count:ds.by[j+1].n, mean:r2(ds.by[j+1].mean)})) } }; })() : {};
+      return { n:i+1, id:qu.id, text:qu.text, kind:kindOf(qu), ...extra,
         options:isOpt(qu)?[...qu.options]:null, min:qu.min, max:qu.max, lo:qu.lo||"", hi:qu.hi||"",
-        answers:st.n||0, counts:st.counts||{}, mostChosen:st.n?optLabel(qu,st.mode):null,
+        answers:st.n||0, counts:isOpen(qu)?{}:(st.counts||{}), mostChosen:(st.n&&!isOpen(qu))?optLabel(qu,st.mode):null,
         mean:num?+st.mean.toFixed(2):null, median:num?st.median:null, sd:num?+st.sd.toFixed(2):null }; }),
     answers: ids.map((k,i)=>({ respondent:"R"+String(i+1).padStart(2,"0"), at:new Date(rv[k].t||0).toISOString(),
-      answers:Object.fromEntries(cfg.questions.map(qu=>[qu.id, Number.isFinite(rv[k].answers[qu.id])?rv[k].answers[qu.id]:null])),
-      texts:Object.fromEntries(cfg.questions.filter(qu=>isTraffic(qu)&&[2,3].includes(rv[k].answers[qu.id])&&String(rv[k].texts?.[qu.id]||"").trim()).map(qu=>[qu.id,String(rv[k].texts[qu.id]).trim()])) })),
+      answers:Object.fromEntries(cfg.questions.map(qu=>[qu.id, Number.isFinite(rv[k].answers?.[qu.id])?rv[k].answers[qu.id]:null])),
+      confidence:Object.fromEntries(cfg.questions.filter(qu=>isDilemma(qu)&&Number.isFinite(rv[k].conf?.[qu.id])).map(qu=>[qu.id,rv[k].conf[qu.id]])),
+      texts:Object.fromEntries(cfg.questions.filter(qu=>((isTraffic(qu)&&[2,3].includes(rv[k].answers[qu.id]))||isOpen(qu))&&String(rv[k].texts?.[qu.id]||"").trim()).map(qu=>[qu.id,String(rv[k].texts[qu.id]).trim()])) })),
     followUps:{yellow:followUp(cfg,2), red:followUp(cfg,3)} };
 }
 function resultsCSV(p){ const qq=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`, s=p.set||{};
-  const rows=[["respondent","question_nr","question","value","label","comment","set","header","category"].join(",")];
-  p.answers.forEach(r=>p.questions.forEach(qu=>{ const v=r.answers[qu.id]; if(!Number.isFinite(v)) return;
-    rows.push([qq(r.respondent), qu.n, qq(qu.text), v, qq(qu.options?(qu.options[v-1]||v):v), qq((r.texts&&r.texts[qu.id])||""), qq(s.name), qq(s.header), qq(s.category)].join(",")); }));
+  const rows=[["respondent","question_nr","question","value","label","comment","confidence","set","header","category"].join(",")];
+  p.answers.forEach(r=>p.questions.forEach(qu=>{ const v=r.answers[qu.id], text=(r.texts&&r.texts[qu.id])||"", open=qu.kind==="open", cf=r.confidence?r.confidence[qu.id]:null;
+    if(open ? !text : !Number.isFinite(v)) return; // an open answer is one row with its text in the comment column
+    rows.push([qq(r.respondent), qu.n, qq(qu.text), open?"":v, open?'""':qq(qu.options?(qu.options[v-1]||v):v), qq(text), Number.isFinite(cf)?cf:"", qq(s.name), qq(s.header), qq(s.category)].join(",")); }));
   return "﻿"+rows.join("\r\n"); }
 
 /* ============ colour: one accent in, the whole palette out ============ */
@@ -221,7 +293,9 @@ function randomName(taken, rnd){ rnd=rnd||Math.random; const has=n=>taken instan
   return null; }
 
 const api={ clamp, num, fmt, tx, slug, stamp,
-  TL_LABELS, TL_COLORS, TL_Q_YELLOW, TL_Q_RED, normOptions, newQid, isTraffic, isOpt, optLabel, q, exportQ, followUp,
+  TL_LABELS, TL_COLORS, TL_Q_YELLOW, TL_Q_RED, normOptions, newQid, isTraffic, isOpen, isDilemma, isOpt, kindOf, KIND_LABEL, KIND_NAME, OPEN_MAX, DEFAULT_CONF, normConf,
+  optLabel, q, qOpen, qDilemma, qNew, qFromObj, shapeQuestion, questionProblems, reviveQuestion, exportQ, followUp,
+  CATEGORY_RULES, catRules, catName, kindAllowed, filterForCategory, skippedMessage, categoryBlockers, blockerMessage, dilemmaStats,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, validAns, roundVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, SET_ID_RE, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,

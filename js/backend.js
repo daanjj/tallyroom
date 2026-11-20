@@ -48,7 +48,8 @@ function makeDemoBackend(isHost){
       C.q("This workshop is a good use of my time.",1,5,"Strongly disagree","Strongly agree"),
       C.q("Which topic should we start with?",1,3,"","",["Strategy","Ways of working","Customers"]),
       {...C.q("We adopt the proposal as written.",1,3,"","",null,true), options:["Consent","Concern","Objection"]},
-      C.q("How confident are you that we will follow through?",1,7,"Not at all","Completely") ] } };
+      C.q("How confident are you that we will follow through?",1,7,"Not at all","Completely"),
+      C.qOpen("What should we do differently next time?") ] } };
     save(); }
   const names=["a","b","c","d","e","f","g","h"];
   function simulate(id){ const p=db.polls[id]; if(!isHost || !p || !p.session || !p.config) return; const ses=p.session, cfg=C.normConfig(p.config); if(!cfg.questions.length) return;
@@ -59,6 +60,8 @@ function makeDemoBackend(isHost){
       names.forEach((n,i)=>qs.forEach((qu,j)=>setTimeout(()=>{ const cur=get(n), v=(cur && cur.round===ses.round) ? {...cur, answers:{...(cur.answers||{})}} : {round:ses.round,answers:{}}; if(v.answers[qu.id]!=null) return;
         const bias=(j%3===0?0.75:j%3===1?0.55:0.4); const r=(Math.random()+Math.random()+Math.random())/3; const val=Math.round(qu.min+(qu.max-qu.min)*C.clamp(r*1.1+bias*0.5-0.3,0,1));
         v.answers[qu.id]=val; if(qu.kind==="traffic" && val!==1){ v.texts={...(v.texts||{})}; v.texts[qu.id]=(val===2?"Demo concern from ":"Demo objection from ")+n; }
+        if(qu.kind==="open"){ v.answers[qu.id]=1; v.texts={...(v.texts||{})}; v.texts[qu.id]="Demo answer from "+n+(i%3===0?", with a second line\nto show how longer answers wrap":""); }
+        if(qu.kind==="dilemma"){ const cf=qu.conf||C.DEFAULT_CONF; v.conf={...(v.conf||{})}; v.conf[qu.id]=cf.min+Math.round(Math.random()*(cf.max-cf.min)); }
         v.t=Date.now(); put(n,v); }, 500+400*i+150*j))); } }
   return { id:localId(), isHost, canWrite:true, demo:true,
     isConnected:()=>true, onConn:f=>f(true), downFor:()=>0, nudge:()=>{},
