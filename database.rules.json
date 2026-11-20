@@ -1,0 +1,70 @@
+{
+  "rules": {
+    "presenters": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid"
+      }
+    },
+    "sets": {
+      ".read": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+      ".write": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+      "$set": {
+        ".read": "auth != null"
+      }
+    },
+    "polls": {
+      "$set": {
+        ".read": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+        ".write": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+        "config": {
+          ".read": "auth != null"
+        },
+        "session": {
+          ".read": "auth != null"
+        },
+        "votes": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('sets').child($set).exists() && (!root.child('sets').child($set).child('expiresAt').exists() || root.child('sets').child($set).child('expiresAt').val() > now)",
+            ".validate": "newData.hasChildren(['round', 't'])",
+            "round": {
+              ".validate": "newData.isNumber()"
+            },
+            "t": {
+              ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+            },
+            "name": {
+              ".validate": "newData.isString() && newData.val().length <= 30"
+            },
+            "nameAt": {
+              ".validate": "newData.isNumber()"
+            },
+            "answers": {
+              "$q": {
+                ".validate": "newData.isNumber()"
+              }
+            },
+            "conf": {
+              "$q": {
+                ".validate": "newData.isNumber()"
+              }
+            },
+            "revs": {
+              "$q": {
+                ".validate": "newData.isNumber()"
+              }
+            },
+            "texts": {
+              "$q": {
+                ".validate": "newData.isString() && newData.val().length <= 2000"
+              }
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        }
+      }
+    }
+  }
+}

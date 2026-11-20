@@ -9,16 +9,18 @@ There is no build step: the browser loads these files as they are.
 | File | What it holds |
 |---|---|
 | `index.html` | The page shell: it only loads the files below |
-| `config.js` | Your settings: Firebase project, host key |
+| `config.js` | Your settings: the Firebase project. No secret in it |
+| `database.rules.json` | The database rules: who may read and write what. Published by hand in the Firebase console |
 | `css/styles.css` | All styling. The purple values are the default accent |
 | `js/core.js` | Pure logic: questions, statistics, exports, expiry, colour palette. No screen, no network |
 | `js/backend.js` | Where the data lives: Firebase, or a demo store inside the browser |
 | `js/app.js` | Screens and actions |
 | `tests/core.test.js` | Tests for `js/core.js` |
+| `tests/backend.test.js` | Tests for the sign-in logic of `js/backend.js`, against a stand-in for Firebase |
 
 ## Trying it without touching the database
 
-Add `?demo=1` to the address. The page then keeps its data in this browser only (shared between its tabs), you are the presenter, and eight simulated participants answer. `&host=off` shows what a participant sees.
+Add `?demo=1` to the address. The page then keeps its data in this browser only (shared between its tabs), you are the presenter without signing in, and eight simulated participants answer. `&host=off` shows what a participant sees.
 
 ```bash
 python3 -m http.server 8765
@@ -34,12 +36,21 @@ node --test
 
 Needs Node 18 or newer, nothing to install.
 
+## Who may do what
+
+- **Presenters** sign in at `?host` with an email and password account made in the Firebase console, and are listed by hand in `presenters/{uid}: true`. All presenters see and manage all sets.
+- **Participants** sign in anonymously, without noticing. The uid of that sign-in is the device id and the key of the vote record.
+- `database.rules.json` enforces it: a presenter reads and writes everything; a participant reads `sets/{id}`, `config`, `session` and `votes` of the set whose link it has, and writes only `votes/{own uid}`, in a set that exists and has not expired, in the shape the page writes. The list of sets and the follow-up actions are for presenters only.
+- Not covered (see Epic G in `BACKLOG.md`): participants of a set can read each other's answers in the database (G5), and the database accepts requests from outside the page by anyone who signs in anonymously (G6).
+
 ## Data layout
+
+- `presenters/{uid}`: `true` for each presenter account. Console only.
 
 - `sets/{setId}`: the attributes of a set (`name`, `header`, `accent`, `category`, `named`, `expiresAt`, `joinUrl`, `createdAt`, `updatedAt`). This is the list the presenter's overview shows.
 - `polls/{setId}/config`: mode, follow-up prompts and the questions.
 - `polls/{setId}/session`: where the session stands (phase, current question, round).
-- `polls/{setId}/votes/{deviceId}`: one record per device, so a phone counts once per set. It holds `answers`, `texts` (comments and open answers), `conf` (dilemma confidence), `revs` (which version of an edited proposal an answer is for) and, in a named set, `name`.
+- `polls/{setId}/votes/{deviceId}`: one record per device (the device id is the uid of its sign-in), so a phone counts once per set. It holds `answers`, `texts` (comments and open answers), `conf` (dilemma confidence), `revs` (which version of an edited proposal an answer is for) and, in a named set, `name`.
 - `polls/{setId}/actions/{questionId}_{deviceId}_v{version}`: the follow-up action for one remark (`action`, `owner`, `due`, `none`), written by the presenter.
 - Consent sets also use `session.outcome[questionId]` (the light of a proposal as it stood when the presenter left it), `session.revote` (a re-vote in progress) and, on an edited question, `rev` and `history` (earlier texts with their votes and comments).
 

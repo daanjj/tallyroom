@@ -578,3 +578,17 @@ test("F2 JSON and CSV carry the actions, and a saved results file gives the same
   const p2 = C.resultsPayload({ setId: "s", meta, cfg: { questions: qs }, ses: { round: 1, outcome: C.reviveOutcome(p) }, votes: back, actions: revived, now: NOW });
   assert.equal(C.actionsMarkdown(p2), C.actionsMarkdown(p));
 });
+
+/* ---------- links that cannot be guessed from the name (G4, open decision 14) ---------- */
+test("new set id: the name as a slug plus four random characters", () => {
+  const id = C.newSetId("MT offsite, team B!", null, seq(0, 0.5, 0.99, 0.25));
+  assert.match(id, /^mt-offsite-team-b-[a-z2-9]{4}$/);
+  assert.equal(id, "mt-offsite-team-b-" + C.randomTail(seq(0, 0.5, 0.99, 0.25)));
+  assert.doesNotMatch(C.randomTail(), /[01oli]/);
+  for (const n of ["Café Zürich", "x".repeat(60), "!!!", "  "]) assert.ok(C.SET_ID_RE.test(C.newSetId(n)), n);
+  assert.equal(C.newSetId("x".repeat(60)).length, 40);
+});
+test("new set id: draws again while the id is taken", () => {
+  const first = "team-b-" + C.randomTail(seq(0)), second = "team-b-" + C.randomTail(seq(0.5));
+  assert.equal(C.newSetId("Team B", (id) => id === first, seq(0, 0, 0, 0, 0.5, 0.5, 0.5, 0.5)), second);
+});

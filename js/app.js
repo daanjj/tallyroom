@@ -10,13 +10,14 @@ const qInk = (qu,i,n) => isTraffic(qu) ? (i===1?"#1E1838":"#FFFFFF") : selInk(i,
 const params=new URLSearchParams(location.search);
 const PAGE=location.href.split("#")[0].split("?")[0];
 const RAW_SET=params.get("set"), SET_ID=(RAW_SET && C.SET_ID_RE.test(RAW_SET)) ? RAW_SET : null;
-/* no arguments = the overview of all sets; the host key is never part of a link */
-function urlFor(o){ o=o||{}; const p=new URLSearchParams(); if(o.set) p.set("set",o.set); if(o.edit) p.set("edit","1"); if(params.has("demo")) p.set("demo",params.get("demo")||"1"); const s=p.toString(); return PAGE+(s?"?"+s:""); }
+/* no arguments = the overview of all sets; host = the presenter sign-in screen (it comes back here without it) */
+const SIGNIN = params.has("host") && params.get("host")!=="off";
+function urlFor(o){ o=o||{}; const p=new URLSearchParams(); if(o.set) p.set("set",o.set); if(o.edit) p.set("edit","1"); if(o.host) p.set("host","1"); if(params.has("demo")) p.set("demo",params.get("demo")||"1"); const s=p.toString(); return PAGE+(s?"?"+s:""); }
 function joinUrl(id, meta){ return (meta && meta.joinUrl) || urlFor({set:id}); }
 
 /* ============ state ============ */
 /* meta: undefined = not loaded yet, null = this set does not exist */
-const S = { route:(RAW_SET!=null?"set":"home"), setId:SET_ID, booted:false, meta:undefined, metaErr:null, sets:null, setsErr:null, polls:{}, cfg:null, ses:null, votes:{}, actions:{}, me:{id:null,isHost:false,canWrite:true,ackReset:null}, ui:{view:null,configOpen:false,draft:null,readonly:false,qs:.75,dlg:null}, backend:null, be:null };
+const S = { route:(RAW_SET!=null?"set":"home"), setId:SET_ID, booted:false, meta:undefined, metaErr:null, sets:null, setsErr:null, polls:{}, cfg:null, ses:null, votes:{}, actions:{}, auth:{ready:false,uid:null,isHost:false,anon:false,email:"",error:null}, me:{id:null,isHost:false,canWrite:true,ackReset:null}, ui:{view:null,configOpen:false,draft:null,readonly:false,qs:.75,dlg:null}, backend:null, be:null };
 const app = document.getElementById("app");
 const QS_STEPS=[.5,.6,.7,.75,.8,.9,1,1.15,1.3,1.5,1.75,2];
 function getQS(){ try{ const v=parseFloat(localStorage.getItem("tr_qs")); if(QS_STEPS.includes(v)) return v; }catch(e){} return .75; }
@@ -40,7 +41,9 @@ function namedMode(){ return S.review ? (S.review.info.named||"no") : ((S.meta &
 function catNow(){ return S.review ? (S.review.info.category||"generic") : ((S.meta && S.meta.category)||"generic"); }
 const nameLabel = v => v.name ? String(v.name) : "unnamed";
 function header(){ return S.review ? S.review.info.title : ((S.meta && (tx(S.meta.header)||tx(S.meta.name))) || "Tally Room"); }
-function expired(){ return !S.review && C.isExpired(S.meta, Date.now()); }
+/* the server's clock decides (the database rules refuse answers after expiry), not the clock of the phone */
+function nowS(){ return S.be && S.be.now ? S.be.now() : Date.now(); }
+function expired(){ return !S.review && C.isExpired(S.meta, nowS()); }
 function metaOf(id){ if(S.route==="set") return id===S.setId ? S.meta : null; return (S.sets && S.sets[id]) ? C.normMeta(S.sets[id]) : null; }
 function fmtDate(ts){ try{ return new Date(ts).toLocaleString("en-GB",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); }catch(e){ return new Date(ts).toISOString().slice(0,16).replace("T"," "); } }
 let themeFor=null;
@@ -210,13 +213,15 @@ function notice(title, html, pulse){ return `<div class="p-wrap"><div class="top
 function render(){
   let html, host=false;
   if(!S.booted){ html=notice("", "Connecting…", true); }
+  else if(S.route==="signin"){ applyTheme(null); document.title="Tally Room"; html=signInHTML(); }
+  else if(S.route==="set" && S.auth.error){ html=notice("Could not connect", "Check your connection and reload."); }
   else if(S.route==="home"){ applyTheme(null); document.title="Tally Room"; html=homeHTML(); }
   else if(S.metaErr){ html=notice("Cannot open this question set", RULES_MSG); }
   else if(!S.setId || S.meta===null){ applyTheme(null); document.title="Tally Room";
     html=notice("This question set does not exist (any more)", "Ask the presenter for a new link or QR code."+(S.me.isHost?` <a href="${esc(urlFor())}">All question sets</a>`:"")); }
   else if(S.meta===undefined || !S.cfg || !S.ses){ html=notice("", "Connecting…", true); }
   else { applyTheme(S.meta.accent); document.title=header(); host = S.me.isHost && S.ui.view!=="participant"; }
-  const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.classList.contains("act-in")||ae.id==="nameIn")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
+  const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.classList.contains("act-in")||ae.id==="nameIn"||ae.id==="siEmail"||ae.id==="siPass")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
   const mc=document.querySelector("#modal .card"), mTop=mc?mc.scrollTop:0, wTop=window.scrollY;
   S.rendering=true; try{ app.innerHTML = html!=null ? html : (host ? hostHTML() : (expired() ? expiredHTML() : participantHTML())); } finally { S.rendering=false; }
   if(keep){ const el=document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.a,keep.b); }catch(e){} } }
@@ -224,6 +229,7 @@ function render(){
   if(S.ui.configOpen) app.insertAdjacentHTML("beforeend", configHTML());
   if(S.ui.configOpen && mTop){ const nc=document.querySelector("#modal .card"); if(nc) nc.scrollTop=mTop; } // keep the form where it was
   if(S.ui.dlg){ app.insertAdjacentHTML("beforeend", dlgHTML()); afterDlg(); }
+  if(S.ui.saveErr) app.insertAdjacentHTML("beforeend", `<div class="save-err" role="alert"><span>${esc(S.ui.saveErr)}</span><button class="btn sm" data-act="reload">Reload</button></div>`);
   if(wTop && Math.abs(window.scrollY-wTop)>2) window.scrollTo(0,wTop);
   if(S.ui.configOpen) app.querySelector("#modal")?.addEventListener("input", ()=>{ try{ readDraftFromDOM(); }catch(e){} }, {passive:true});
 }
@@ -246,7 +252,7 @@ function expiredHTML(){ const back = S.me.isHost ? `<button class="btn sm ghost"
 /* ---- host ---- */
 function hostHTML(){
   const ses=S.ses, cfg=S.cfg, Q=cfg.questions, ph=Q.length?ses.phase:"lobby"; const joined=joinedCount();
-  const controls = `<a class="btn sm ghost" href="${esc(urlFor())}">All question sets</a>${fontCtl()}${ph!=="lobby"?`<button class="btn sm ghost" data-act="lobby">Back to lobby</button>`:""}<button class="btn sm ghost" data-act="config">Edit questions</button><button class="btn sm ghost" data-act="setSettings" data-id="${esc(S.setId)}">Settings</button><button class="btn sm ghost" data-act="asParticipant">View as participant</button>`;
+  const controls = `<a class="btn sm ghost" href="${esc(urlFor())}">All question sets</a>${fontCtl()}${ph!=="lobby"?`<button class="btn sm ghost" data-act="lobby">Back to lobby</button>`:""}<button class="btn sm ghost" data-act="config">Edit questions</button><button class="btn sm ghost" data-act="setSettings" data-id="${esc(S.setId)}">Settings</button><button class="btn sm ghost" data-act="asParticipant">View as participant</button>${signOutBtn()}`;
   let main="", side=sideHTML();
   if(ph==="lobby"){
     main=`<div class="card" style="padding:28px"><div class="eyebrow">${Q.length?"Ready to start":"No questions yet"} · ${esc(cap(S.meta.category))}</div><h1 style="font-size:clamp(26px,4vw,40px);margin-top:8px">${esc(header())}</h1>
@@ -548,12 +554,49 @@ function readDraftFromDOM(){
   d.questions=d.questions.map((qu,i)=>C.shapeQuestion(qu, picked[i]||kindOf(qu)));
 }
 
+/* ============ presenter sign-in (backlog G1) ============ */
+const signOutBtn = () => (S.be && !S.be.demo && S.auth.uid && !S.auth.anon) ? `<button class="btn sm ghost" data-act="signOut" title="Signed in as ${esc(S.auth.email)}">Sign out</button>` : "";
+function notPresenterHTML(){ return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card big-wait"><h2 style="font-size:24px">This account is not a presenter</h2>
+  <p class="meta">${esc(S.auth.email)} is signed in, but it is not on the list of presenters. Ask the owner of this Tally Room to add it.</p><div class="controls"><button class="btn primary" data-act="signOut">Sign out</button></div></div></div>`; }
+function signInHTML(){
+  if(S.auth.uid && !S.auth.anon) return notPresenterHTML();
+  const busy=!!S.ui.siBusy;
+  return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card p-q"><div class="eyebrow">Presenter</div><h2 style="font-size:22px;margin-top:6px">Sign in</h2>
+    <div class="field" style="margin-top:14px"><label for="siEmail">Email</label><input type="email" id="siEmail" autocomplete="username" autocapitalize="none" spellcheck="false" value="${esc(S.ui.siEmail||"")}"></div>
+    <div class="field" style="margin-top:12px"><label for="siPass">Password</label><input type="password" id="siPass" autocomplete="current-password">
+      ${S.ui.siErr?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(S.ui.siErr)}</small>`:""}${S.ui.siNote?`<small class="meta" role="status">${esc(S.ui.siNote)}</small>`:""}</div>
+    <div class="controls" style="margin-top:14px"><button class="btn primary" data-act="signIn" ${busy?"disabled":""}>${busy?"Signing in…":"Sign in"}</button><button class="btn ghost" data-act="forgot" ${busy?"disabled":""}>Forgot password</button></div>
+    <p class="meta" style="margin-top:14px">Participants do not sign in: they scan the QR code or open the link of a question set. <a href="${esc(urlFor({set:SET_ID}))}">Back</a></p></div></div>`; }
+function signInError(e){ const c=String(e&&e.code||"");
+  if(/network/.test(c)) return "Could not connect. Check your connection and try again.";
+  if(/too-many-requests/.test(c)) return "Too many attempts. Wait a few minutes and try again.";
+  if(/operation-not-allowed/.test(c)) return "Email and password sign-in is switched off in the Firebase project (tallyroom-setup.md, step 1).";
+  return "Email or password is not right"; } // one message, without saying which of the two
+async function doSignIn(){ const em=document.getElementById("siEmail"), pw=document.getElementById("siPass"), email=em?em.value.trim():"", pass=pw?pw.value:"";
+  S.ui.siEmail=email; S.ui.siNote=""; if(!email || !pass){ S.ui.siErr="Email or password is not right"; render(); return; }
+  S.ui.siErr=""; S.ui.siBusy=true; render();
+  try{ await S.be.signIn(email, pass); }catch(e){ console.warn("sign-in failed", e&&e.code); S.ui.siErr=signInError(e); }
+  S.ui.siBusy=false; if(S.route==="signin") render(); }
+async function doForgot(){ const em=document.getElementById("siEmail"), email=em?em.value.trim():""; S.ui.siEmail=email; S.ui.siErr=""; S.ui.siNote="";
+  if(!email){ S.ui.siErr="Type your email address first."; render(); document.getElementById("siEmail")?.focus(); return; }
+  try{ await S.be.resetPassword(email); }catch(e){ console.warn("reset mail", e&&e.code); } // the answer never tells whether the address has an account
+  S.ui.siNote="If this address has an account, a mail is on its way"; render(); }
+/* the sign-in changed: who this device is, and whether it is the presenter (backlog G1, G2) */
+function applyAuth(a){ const wasHost=S.me.isHost, wasId=S.me.id; S.auth=a; S.me.id=S.be.id; S.me.isHost=S.be.isHost;
+  if(!S.booted) return;
+  if(S.route==="signin"){ if(S.me.isHost){ try{ location.replace(urlFor({set:SET_ID})); }catch(e){} return; } render(); return; }
+  if(wasHost===S.me.isHost && wasId===S.me.id) return;
+  /* a presenter who signs out on a set page is a participant of that set from here on, without reload */
+  S.ui.view=null; S.ui.dlg=null; S.ui.configOpen=false; S.ui.draft=null; if(!S.me.isHost){ S.actions={}; S.ui.act={}; S.review=null; }
+  render(); if(S.heartbeat) setTimeout(S.heartbeat, 300); }
+
 /* ============ overview of all question sets (presenter home) ============ */
 const PHASE_LABEL={lobby:"In lobby", running:"Running", finished:"Finished"};
 const cap = s => String(s||"").charAt(0).toUpperCase()+String(s||"").slice(1);
 function homeHTML(){
-  if(!S.me.isHost) return notice("Scan the QR code or open the link you received", "Each question set has its own link. Ask the presenter for the QR code.");
-  const top=`<div class="topbar">${brand("Tally Room")}<div class="controls">${connPill()}${S.be&&S.be.demo?`<span class="pill warn">Demo data, this browser only</span>`:""}</div></div>`;
+  if(!S.me.isHost && S.auth.uid && !S.auth.anon) return notPresenterHTML();
+  if(!S.me.isHost) return notice("Scan the QR code or open the link you received", "Each question set has its own link. Ask the presenter for the QR code."+(S.be&&S.be.demo?"":`<br><br><a href="${esc(urlFor({host:true}))}" style="font-size:13px">Presenter sign-in</a>`));
+  const top=`<div class="topbar">${brand("Tally Room")}<div class="controls">${connPill()}${S.be&&S.be.demo?`<span class="pill warn">Demo data, this browser only</span>`:""}${signOutBtn()}</div></div>`;
   if(S.setsErr) return `<div class="wrap">${top}<div class="banner">${RULES_MSG}</div></div>`;
   if(!S.sets) return `<div class="wrap">${top}<div class="card big-wait"><div class="pulse"></div><p class="meta">Loading question sets…</p></div></div>`;
   const now=Date.now(), list=C.sortSets(S.sets, now);
@@ -592,7 +635,9 @@ async function loadStats(){ if(S.route!=="home" || !S.sets || statsBusy || docum
   try{ await Promise.all(Object.keys(S.sets).map(async id=>{ try{ S.polls[id]=C.pollStats(await S.be.readPoll(id)); }catch(e){} })); } finally { statsBusy=false; }
   renderBg(); }
 /* read fresh, so a set made on another device in the meantime is not overwritten */
-async function freshSetId(name){ const sets=await S.be.getSets(); return C.setIdFor(name, id=>!!sets[id]); }
+function rnd(){ try{ const a=new Uint32Array(1); crypto.getRandomValues(a); return a[0]/4294967296; }catch(e){ return Math.random(); } }
+const LINK_NOTE="Anyone who knows or guesses this link can join and see the results shown to the room.";
+async function freshSetId(name){ const sets=await S.be.getSets(); return C.newSetId(name, id=>!!sets[id], rnd); }
 
 /* ============ dialogs: set settings, QR code, delete ============ */
 function toLocalInput(ts){ const d=new Date(ts), p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
@@ -606,7 +651,8 @@ function dlgHTML(){ const d=S.ui.dlg; if(!d) return "";
   return `<div class="modal" id="dlg"><div class="card dlg${d.type==="edit"?" wide":""}" role="dialog" aria-modal="true" aria-label="${esc(d.title)}">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:22px;flex:1">${esc(d.title)}</h2><button class="btn sm ghost" data-act="dlgClose">Close</button></div>${body}</div></div>`; }
 function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEFAULT_ACCENT;
-  return `<div class="field"><label for="dlgName">Name (only you see this, in the overview)</label><input type="text" id="dlgName" maxlength="60" value="${esc(tx(f.name))}" placeholder="MT offsite, team B"></div>
+  return `<div class="field"><label for="dlgName">Name (only you see this, in the overview)</label><input type="text" id="dlgName" maxlength="60" value="${esc(tx(f.name))}" placeholder="MT offsite, team B">
+      ${isNew?`<div class="meta">The link of the set is this name plus four random characters (mt-offsite-team-b-x7k2). ${LINK_NOTE}</div>`:""}</div>
     <div class="field"><label for="dlgHeader">Header shown to the audience (leave empty to use the name)</label><input type="text" id="dlgHeader" maxlength="80" value="${esc(tx(f.header)===tx(f.name)?"":tx(f.header))}"></div>
     <div class="field"><label>Accent colour</label><div class="swatches">${C.ACCENT_PRESETS.map(([n,hex])=>`<button type="button" class="sw${hex===acc?" on":""}" data-act="dlgAccent" data-v="${hex}" style="background:${hex}" title="${n}" aria-label="${n}"></button>`).join("")}
       <label class="sw-custom">Other <input type="color" id="dlgColor" value="${acc.toLowerCase()}" aria-label="Pick another accent colour"></label></div></div>
@@ -675,11 +721,11 @@ function delDlgHTML(d){ const m=metaOf(d.id)||{}, st=d.st;
     <div class="controls"><button class="btn" data-act="setExpJSON" data-id="${esc(d.id)}">Export responses first</button><span class="spacer"></span><button class="btn ghost" data-act="dlgClose">Cancel</button><button class="btn danger-solid" data-act="delConfirm">Delete permanently</button></div>`; }
 /* a set under another id, so under another link: for sets from before links followed the name, or after a rename */
 function openLinkDlg(id){ const m=metaOf(id); if(!m) return; const sets=S.sets||{};
-  S.ui.dlg={type:"link", id, title:"Change the link of this question set", focus:"dlgLink", v:C.setIdFor(tx(m.name), x=>x!==id && !!sets[x])}; render(); }
+  S.ui.dlg={type:"link", id, title:"Change the link of this question set", focus:"dlgLink", v:C.newSetId(tx(m.name), x=>!!sets[x], rnd)}; render(); }
 function linkDlgHTML(d){ const m=metaOf(d.id)||{}, st=S.polls[d.id], live=st && st.phase && st.phase!=="lobby";
   return `<p class="meta" style="margin:0">Now: <span style="word-break:break-all">${esc(urlFor({set:d.id}))}</span></p>
     <div class="field"><label for="dlgLink">New last part of the link</label><input type="text" id="dlgLink" maxlength="40" value="${esc(d.v)}" autocapitalize="none" spellcheck="false">
-      <div class="meta">Lowercase letters, digits and dashes. Anything else is converted, so you can also type a title.</div></div>
+      <div class="meta">Lowercase letters, digits and dashes. Anything else is converted, so you can also type a title. The four characters at the end make the link hard to guess; keep them or type your own. ${LINK_NOTE}</div></div>
     <div class="banner"><b>${esc(tx(m.name))}</b> keeps its questions and answers, but the old link and QR code stop working. Anyone who has the set open has to join again through the new link.${live?" A session is running in this set right now.":""}${m.joinUrl?" This set shows its own join link to participants; check that it still points to the right place.":""}</div>
     <div class="controls"><button class="btn primary" data-act="dlgSave">Change link</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
 async function saveLinkDlg(){ const d=S.ui.dlg, el=document.getElementById("dlgLink"), raw=el?el.value.trim():"";
@@ -720,7 +766,13 @@ function saveEditDlg(){ const d=S.ui.dlg, i=S.cfg.questions.findIndex(x=>x.id===
   setConfig({...S.cfg, questions:qs});
   setSession({phase:"voting", current:i, revealed:S.ses.revealed.filter(x=>x!==qu.id), revote:{qid:qu.id, rev:nq.rev}, outcome, showLive:false}); }
 let writeChain=Promise.resolve();
-function write(fn){ writeChain = writeChain.then(fn).catch(e=>{ console.warn("write failed",e); if(e&&e.code==="invalid_argument"){ S.ui.readonly=true; render(); } }); return writeChain; }
+function write(fn){ writeChain = writeChain.then(fn).catch(e=>{ console.warn("write failed",e); if(e&&e.code==="invalid_argument"){ S.ui.readonly=true; render(); } else if(isDenied(e)) onRefused(); }); return writeChain; }
+/* the database rules refused a write (backlog G3). At the expiry moment that is expected: the expired screen follows.
+   Anything else must not pass in silence. */
+function isDenied(e){ return !!e && /permission.denied/i.test(String(e.code||"")+" "+String(e.message||"")); }
+function onRefused(){ const m=S.meta, now=nowS();
+  if(S.route==="set" && !S.me.isHost && m && Number.isFinite(m.expiresAt) && m.expiresAt<=now+15000){ setTimeout(render, Math.max(0, m.expiresAt-now)+300); return; }
+  S.ui.saveErr = (S.me.isHost && S.ui.view!=="participant") ? "The database refused this change. Reload the page" : "Your answer could not be saved. Reload the page"; render(); }
 function setSession(patch){ const next={...S.ses,...patch}; if(!("revote" in patch) && ("current" in patch || "phase" in patch)) next.revote=null; // moving on ends a re-vote
   S.ses=next; render(); if(S.review || expired()) return Promise.resolve(); return write(()=>S.backend.setSession(next)); }
 function setConfig(next){ S.cfg=next; render(); if(S.review || expired()) return Promise.resolve(); return write(()=>S.backend.setConfig(next)); }
@@ -763,6 +815,10 @@ app.addEventListener("click", e=>{
     } break;
     case "rejoin": S.me.ackReset=(S.ses.resetAt||0); render(); if(S.heartbeat) S.heartbeat(); break;
     case "reset": if(confirm("Clear all answers and start a new round?"+actionNote())){ const r=(ses.round||1)+1; setSession({phase:"lobby", current:0, revealed:[], round:r, outcome:null}); dropHistory(); write(()=>S.backend.clearVotes()); } break;
+    case "signIn": doSignIn(); break;
+    case "forgot": doForgot(); break;
+    case "signOut": S.be.signOut().catch(e=>alert("Signing out failed: "+(e&&e.message||e))); break;
+    case "reload": location.reload(); break;
     case "asParticipant": S.ui.view="participant"; render(); if(S.heartbeat) S.heartbeat(); break;
     case "asHost": S.ui.view=null; render(); break;
     case "vote": {
@@ -865,6 +921,7 @@ app.addEventListener("input", e=>{ const t=e.target; if(t && t.id==="dlgColor"){
   S.ui.tx=S.ui.tx||{}; S.ui.tx[txKey(t.dataset.q)]=t.value; clearTimeout(fuTimer); const qid=t.dataset.q; fuTimer=setTimeout(()=>saveText(qid), 800); });
 app.addEventListener("focusout", e=>{ const t=e.target; if(S.rendering || !t || !t.isConnected) return; if(t.classList && t.classList.contains("tl-fu-in")){ clearTimeout(fuTimer); saveText(t.dataset.q); } });
 app.addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target && e.target.id==="nameIn"){ e.preventDefault(); document.querySelector('[data-act="nameSave"]')?.click(); return; }
+  if(e.key==="Enter" && e.target && (e.target.id==="siEmail" || e.target.id==="siPass")){ e.preventDefault(); doSignIn(); return; }
   if(e.key!=="Escape") return; if(S.ui.dlg){ closeDlg(); return; } if(S.ui.configOpen){ S.ui.configOpen=false; S.ui.jsonText=null; render(); } });
 app.addEventListener("toggle", e=>{ if(e.target && e.target.id==="cfgJsonBox") S.ui.jsonOpen=e.target.open; if(e.target && e.target.id==="waitBox" && !S.rendering) S.ui.waitOpen=e.target.open; }, true);
 document.addEventListener("keydown", e=>{ if(!S.me.isHost||S.route!=="set"||S.ui.configOpen||S.ui.dlg||S.ui.view==="participant") return; if(e.target.matches("input,textarea")) return;
@@ -883,11 +940,15 @@ async function migrate(be){ const id=(typeof MIGRATE_POLL_ID!=="undefined" && MI
 async function boot(){
   S.ui.qs=getQS(); applyQS();
   render();
-  const be = B.make({ firebaseConfig:(typeof FIREBASE_CONFIG!=="undefined" ? FIREBASE_CONFIG : {}), hostKey:(typeof HOST_KEY!=="undefined" ? HOST_KEY : ""), params });
-  S.be=be; S.me.id=be.id; S.me.isHost=be.isHost; S.ui.readonly = be.canWrite===false;
+  /* a set page signs in anonymously by itself; the overview and the sign-in screen do not need an identity for that */
+  const be = B.make({ firebaseConfig:(typeof FIREBASE_CONFIG!=="undefined" ? FIREBASE_CONFIG : {}), params, anon: !!SET_ID && !SIGNIN });
+  S.be=be; S.ui.readonly = be.canWrite===false;
   let offTimer=null;
   function setOffline(off){ if(off===!!S.ui.offline) return; S.ui.offline=off; if(S.booted) renderBg(); }
   if(be.onConn) be.onConn(ok=>{ clearTimeout(offTimer); if(ok) setOffline(false); else offTimer=setTimeout(()=>setOffline(true), 6000); });
+  /* wait for the first sign-in state before deciding between presenter and participant */
+  await new Promise(done=>be.onAuth(a=>{ applyAuth(a); done(); }));
+  if(SIGNIN && !be.demo){ if(be.isHost){ location.replace(urlFor({set:SET_ID})); return; } S.route="signin"; S.booted=true; render(); return; }
   if(be.isHost && !be.demo) await migrate(be);
   S.booted=true;
   if(S.route==="home") bootHome(be); else if(S.setId) bootSet(be); else render();
@@ -912,11 +973,11 @@ function bootSet(be){
   p.onConfig(c=>{ raw.cfg=c||null; if(S.review){ S.review.live.cfg=C.normConfig(c); return; } settle(); renderBg(); });
   p.onSession(s=>{ s=normSession(s); noteReset(s); raw.ses=s||null; if(S.review){ S.review.live.ses={...DEFAULT_SESSION,...(s||{})}; return; } settle(); renderBg(); });
   p.onVotes(v=>{ if(S.review){ S.review.live.votes=v||{}; return; } S.votes=v||{}; votesIn=true; ensureName(); renderBg(); });
-  if(be.isHost) p.onActions(a=>{ if(S.review){ S.review.live.actions=a||{}; return; } S.actions=a||{}; renderBg(); }); // follow-up actions are for the presenter only
+  p.onActions(a=>{ if(!be.isHost) a={}; if(S.review){ S.review.live.actions=a||{}; return; } S.actions=a||{}; renderBg(); }); // follow-up actions are for the presenter only
   try{ const o=JSON.parse(localStorage.getItem("tr_name_"+S.setId)||"null"); if(o && o.n){ S.me.name=String(o.n); S.me.nameAt=o.at||0; } }catch(e){}
   { const send=p.setVotes; p.setVotes=(pid,v)=>send(pid, pid===be.id ? stampDoc(v) : v); } // this device's doc always carries (or drops) its name
   /* random names are handed out here; when two devices hold the same name the later one gives way */
-  function ensureName(){ if(!S.meta || !S.ses || !votesIn || S.review || expired()) return; const nm=S.meta.named; if(!C.isNamed(nm)) return;
+  function ensureName(){ if(!be.id || !S.meta || !S.ses || !votesIn || S.review || expired()) return; const nm=S.meta.named; if(!C.isNamed(nm)) return;
     const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
     const clash = S.me.name && C.mustYieldName(S.votes, be.id, S.me.name, S.me.nameAt);
     if(nm==="random" && (!S.me.name || clash)){ const n=C.randomName(new Set(C.otherNames(S.votes,be.id).map(x=>x.toLowerCase()))); if(!n) return;
@@ -924,14 +985,14 @@ function bootSet(be){
       S.votes[be.id]=doc; write(()=>p.setVotes(be.id,doc)); renderBg(); }
     else if(nm==="yes" && clash){ setName(null); S.ui.nameErr="This name is already in use. Choose another."; renderBg(); } }
   // announce presence so the host sees who joined (a vote doc with no answers)
-  function heartbeat(){ if(!S.ses || !S.meta || expired() || be.canWrite===false || isKicked() || S.review) return; const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
+  function heartbeat(){ if(!be.id || !S.ses || !S.meta || expired() || be.canWrite===false || isKicked() || S.review) return; const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
     ensureName(); if(C.isNamed(S.meta.named) && !S.me.name) return; // in a named set you join once you have a name
     const cur=S.votes[be.id]; const doc = (cur && cur.round===S.ses.round) ? {...cur, t:Date.now()} : {round:S.ses.round, answers:{}, t:Date.now()};
     S.votes[be.id]=doc; write(()=>p.setVotes(be.id,doc)); }
   S.heartbeat=heartbeat;
   setTimeout(heartbeat, 800);
   setInterval(heartbeat, 60000);
-  setInterval(renderBg, be.isHost ? 30000 : 60000); // presence fades and sets expire with the clock, on every device
+  setInterval(renderBg, 30000); // presence fades and sets expire with the clock, on every device
 
   /* ---- staying in sync after the screen has been off ---- */
   function applyPull(d){ if(!d || S.review) return;

@@ -1,6 +1,8 @@
 /* Tally Room backends: where the data lives.
    Both backends offer the same interface:
-     global   id, isHost, canWrite, demo, isConnected(), onConn(f), downFor(), nudge()
+     global   id, isHost, canWrite, demo, isConnected(), onConn(f), downFor(), nudge(), now()
+     sign-in  onAuth(f(state)), signIn(email, password), signOut(), resetPassword(email)
+              id and isHost follow the sign-in and can change while the page is open (backlog G1, G2)
      sets     onSets(f(map|null, err)), getSets(), setMeta(id, meta), patchMeta(id, patch), removeSet(id), moveSet(id, newId)
      polls    readPoll(id), writePoll(id, {config, session}), poll(id) -> live access to one set
    Data layout: sets/{id} = attributes of a set, polls/{id}/config|session|votes = its questions, state and answers,
@@ -9,20 +11,11 @@
 "use strict";
 const C=root.TRCore;
 
-function localId(){ try{ let id=localStorage.getItem("tr_pid"); if(!id){ id="p_"+Math.random().toString(36).slice(2,12); localStorage.setItem("tr_pid",id);} return id; }catch(e){ return "p_"+Math.random().toString(36).slice(2,12); } }
-
-/* Presenter flag: one per device, valid for all sets. ?host=KEY switches it on, ?host=off switches it off. */
-function resolveHost(params, hostKey, demo){
-  if(demo) return params.get("host")!=="off"; // demo: presenter unless asked otherwise, nothing is stored
-  try{
-    const legacy=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.indexOf("tr_host_")===0) legacy.push(k); }
-    if(legacy.some(k=>localStorage.getItem(k)==="1")) localStorage.setItem("tr_host","1"); // flag from before sets existed (it was kept per poll)
-    legacy.forEach(k=>localStorage.removeItem(k));
-    if(hostKey && params.get("host")===hostKey) localStorage.setItem("tr_host","1");
-    if(params.get("host")==="off") localStorage.removeItem("tr_host");
-    return localStorage.getItem("tr_host")==="1";
-  }catch(e){ return !!hostKey && params.get("host")===hostKey; }
-}
+/* the demo store has no sign-in: its device id is made up here and kept in this browser */
+function demoId(){ try{ let id=localStorage.getItem("tr_demo_pid"); if(!id){ id="p_"+Math.random().toString(36).slice(2,12); localStorage.setItem("tr_demo_pid",id);} return id; }catch(e){ return "p_"+Math.random().toString(36).slice(2,12); } }
+/* from before sign-in existed: the presenter flag (tr_host, tr_host_{poll}) and the self-made device id (tr_pid) */
+function dropLegacyKeys(){ try{ const old=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && (k==="tr_host" || k==="tr_pid" || k.indexOf("tr_host_")===0)) old.push(k); }
+  old.forEach(k=>localStorage.removeItem(k)); }catch(e){} }
 
 /* ---- Demo backend: no network. Data sits in this browser (localStorage) and is shared between its tabs.
         Eight simulated participants answer in the tab that presents, to preview the design. ---- */
@@ -66,8 +59,10 @@ function makeDemoBackend(isHost){
         if(qu.kind==="open"){ v.answers[qu.id]=1; v.texts={...(v.texts||{})}; v.texts[qu.id]="Demo answer from "+n+(i%3===0?", with a second line\nto show how longer answers wrap":""); }
         if(qu.kind==="dilemma"){ const cf=qu.conf||C.DEFAULT_CONF; v.conf={...(v.conf||{})}; v.conf[qu.id]=cf.min+Math.round(Math.random()*(cf.max-cf.min)); }
         v.t=Date.now(); put(n,v); }, 500+400*i+150*j))); } }
-  return { id:localId(), isHost, canWrite:true, demo:true,
-    isConnected:()=>true, onConn:f=>f(true), downFor:()=>0, nudge:()=>{},
+  return { id:demoId(), isHost, canWrite:true, demo:true,
+    isConnected:()=>true, onConn:f=>f(true), downFor:()=>0, nudge:()=>{}, now:()=>Date.now(),
+    onAuth:f=>f({ready:true, uid:null, isHost, anon:false, email:"", error:null}), // nothing to sign in to
+    signIn:async()=>{}, signOut:async()=>{}, resetPassword:async()=>{},
     onSets:f=>{ L.sets.push(f); f(copy(db.sets)||{}); },
     getSets:async()=>copy(db.sets)||{},
     setMeta:async(id,m)=>{ db.sets[id]=copy(m); save(); emitSets(); emit(id,"meta"); },
@@ -92,21 +87,64 @@ function makeDemoBackend(isHost){
       clearActions:async()=>{ P(id).actions={}; save(); emit(id,"actions"); } }; } };
 }
 
-/* ---- Firebase Realtime Database backend (self-hosted version, open to anyone with the link) ---- */
-function makeFirebaseBackend(config, isHost){
+/* ---- Firebase Realtime Database backend ----
+   Who you are comes from Firebase Authentication (backlog G1, G2):
+     presenter    signed in with email and password, and listed in presenters/{uid}
+     participant  signed in anonymously, without any screen; the uid is the device id and the key of its vote record
+   The database rules (database.rules.json) decide what each of them may read and write.
+   opts.anon: sign in anonymously when nobody is signed in (a set page); opts.signOut: ?host=off */
+function makeFirebaseBackend(config, opts){
   root.firebase.initializeApp(config);
-  const db=root.firebase.database(), BASE=String(config.databaseURL).replace(/\/+$/,"");
+  dropLegacyKeys();
+  const db=root.firebase.database(), auth=root.firebase.auth(), BASE=String(config.databaseURL).replace(/\/+$/,"");
   /* a phone that was locked or backgrounded comes back with a dead socket: watch the link,
      force a reconnect, and fall back to plain HTTPS reads so a stalled socket never strands anyone */
-  let connected=false, downSince=Date.now(), lastNudge=0; const connFns=[];
+  let connected=false, downSince=Date.now(), lastNudge=0, offset=0; const connFns=[];
   db.ref(".info/connected").on("value", s=>{ const now=s.val()===true; if(now===connected) return; connected=now; if(!now) downSince=Date.now(); connFns.forEach(f=>f(now)); });
-  const rest=async path=>{ const r=await fetch(BASE+"/"+path+".json?_="+Date.now(), {cache:"no-store"}); if(!r.ok) throw new Error("rest "+r.status); return (await r.json())||{}; };
-  return { id:localId(), isHost, canWrite:true, demo:false,
+  db.ref(".info/serverTimeOffset").on("value", s=>{ offset=Number(s.val())||0; }); // the rules use the server's clock, so expiry does too
+  const now=()=>Date.now()+offset;
+  /* plain HTTPS reads carry the ID token of the signed-in device; without it the rules refuse them */
+  const rest=async path=>{ const u=auth.currentUser; if(!u) throw new Error("rest: not signed in"); const tok=await u.getIdToken();
+    const r=await fetch(BASE+"/"+path+".json?auth="+encodeURIComponent(tok)+"&_="+Date.now(), {cache:"no-store"}); if(!r.ok) throw new Error("rest "+r.status); return (await r.json())||{}; };
+
+  /* ---- sign-in state ---- */
+  const st={ready:false, uid:null, isHost:false, anon:false, email:"", error:null}, authFns=[];
+  let wantOut=!!opts.signOut, seq=0;
+  /* live listeners are attached again whenever the identity changes: the server drops the ones the new identity may not
+     keep, and a presenter-only path (the list of sets, the actions) is only listened to by a presenter */
+  const subs=[];
+  function attach(sub){ detach(sub); if(!st.uid || (sub.hostOnly && !st.isHost)){ if(sub.hostOnly && st.ready) sub.empty(); return; }
+    const ref=db.ref(sub.path), uid=st.uid, cb=ref.on("value", s=>sub.f(s.val()), e=>{ if(sub.live && sub.live.cb===cb){ sub.live=null; if(sub.err && st.uid===uid) sub.err(e); } });
+    sub.live={ref, cb}; }
+  function detach(sub){ if(sub.live){ const l=sub.live; sub.live=null; try{ l.ref.off("value", l.cb); }catch(e){} } }
+  function listen(path, f, err, hostOnly, empty){ const sub={path, f, err, hostOnly:!!hostOnly, empty:empty||(()=>{}), live:null}; subs.push(sub); if(st.ready) attach(sub); }
+  function publish(next){ const changed = !st.ready || next.uid!==st.uid || next.isHost!==st.isHost;
+    Object.assign(st, next, {ready:true}); if(changed) subs.forEach(attach); authFns.forEach(f=>f({...st})); }
+  async function resolve(user){ const my=++seq;
+    if(user && !user.isAnonymous && wantOut){ wantOut=false; try{ await auth.signOut(); }catch(e){} return; } // ?host=off
+    wantOut=false;
+    if(!user){
+      if(!opts.anon){ publish({uid:null, isHost:false, anon:false, email:"", error:null}); return; }
+      try{ await auth.signInAnonymously(); }catch(e){ console.warn("anonymous sign-in failed", e); if(my===seq) publish({uid:null, isHost:false, anon:false, email:"", error:"anon"}); }
+      return; } // the sign-in itself brings the next state
+    if(user.isAnonymous){ publish({uid:user.uid, isHost:false, anon:true, email:"", error:null}); return; }
+    let host=false; try{ host=(await db.ref("presenters/"+user.uid).once("value")).val()===true; }catch(e){ console.warn("presenter check failed", e); }
+    if(my===seq) publish({uid:user.uid, isHost:host, anon:false, email:user.email||"", error:null}); }
+  auth.onAuthStateChanged(resolve, e=>{ console.warn("auth", e); publish({uid:null, isHost:false, anon:false, email:"", error:"anon"}); });
+
+  const denied=e=>!!e && /permission.denied/i.test(String(e.code||"")+" "+String(e.message||""));
+  return { get id(){ return st.uid; }, get isHost(){ return st.isHost; }, canWrite:true, demo:false,
     isConnected:()=>connected,
     onConn:f=>{ connFns.push(f); f(connected); },
     downFor:()=>connected ? 0 : Date.now()-downSince,
     nudge:()=>{ const t=Date.now(); if(connected || t-downSince<8000 || t-lastNudge<10000) return; lastNudge=t; try{ db.goOffline(); db.goOnline(); }catch(e){} },
-    onSets:f=>db.ref("sets").on("value", s=>f(s.val()||{}), e=>f(null,e)),
+    now,
+    onAuth:f=>{ authFns.push(f); if(st.ready) f({...st}); },
+    signIn:(email,password)=>auth.signInWithEmailAndPassword(email,password),
+    /* on a set page the presenter turns straight into an anonymous participant, without a moment as nobody */
+    signOut:()=>opts.anon ? auth.signInAnonymously() : auth.signOut(),
+    resetPassword:email=>auth.sendPasswordResetEmail(email),
+    onSets:f=>listen("sets", v=>f(v||{}), e=>f(null,e), true),
     getSets:async()=>(await db.ref("sets").once("value")).val()||{},
     setMeta:(id,m)=>db.ref("sets/"+id).set(m),
     patchMeta:(id,p)=>db.ref("sets/"+id).update(p),
@@ -115,31 +153,35 @@ function makeFirebaseBackend(config, isHost){
     moveSet:async(id,nid)=>{ const val=async p=>(await db.ref(p).once("value")).val();
       const [meta,poll,m2,p2]=await Promise.all([val("sets/"+id), val("polls/"+id), val("sets/"+nid), val("polls/"+nid)]);
       if(!meta) throw new Error("This set does not exist any more."); if(m2 || p2) throw new Error("That link is already in use.");
-      await db.ref().update({["sets/"+nid]:meta, ["polls/"+nid]:poll, ["sets/"+id]:null, ["polls/"+id]:null}); },
+      try{ await db.ref().update({["sets/"+nid]:meta, ["polls/"+nid]:poll, ["sets/"+id]:null, ["polls/"+id]:null}); }
+      catch(e){ if(denied(e)) throw new Error("This set holds answers in an old format. Clear the answers or export them first"); throw e; } },
     readPoll:async id=>{ try{ return await rest("polls/"+id); }catch(e){ return (await db.ref("polls/"+id).once("value")).val()||{}; } },
     writePoll:(id,p)=>db.ref("polls/"+id).set(p),
-    poll:id=>{ const node=db.ref("polls/"+id); return {
-      pull:()=>rest("polls/"+id),
-      onMeta:f=>db.ref("sets/"+id).on("value", s=>f(s.val()), e=>f(null,e)),
-      onConfig:f=>node.child("config").on("value", s=>f(s.val())),
-      onSession:f=>node.child("session").on("value", s=>f(s.val())),
-      onVotes:f=>node.child("votes").on("value", s=>f(s.val()||{})),
+    poll:id=>{ const node=db.ref("polls/"+id), P="polls/"+id; return {
+      /* only a presenter may read polls/{id} as a whole; a participant reads the parts it is allowed to */
+      pull:async()=>{ if(st.isHost) return rest(P); const [config,session,votes]=await Promise.all([rest(P+"/config"), rest(P+"/session"), rest(P+"/votes")]); return {config, session, votes}; },
+      onMeta:f=>listen("sets/"+id, f, e=>f(null,e)),
+      onConfig:f=>listen(P+"/config", f),
+      onSession:f=>listen(P+"/session", f),
+      onVotes:f=>listen(P+"/votes", v=>f(v||{})),
       setConfig:c=>node.child("config").set(c),
       setSession:s=>node.child("session").set(s),
-      setVotes:(pid,v)=>node.child("votes/"+pid).set(v),
+      /* the rules refuse a time stamp that is ahead of the server, so a phone with a fast clock is held back to the server's */
+      setVotes:(pid,v)=>node.child("votes/"+pid).set(v && Number.isFinite(v.t) && v.t>now()+30000 ? {...v, t:Math.round(now())} : v),
       setAllVotes:v=>node.child("votes").set(v||{}),
       clearVotes:()=>node.child("votes").remove(),
-      onActions:f=>node.child("actions").on("value", s=>f(s.val()||{})),
+      onActions:f=>listen(P+"/actions", v=>f(v||{}), null, true, ()=>f({})),
       setAction:(key,a)=>node.child("actions/"+key).set(a),
       clearActions:()=>node.child("actions").remove() }; } };
 }
 
-/* opts: {firebaseConfig, hostKey, params}. Demo when ?demo is in the address or Firebase is not configured. */
+/* opts: {firebaseConfig, params, anon}. Demo when ?demo is in the address or Firebase is not configured. */
 function make(opts){ const fc=opts.firebaseConfig||{}, params=opts.params;
-  const demo = params.has("demo") || !(root.firebase && fc.apiKey && fc.databaseURL);
-  const isHost = resolveHost(params, opts.hostKey, demo);
-  if(demo){ if(!params.has("demo")) console.warn("Firebase not configured: running in single-browser demo mode."); return makeDemoBackend(isHost); }
-  return makeFirebaseBackend(fc, isHost);
+  const demo = params.has("demo") || !(root.firebase && root.firebase.auth && fc.apiKey && fc.databaseURL);
+  if(demo){ if(!params.has("demo")) console.warn("Firebase not configured: running in single-browser demo mode.");
+    return makeDemoBackend(params.get("host")!=="off"); } // demo: presenter unless asked otherwise, nothing is stored
+  return makeFirebaseBackend(fc, {anon:!!opts.anon, signOut:params.get("host")==="off"});
 }
 root.TRBackend={ make };
-})(window);
+if(typeof module!=="undefined" && module.exports) module.exports=root.TRBackend;
+})(typeof window!=="undefined" ? window : globalThis);

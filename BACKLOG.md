@@ -663,9 +663,19 @@ Added 20 Nov 2026. Applies to sets of category `consent`.
 
 Added 20 Nov 2026, after a review of the setup as it stands. Applies to the Firebase backend; demo mode (`?demo=1`) keeps working without sign-in and without rules.
 
-> **Status: not built.**
+> **Status: G1 to G4 built on 20 Nov 2026**, tried in demo mode and with tests against a stand-in for Firebase (`tests/backend.test.js`). **Not yet live:** the providers and the `presenters` list are not set up in the Firebase console, the rules are not published, and none of the AC that need the real database (Rules Playground, three phones) have been run. G5, G6 and G7 are not built.
+>
+> Differences from the specification below:
+> - **New sets get four random characters behind the name** (`mt-offsite-team-b-x7k2`), per open decision 14. Change link suggests such a link too, and still accepts any link typed by hand.
+> - **Texts in a vote record may be 2,000 characters**, not 500: the editor allows an open question a `maxLen` up to 2,000 and a follow-up text is 600, and the rules must not refuse what the page writes.
+> - **Expiry follows the server's clock on every device** (`.info/serverTimeOffset`), so the expired screen appears at the moment the rules start refusing. A time stamp ahead of the server is held back to the server's time, so a phone with a fast clock is not locked out.
+> - **Signing out on a set page** swaps the presenter account for an anonymous one in one step; live listeners are attached again on every change of identity.
+> - **The page signs in anonymously on a set page only.** The overview and the sign-in screen need no identity.
+> - **A signed-in account that is not a presenter** is an ordinary participant on a set page.
+> - **The HTTPS fallback for participants** reads `config`, `session` and `votes` separately.
+> - The demo backend keeps its device id under `tr_demo_pid`, because `tr_pid` is removed.
 
-**Where it stands today**
+**Where it stands today** (before G1 to G4)
 
 - The database rules allow everyone to read and write `sets` and `polls/{id}`, without sign-in. Whoever has the database URL can read every set, every answer and every name, change or delete them, or fill the database, without using the page.
 - The database URL and `HOST_KEY` are in `config.js`, which every visitor's browser downloads. Any participant can read the key and open the page with `?host=…`. The key only switches the presenter buttons on; the database does not check it.
@@ -859,7 +869,7 @@ Each of these is tried with the Rules Playground in the Firebase console or from
 }
 ```
 
-- This block is a starting point, written without running it. Publishing it is part of the item, and so is every check under AC here and in G3.
+- This block is a starting point, written without running it; `database.rules.json` is the version to publish (it differs in the text limit, see the status note). Publishing it is part of the item, and so is every check under AC here and in G3. **Both are still to do.**
 
 **AC**
 

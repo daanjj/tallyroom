@@ -1,43 +1,110 @@
 # Tally Room, self-hosted version: setup guide
 
-A small static site (`index.html`, `config.js` and the folders `css` and `js`) plus a free Firebase database for the live votes. Works for anyone with the link or QR code, no login, unlimited participants (Firebase's free plan allows 100 simultaneous connections). Total setup time: about 15 minutes, once.
+A small static site (`index.html`, `config.js` and the folders `css` and `js`) plus a free Firebase database for the live votes. Participants need only the link or QR code, no login; presenters sign in. Unlimited participants (Firebase's free plan allows 100 simultaneous connections). Total setup time: about 20 minutes, once.
 
 ## 1. Create the free database (Firebase)
 
 1. Go to https://console.firebase.google.com and sign in with any Google account. Click **Add project**, give it a name (e.g. `tallyroom`), switch off Google Analytics, create.
 2. In the left menu: **Databases and storage → Realtime Database** (under NoSQL; in older console layouts this is **Build → Realtime Database**), then **Create database**. Choose location **europe-west1 (Belgium)**. Choose **Start in locked mode**, then Enable.
-3. Open the **Rules** tab and replace the content with:
+3. Open the **Rules** tab and replace the content with the content of `database.rules.json` (the file in this folder is the source; this is the same text):
 
 ```json
 {
   "rules": {
+    "presenters": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid"
+      }
+    },
     "sets": {
-      ".read": true,
-      ".write": true
+      ".read": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+      ".write": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+      "$set": {
+        ".read": "auth != null"
+      }
     },
     "polls": {
-      "$poll": {
-        ".read": true,
-        ".write": true
+      "$set": {
+        ".read": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+        ".write": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+        "config": {
+          ".read": "auth != null"
+        },
+        "session": {
+          ".read": "auth != null"
+        },
+        "votes": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('sets').child($set).exists() && (!root.child('sets').child($set).child('expiresAt').exists() || root.child('sets').child($set).child('expiresAt').val() > now)",
+            ".validate": "newData.hasChildren(['round', 't'])",
+            "round": {
+              ".validate": "newData.isNumber()"
+            },
+            "t": {
+              ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+            },
+            "name": {
+              ".validate": "newData.isString() && newData.val().length <= 30"
+            },
+            "nameAt": {
+              ".validate": "newData.isNumber()"
+            },
+            "answers": {
+              "$q": {
+                ".validate": "newData.isNumber()"
+              }
+            },
+            "conf": {
+              "$q": {
+                ".validate": "newData.isNumber()"
+              }
+            },
+            "revs": {
+              "$q": {
+                ".validate": "newData.isNumber()"
+              }
+            },
+            "texts": {
+              "$q": {
+                ".validate": "newData.isString() && newData.val().length <= 2000"
+              }
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        }
       }
     }
   }
 }
 ```
 
-Click **Publish**. `sets` is the list of question sets with their header, colour and expiry date; `polls` holds the questions and answers of each set. (These rules mean anyone with the page link can vote, which is what you want in a workshop.)
+Click **Publish**. `sets` is the list of question sets with their header, colour and expiry date; `polls` holds the questions and answers of each set; `presenters` is the list of accounts that may present. In short: a presenter may read and write everything; a participant may read the one set of the link and write only its own answers, and only while the set exists and has not expired. Nobody can read or write anything without being signed in. Who has the Firebase CLI can publish with `firebase deploy --only database` instead.
 
-**Upgrading from the version with one poll:** your rules only have the `polls` block. Add the `sets` block and publish, before you put the new files online. Without it the page shows "The database does not allow reading question sets yet".
+**Upgrading from the version with `HOST_KEY`:** do steps 1b and 1.3 and put the new files online in the same half hour, between sessions. The old page cannot write under the new rules, and the new page is not protected under the old ones. Export or reset running sets first: answers given before the switch stay readable but belong to no device any more, so a participant who returns would count twice. `HOST_KEY` is gone from `config.js`.
 
 4. Copy the database URL shown at the top of the Data tab. It looks like `https://tallyroom-xxxxx-default-rtdb.europe-west1.firebasedatabase.app`.
 5. Click **Settings → Project settings** in the left menu (or the **Add app** button on Project Overview) → **Your apps** → click the web icon `</>` → register the app (any nickname, no hosting needed) → copy the `firebaseConfig` block.
+
+## 1b. Sign-in (Firebase Authentication)
+
+Participants never see a sign-in: their phone signs in anonymously, which is how the database tells devices apart. Presenters sign in with email and password.
+
+1. In the left menu: **Authentication → Get started → Sign-in method**. Switch on **Email/Password** (not the email link option) and **Anonymous**.
+2. **Authentication → Users → Add user**: an email address and a password for each presenter. The page has no sign-up. Copy the **User UID** of the new user.
+3. **Realtime Database → Data**: add a key `presenters`, and under it the UID as key with the value `true` (type boolean), so the data reads `presenters / {UID}: true`. Only the console can change this list; the page cannot.
+4. **Authentication → Settings → Authorised domains**: add the domain of your page (`<yourname>.github.io` or your Netlify domain). `localhost` is there already.
+
+Anonymous users pile up under Users, one per phone per browser. That is harmless; a project upgraded to Identity Platform can delete them automatically after 30 days.
 
 ## 2. Put your settings in the file
 
 Open `config.js` in a text editor (Notepad, TextEdit, VS Code). Fill in:
 
 - `FIREBASE_CONFIG`: paste the values from step 1.5. Make sure `databaseURL` is filled in with the URL from step 1.4 (the console sometimes leaves it out).
-- `HOST_KEY`: a secret word only you know, e.g. `paars2026`.
+- Nothing in `config.js` is a secret. Visitors download it; what they may do is decided by sign-in and the database rules.
 - `MIGRATE_POLL_ID`: leave it empty (`""`) for a new database. Only when you upgrade from the version with one poll: the old `POLL_ID` (e.g. `workshop-4`). The first time the presenter opens the page, that poll becomes a question set with the same questions and answers.
 
 Save the file. There is no `POLL_ID` any more: question sets are created inside the tool.
@@ -59,13 +126,13 @@ To change questions or create sets later you do not need to re-upload: that happ
 
 ## 4. Question sets
 
-- **Presenter**: open `https://your-link/?host=paars2026` once on your laptop (your own HOST_KEY). That browser is now the presenter for all question sets; from then on the plain link opens the overview of sets on that device. `?host=off` switches it back.
+- **Presenter**: open `https://your-link/?host` on your laptop and sign in with the account from step 1b (or use the small **Presenter sign-in** link on the plain page). The sign-in is remembered on that device; from then on the plain link opens the overview of sets. **Sign out** sits in the top bar; `?host=off` signs out too. **Forgot password** sends a reset mail.
 - **New question set** asks for a name (for your own overview), a header (what the audience sees), an accent colour, a category and an expiry date (3 days from now unless you change it). The category decides which question types the set offers: *Generic* has scale, multiple choice and open questions; *Consent* adds the traffic light; *Dilemma* adds the dilemma question (a choice plus a confidence rating). It then opens the question editor. **Create from file** starts the set from a questions file you exported earlier.
 - **Named respondents** (in New question set and in Settings): *No* keeps everyone anonymous; *Yes* asks each participant for a name before joining; *Random* gives each device a name such as `k1`. With Yes or Random you see names with comments and open answers and in the exports.
-- Each set has its own link and QR code. The link ends in the name of the set as you typed it when creating it (`https://your-link/?set=mt-offsite-team-b`); renaming the set later does not change it. **Show QR** in the overview gives a large code, **Copy link** and **Download PNG** for slides or print.
+- Each set has its own link and QR code. The link ends in the name of the set as you typed it when creating it, plus four random characters (`https://your-link/?set=mt-offsite-team-b-x7k2`); renaming the set later does not change it. Anyone who knows or guesses the link of a set can join it and see the results shown to the room, which is why the random characters are there. **Show QR** in the overview gives a large code, **Copy link** and **Download PNG** for slides or print.
 - **More** per set: Settings, Other expiry date, Change link, Duplicate, Export questions, Export responses (JSON or CSV), Delete. These work without opening the set.
 - **Change link** gives a set another link, for example after a rename or for a set that still has an old or random link. Questions and answers move along, but the old link and QR code stop working and anyone who has the set open has to join again, so do this before a session and not during one.
-- **Expiry**: after the expiry moment participants see "This question set has expired" and can no longer answer; the presenter sees the set read-only. Nothing is deleted. **Extend** in the overview (or **Extend 3 days** in the set) switches it back on for every device within a few seconds.
+- **Expiry**: after the expiry moment participants see "This question set has expired" and can no longer answer (the database refuses their answers, by its own clock); the presenter sees the set read-only. Nothing is deleted. **Extend** in the overview (or **Extend 3 days** in the set) switches it back on for every device within a few seconds.
 - The plain link without `?set=` shows participants only "Scan the QR code or open the link you received". QR codes printed for the old single-poll version therefore no longer open a poll; hand out the code of the set.
 
 ## 5. Run a session
@@ -87,9 +154,14 @@ Firebase Spark plan: free, no credit card, 1 GB storage and 100 simultaneous con
 ## Troubleshooting
 
 - Page shows "Connecting…" forever: `databaseURL` missing or wrong in `config.js`, or rules not published.
-- "The database does not allow reading question sets yet": the `sets` block is missing from the rules (step 1.3).
+- "Could not connect. Check your connection and reload" on a phone: the **Anonymous** provider is off (step 1b), the phone blocks storage (some private modes), or there is no network.
+- Votes are refused ("Your answer could not be saved"): the rules are published but the Anonymous provider is off, or the page online is still the old version.
+- "This account is not a presenter": the UID of the account is not under `presenters` with the value `true` (step 1b.3), or the rules are not published yet.
+- Signing in fails on the live page but works on `localhost`: the domain is missing under Authentication → Settings → Authorised domains.
+- Change link reports "This set holds answers in an old format": the set holds answers from before the rules, with a field or a text the rules refuse. Export the answers, clear them, then change the link.
+- "The database does not allow reading question sets yet": the rules of step 1.3 are not published.
 - "This question set does not exist (any more)": the set was deleted, or the link is incomplete. Take the link or QR code from the overview again.
 - A phone stays on "Waiting for the presenter to start" after you open question 1: the page reconnects by itself (it forces a new connection when the screen comes back on and reads the session over plain HTTPS while waiting in the lobby), so give it a few seconds. A **Reconnecting…** pill in the top bar means the link is still down; refreshing always works.
 - Votes do not appear on the presenter screen: participants are on the link of a different set, or the rules block writes. Check the Rules tab.
-- Everybody sees the presenter view: someone opened the `?host=` link on a shared device. Open `?host=off` on that device.
+- A shared device shows the presenter view: someone signed in on it. Click **Sign out**, or open `?host=off` on that device.
 - The page looks or behaves like the old version after an upload: the browser still has the old files. Reload once; if you change the files yourself, raise the `?v=` number behind the file names in `index.html`.

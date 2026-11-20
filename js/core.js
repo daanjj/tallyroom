@@ -269,6 +269,12 @@ const SET_ID_RE=/^[A-Za-z0-9_-]{1,40}$/;
 /* the id is the name as a slug, so the link reads like the set; -2, -3… when that id is taken */
 function setIdFor(name, taken){ const base=slug(name); if(!taken || !taken(base)) return base;
   for(let n=2;;n++){ const suf="-"+n, id=base.slice(0,40-suf.length).replace(/-+$/,"")+suf; if(!taken(id)) return id; } }
+/* a new set gets four random characters behind its name, so its link cannot be guessed from the name (backlog G4).
+   Without 0, o, 1, l and i: the link is also read aloud and typed over. */
+const TAIL_CHARS="abcdefghjkmnpqrstuvwxyz23456789";
+function randomTail(rnd){ rnd=rnd||Math.random; let t=""; for(let i=0;i<4;i++) t+=TAIL_CHARS[Math.floor(rnd()*TAIL_CHARS.length)%TAIL_CHARS.length]; return t; }
+function newSetId(name, taken, rnd){ const base=slug(name).slice(0,35).replace(/-+$/,"")||"set";
+  for(;;){ const id=base+"-"+randomTail(rnd); if(!taken || !taken(id)) return id; } }
 function normHex(v){ let s=String(v||"").trim(); if(/^#?[0-9a-fA-F]{3}$/.test(s)){ s=s.replace("#",""); s="#"+s[0]+s[0]+s[1]+s[1]+s[2]+s[2]; } if(/^[0-9a-fA-F]{6}$/.test(s)) s="#"+s; return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toUpperCase() : null; }
 /* the record at sets/{id}: always complete, never undefined (Firebase refuses undefined) */
 function normMeta(m){ if(!m || typeof m!=="object") return null;
@@ -408,7 +414,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   CATEGORY_RULES, catRules, catName, kindAllowed, filterForCategory, skippedMessage, categoryBlockers, blockerMessage, dilemmaStats,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, validAns, roundVotes, stats, parseCSV, csvToQuestions,
-  DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, SET_ID_RE, setIdFor, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
+  DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,

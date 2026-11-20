@@ -5,22 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tally Room</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
-<link rel="stylesheet" href="css/styles.css?v=20261120e">
+<link rel="stylesheet" href="css/styles.css?v=20261120f">
 </head>
 <body>
 <div id="app"></div>
 
 <!-- No build step: plain scripts, loaded in this order.
-     config.js   your settings (Firebase project, host key)
+     config.js   your settings (Firebase project); it holds no secret
      core.js     pure logic, covered by tests/core.test.js
      backend.js  where the data lives (Firebase, or a demo store in the browser with ?demo=1)
      app.js      screens and actions -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-<script src="config.js?v=20261120e"></script>
-<script src="js/core.js?v=20261120e"></script>
-<script src="js/backend.js?v=20261120e"></script>
-<script src="js/app.js?v=20261120e"></script>
+<script src="config.js?v=20261120f"></script>
+<script src="js/core.js?v=20261120f"></script>
+<script src="js/backend.js?v=20261120f"></script>
+<script src="js/app.js?v=20261120f"></script>
 </body>
 </html>
