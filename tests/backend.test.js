@@ -105,3 +105,17 @@ test("every config written to Firebase carries the ids of its questions, for the
   assert.deepEqual(log.set.map(([p, v]) => [p, (v.config || v).qids]), [["polls/a", { qabc123: true }], ["polls/a/config", { qabc123: true }]]);
   assert.equal(cfg.qids, undefined, "the caller's object is left alone");
 });
+test("a participant listens to its own record, what is shown and the names, never to all votes; a presenter to all votes", async () => {
+  const part = load({ data: DATA }, null, "set=a", true); await tick();
+  const p = part.be.poll("a"), got = {}; p.onVotes((v) => (got.all = v)); p.onMine((v) => (got.mine = v)); p.onShown((v) => (got.shown = v)); p.onNames((v) => (got.names = v)); await tick();
+  assert.deepEqual(part.log.on, ["polls/a/votes/anon1", "polls/a/shown", "polls/a/names"]); assert.deepEqual(got.all, {});
+  const host = load({ data: DATA, user: { uid: "u_ann", isAnonymous: false } }, null, "set=a", true); await tick();
+  const h = host.be.poll("a"); h.onVotes(() => {}); h.onMine(() => {}); h.onShown(() => {}); h.onNames(() => {}); await tick();
+  assert.deepEqual(host.log.on, ["polls/a/votes"]);
+});
+test("a participant's catch-up read asks only for the parts it may read", async () => {
+  const calls = []; global.fetch = async (url) => { calls.push(url.split(".json")[0].replace("https://x.example/", "")); return { ok: true, json: async () => ({}) }; };
+  const { be } = load({ data: DATA, user: { uid: "anonX", isAnonymous: true, getIdToken: async () => "t" } }, null, "set=a", true); await tick();
+  const d = await be.poll("a").pull();
+  assert.deepEqual(calls.sort(), ["polls/a/config", "polls/a/names", "polls/a/session", "polls/a/shown", "polls/a/votes/anonX"]); assert.equal(d.mine, null);
+});

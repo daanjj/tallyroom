@@ -25,14 +25,17 @@ function makeDemoBackend(isHost){
   let db=load();
   const save=()=>{ mem=db; try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){} };
   const L={sets:[], poll:{}}; // listeners
-  const pl=id=>(L.poll[id]=L.poll[id]||{meta:[],cfg:[],ses:[],votes:[],actions:[]});
+  const pl=id=>(L.poll[id]=L.poll[id]||{meta:[],cfg:[],ses:[],votes:[],mine:[],shown:[],names:[],actions:[]});
+  const myId=demoId();
   const P=id=>(db.polls[id]=db.polls[id]||{});
   const copy=v=>v==null?null:JSON.parse(JSON.stringify(v));
   function emit(id, what){ const l=L.poll[id]; if(!l) return; const p=db.polls[id]||{};
     if(!what||what==="meta") l.meta.forEach(f=>f(copy(db.sets[id])));
     if(!what||what==="cfg") l.cfg.forEach(f=>f(copy(p.config)));
     if(!what||what==="ses") l.ses.forEach(f=>f(copy(p.session)));
-    if(!what||what==="votes") l.votes.forEach(f=>f(copy(p.votes)||{}));
+    if(!what||what==="votes"){ l.votes.forEach(f=>f(isHost ? (copy(p.votes)||{}) : {})); l.mine.forEach(f=>f(copy((p.votes||{})[myId])||null)); } // as the rules: a participant sees its own record only
+    if(!what||what==="shown") l.shown.forEach(f=>f(copy(p.shown)||{}));
+    if(!what||what==="names") l.names.forEach(f=>f(copy(p.names)||{}));
     if(!what||what==="actions") l.actions.forEach(f=>f(copy(p.actions)||{})); }
   const emitSets=()=>L.sets.forEach(f=>f(copy(db.sets)||{}));
   const emitAll=()=>{ emitSets(); Object.keys(L.poll).forEach(id=>emit(id)); };
@@ -48,7 +51,7 @@ function makeDemoBackend(isHost){
     save(); }
   const names=["a","b","c","d","e","f","g","h"];
   function simulate(id){ const p=db.polls[id]; if(!isHost || !p || !p.session || !p.config) return; const ses=p.session, cfg=C.normConfig(p.config); if(!cfg.questions.length) return;
-    const put=(n,v)=>{ const pp=P(id); pp.votes=pp.votes||{}; if(C.isNamed((db.sets[id]||{}).named)){ v.name=n+String(names.indexOf(n)+1); v.nameAt=1; } else delete v.name; pp.votes["demo_"+n]=v; save(); emit(id,"votes"); };
+    const put=(n,v)=>{ const pp=P(id); pp.votes=pp.votes||{}; if(C.isNamed((db.sets[id]||{}).named)){ v.name=n+String(names.indexOf(n)+1); v.nameAt=1; pp.names=pp.names||{}; pp.names["demo_"+n]={n:v.name, at:1}; } else delete v.name; pp.votes["demo_"+n]=v; save(); emit(id,"votes"); };
     const get=n=>((db.polls[id]||{}).votes||{})["demo_"+n];
     if(ses.phase==="lobby"){ names.forEach((n,i)=>setTimeout(()=>{ const v=get(n); if(!v||v.round!==ses.round) put(n,{round:ses.round,answers:{},t:Date.now()}); }, 300*i)); return; }
     if(ses.phase==="voting"){ const qs = (cfg.mode==="live"||ses.revote) ? [cfg.questions[ses.current]].filter(Boolean) : cfg.questions;
@@ -59,7 +62,7 @@ function makeDemoBackend(isHost){
         if(qu.kind==="open"){ v.answers[qu.id]=1; v.texts={...(v.texts||{})}; v.texts[qu.id]="Demo answer from "+n+(i%3===0?", with a second line\nto show how longer answers wrap":""); }
         if(qu.kind==="dilemma"){ const cf=qu.conf||C.DEFAULT_CONF; v.conf={...(v.conf||{})}; v.conf[qu.id]=cf.min+Math.round(Math.random()*(cf.max-cf.min)); }
         v.t=Date.now(); put(n,v); }, 500+400*i+150*j))); } }
-  return { id:demoId(), isHost, canWrite:true, demo:true,
+  return { id:myId, isHost, canWrite:true, demo:true,
     isConnected:()=>true, onConn:f=>f(true), downFor:()=>0, nudge:()=>{}, now:()=>Date.now(),
     onAuth:f=>f({ready:true, uid:null, isHost, anon:false, email:"", error:null}), // nothing to sign in to
     signIn:async()=>{}, signOut:async()=>{}, resetPassword:async()=>{},
@@ -76,12 +79,18 @@ function makeDemoBackend(isHost){
       onMeta:f=>{ l.meta.push(f); f(copy(db.sets[id])); },
       onConfig:f=>{ l.cfg.push(f); f(copy((db.polls[id]||{}).config)); },
       onSession:f=>{ l.ses.push(f); f(copy((db.polls[id]||{}).session)); },
-      onVotes:f=>{ l.votes.push(f); f(copy((db.polls[id]||{}).votes)||{}); },
+      onVotes:f=>{ l.votes.push(f); f(isHost ? (copy((db.polls[id]||{}).votes)||{}) : {}); },
+      onMine:f=>{ l.mine.push(f); f(copy(((db.polls[id]||{}).votes||{})[myId])||null); },
+      onShown:f=>{ l.shown.push(f); f(copy((db.polls[id]||{}).shown)||{}); },
+      onNames:f=>{ l.names.push(f); f(copy((db.polls[id]||{}).names)||{}); },
+      setShown:async v=>{ P(id).shown=copy(v)||{}; save(); emit(id,"shown"); },
+      setName:async(pid,x)=>{ const p=P(id); p.names=p.names||{}; p.names[pid]=copy(x); save(); emit(id,"names"); },
       setConfig:async c=>{ P(id).config=copy(c); save(); emit(id,"cfg"); },
       setSession:async s=>{ P(id).session=copy(s); save(); emit(id,"ses"); simulate(id); },
       setVotes:async(pid,v)=>{ const p=P(id); p.votes=p.votes||{}; p.votes[pid]=copy(v); save(); emit(id,"votes"); },
       setAllVotes:async v=>{ P(id).votes=copy(v)||{}; save(); emit(id,"votes"); },
-      clearVotes:async()=>{ P(id).votes={}; save(); emit(id,"votes"); },
+      clearVotes:async()=>{ const p=P(id); p.votes={}; p.shown={}; p.names={}; save(); emit(id); },
+      dropNames:async()=>{ const p=P(id); p.shown={}; p.names={}; save(); emit(id); },
       onActions:f=>{ l.actions.push(f); f(copy((db.polls[id]||{}).actions)||{}); },
       setAction:async(key,a)=>{ const p=P(id); p.actions=p.actions||{}; p.actions[key]=copy(a); save(); emit(id,"actions"); },
       clearActions:async()=>{ P(id).actions={}; save(); emit(id,"actions"); } }; } };
@@ -129,11 +138,14 @@ function makeFirebaseBackend(config, opts){
   /* live listeners are attached again whenever the identity changes: the server drops the ones the new identity may not
      keep, and a presenter-only path (the list of sets, the actions) is only listened to by a presenter */
   const subs=[];
-  function attach(sub){ detach(sub); if(!st.uid || (sub.hostOnly && !st.isHost)){ if(sub.hostOnly && st.ready) sub.empty(); return; }
-    const ref=db.ref(sub.path), uid=st.uid, cb=ref.on("value", s=>sub.f(s.val()), e=>{ if(sub.live && sub.live.cb===cb){ sub.live=null; if(sub.err && st.uid===uid) sub.err(e); } });
+  function attach(sub){ detach(sub); const other=(sub.hostOnly && !st.isHost) || (sub.partOnly && st.isHost);
+    if(!st.uid || other){ if(other && st.ready) sub.empty(); return; }
+    const ref=db.ref(typeof sub.path==="function" ? sub.path(st.uid) : sub.path), uid=st.uid, cb=ref.on("value", s=>sub.f(s.val()), e=>{ if(sub.live && sub.live.cb===cb){ sub.live=null; if(sub.err && st.uid===uid) sub.err(e); } });
     sub.live={ref, cb}; }
   function detach(sub){ if(sub.live){ const l=sub.live; sub.live=null; try{ l.ref.off("value", l.cb); }catch(e){} } }
-  function listen(path, f, err, hostOnly, empty){ const sub={path, f, err, hostOnly:!!hostOnly, empty:empty||(()=>{}), live:null}; subs.push(sub); if(st.ready) attach(sub); }
+  /* path: a string, or a function of the uid (a participant's own record); hostOnly / partOnly: only for a presenter / a participant,
+     the other gets empty() instead */
+  function listen(path, f, err, hostOnly, empty, partOnly){ const sub={path, f, err, hostOnly:!!hostOnly, partOnly:!!partOnly, empty:empty||(()=>{}), live:null}; subs.push(sub); if(st.ready) attach(sub); }
   function publish(next){ const changed = !st.ready || next.uid!==st.uid || next.isHost!==st.isHost;
     Object.assign(st, next, {ready:true}); if(changed) subs.forEach(attach); authFns.forEach(f=>f({...st})); }
   async function resolve(user){ const my=++seq;
@@ -175,18 +187,28 @@ function makeFirebaseBackend(config, opts){
     /* the config carries the ids of its questions (qids), which the database rules check every answer against */
     writePoll:(id,p)=>db.ref("polls/"+id).set(p && p.config ? {...p, config:C.withQids(p.config)} : p),
     poll:id=>{ const node=db.ref("polls/"+id), P="polls/"+id; return {
-      /* only a presenter may read polls/{id} as a whole; a participant reads the parts it is allowed to */
-      pull:async()=>{ if(st.isHost) return rest(P); const [config,session,votes]=await Promise.all([rest(P+"/config"), rest(P+"/session"), rest(P+"/votes")]); return {config, session, votes}; },
+      /* only a presenter may read polls/{id} as a whole; a participant reads the parts it is allowed to:
+         its own record, what the room is shown and the names in use (backlog G8) */
+      pull:async()=>{ if(st.isHost) return rest(P); const uid=st.uid;
+        const [config,session,shown,names,mine]=await Promise.all([rest(P+"/config"), rest(P+"/session"), rest(P+"/shown"), rest(P+"/names"), rest(P+"/votes/"+uid)]);
+        return {config, session, shown, names, mine:(mine && Object.keys(mine).length) ? mine : null}; },
       onMeta:f=>listen("sets/"+id, f, e=>f(null,e)),
       onConfig:f=>listen(P+"/config", f),
       onSession:f=>listen(P+"/session", f),
-      onVotes:f=>listen(P+"/votes", v=>f(v||{})),
+      /* a presenter gets every answer; a participant its own record, what the room is shown, and the names in use */
+      onVotes:f=>listen(P+"/votes", v=>f(v||{}), null, true, ()=>f({})),
+      onMine:f=>listen(uid=>P+"/votes/"+uid, v=>f(v||null), null, false, ()=>f(null), true),
+      onShown:f=>listen(P+"/shown", v=>f(v||{}), null, false, ()=>f({}), true),
+      onNames:f=>listen(P+"/names", v=>f(v||{}), null, false, ()=>f({}), true),
+      setShown:v=>node.child("shown").set(v||null),
+      setName:(pid,x)=>node.child("names/"+pid).set(x),
       setConfig:c=>node.child("config").set(C.withQids(c)),
       setSession:s=>node.child("session").set(s),
       /* the rules refuse a time stamp that is ahead of the server, so a phone with a fast clock is held back to the server's */
       setVotes:(pid,v)=>node.child("votes/"+pid).set(v && Number.isFinite(v.t) && v.t>now()+30000 ? {...v, t:Math.round(now())} : v),
       setAllVotes:v=>node.child("votes").set(v||{}),
-      clearVotes:()=>node.child("votes").remove(),
+      clearVotes:()=>node.update({votes:null, shown:null, names:null}),
+      dropNames:()=>node.update({shown:null, names:null}),
       onActions:f=>listen(P+"/actions", v=>f(v||{}), null, true, ()=>f({})),
       setAction:(key,a)=>node.child("actions/"+key).set(a),
       clearActions:()=>node.child("actions").remove() }; } };

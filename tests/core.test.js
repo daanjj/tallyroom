@@ -649,3 +649,38 @@ test("qidMap lists the question ids that can be database keys; withQids adds it 
   const out = C.withQids(cfg); assert.deepEqual(out.qids, { q1a2b3: true, imported_7: true }); assert.equal(cfg.qids, undefined);
   assert.deepEqual(C.qidMap(null), {}); assert.equal(C.withQids(null), null);
 });
+
+/* ---------- what the room is shown (backlog G8) ---------- */
+test("visibleQids: nothing in the lobby or before a reveal; revealed ones, the one on screen in results, all in the summary", () => {
+  const a = C.q("A", 1, 5, "", ""), b = C.q("B", 1, 5, "", ""), cfg = { questions: [a, b] };
+  assert.deepEqual(C.visibleQids(cfg, { phase: "lobby", revealed: [a.id] }), []);
+  assert.deepEqual(C.visibleQids(cfg, { phase: "voting", revealed: [] }), []);
+  assert.deepEqual(C.visibleQids(cfg, { phase: "voting", revealed: [b.id] }), [b.id]);
+  assert.deepEqual(C.visibleQids(cfg, { phase: "results", current: 0, revealed: [] }), [a.id]);
+  assert.deepEqual(C.visibleQids(cfg, { phase: "summary", revealed: [] }), [a.id, b.id]);
+});
+test("shownVotes: one record per shown answer, not linkable to a device or across questions, same results as the full votes", () => {
+  const a = C.q("A", 1, 5, "", ""), o = C.qOpen("Why?"), hidden = C.q("Hidden", 1, 5, "", ""), cfg = { questions: [a, o, hidden] };
+  const votes = {
+    uidAnn: { round: 1, t: 300, answers: { [a.id]: 4, [hidden.id]: 1 }, texts: { [o.id]: "late" }, name: "Ann", nameAt: 5 },
+    uidBob: { round: 1, t: 100, answers: { [a.id]: 2, [o.id]: 1, [hidden.id]: 5 }, texts: { [o.id]: "early" } },
+    uidOld: { round: 0, t: 50, answers: { [a.id]: 1 } },
+    uidBad: { round: 1, t: 60, answers: { [a.id]: 99 } } };
+  const ses = { phase: "voting", round: 1, revealed: [a.id, o.id] }, shown = C.shownVotes(cfg, ses, votes, "no"), json = JSON.stringify(shown);
+  assert.equal(Object.keys(shown).length, 4, "two answers to A, two to the open question; old round, forged and hidden left out");
+  assert.doesNotMatch(json, /uid|Ann|nameAt/); assert.ok(!json.includes(hidden.id));
+  for (const d of Object.values(shown)) assert.equal(Object.keys(d.answers).length, 1, "a record never holds two questions");
+  const vals = Object.values(shown).map((d) => C.validAns(d, a)).filter(Number.isFinite).sort();
+  assert.deepEqual(vals, [2, 4]);
+  const open = Object.values(shown).filter((d) => d.texts).sort((x, y) => x.t - y.t).map((d) => d.texts[o.id]);
+  assert.deepEqual(open, ["early", "late"], "the order of answering survives, as a rank (t is 1, 2, …), not as a time");
+  assert.ok(Object.values(shown).every((d) => d.t <= 2));
+  assert.deepEqual(C.shownVotes(cfg, ses, votes, "no"), shown, "the same input gives the same keys, so republishing changes nothing");
+  assert.match(JSON.stringify(C.shownVotes(cfg, ses, votes, "yes")), /"name":"Ann"/, "a named set shows names, as the presenter's screen does");
+  assert.deepEqual(C.roundVotes(shown, 1, Date.now(), null, "no") && Object.keys(C.roundVotes(shown, 1, Date.now(), null, "no")).length, 4, "the screens' own filter keeps every record");
+});
+test("namesAsVotes turns the names list into what the name checks read", () => {
+  const nv = C.namesAsVotes({ u1: { n: "Ann", at: 3 }, u2: { n: "" }, u3: null });
+  assert.deepEqual(nv, { u1: { name: "Ann", nameAt: 3 } });
+  assert.deepEqual(C.otherNames(nv, "me"), ["Ann"]); assert.equal(C.mustYieldName(nv, "me", "ann", 9), true);
+});

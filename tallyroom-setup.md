@@ -34,8 +34,8 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
           ".read": "auth != null"
         },
         "votes": {
-          ".read": "auth != null",
           "$uid": {
+            ".read": "auth != null && auth.uid === $uid",
             ".write": "auth != null && auth.uid === $uid && root.child('sets').child($set).exists() && (!root.child('sets').child($set).child('expiresAt').exists() || root.child('sets').child($set).child('expiresAt').val() > now)",
             ".validate": "newData.hasChildren(['round', 't'])",
             "round": {
@@ -79,6 +79,25 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
               ".validate": false
             }
           }
+        },
+        "shown": {
+          ".read": "auth != null"
+        },
+        "names": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('sets').child($set).exists() && (!root.child('sets').child($set).child('expiresAt').exists() || root.child('sets').child($set).child('expiresAt').val() > now)",
+            ".validate": "newData.hasChildren(['n', 'at'])",
+            "n": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30"
+            },
+            "at": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
         }
       }
     }
@@ -87,6 +106,8 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
 ```
 
 Click **Publish**. `sets` is the list of question sets with their header, colour and expiry date; `polls` holds the questions and answers of each set; `presenters` is the list of accounts that may present. In short: a presenter may read and write everything; a participant may read the one set of the link and write only its own answers, and only while the set exists and has not expired. Nobody can read or write anything without being signed in. Who has the Firebase CLI can publish with `firebase deploy --only database` instead.
+
+**Upgrading to the version where participants cannot read each other's answers (21 Nov 2026):** publish the rules of step 1.3 and put the new files online together, between sessions. Old page with new rules, or new page with old rules: phones still vote, but show no results after a reveal. Phones that still have the old page open need a reload.
 
 **Upgrading to the version that checks answers (21 Nov 2026):** publish the rules of step 1.3 again; the order does not matter. Answers must now be whole numbers from 0 to 11, and belong to a question of the set. A set gets its list of questions (`qids` in its config) the next time a presenter saves its questions; until then its answers are checked for shape only.
 

@@ -86,3 +86,10 @@ test("the rules check every per-question answer key against the question list of
   for (const k of ["answers", "conf", "revs", "texts", "typing"]) assert.match(v[k].$q[".validate"], /child\('qids'\)\.child\(\$q\)/, k);
   for (const k of ["answers", "conf"]) assert.match(v[k].$q[".validate"], /newData\.val\(\) >= 0 && newData\.val\(\) <= 11/, k);
 });
+test("the rules let a participant read its own answers only; the room reads shown/ and names/", () => {
+  const ps = JSON.parse(fs.readFileSync(path.join(root, "database.rules.json"), "utf8")).rules.polls.$set;
+  assert.equal(ps.votes[".read"], undefined, "no read rule on votes below the presenter's");
+  assert.equal(ps.votes.$uid[".read"], "auth != null && auth.uid === $uid");
+  assert.equal(ps.shown[".read"], "auth != null"); assert.equal(ps.shown[".write"], undefined, "only a presenter writes shown/");
+  assert.match(ps.names.$uid[".write"], /auth\.uid === \$uid/); assert.equal(ps.names.$uid.$other[".validate"], false);
+});

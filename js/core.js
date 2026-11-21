@@ -251,6 +251,30 @@ function roundVotes(votes, round, now, skipPid, named){ const out={};
     if(!hasAnswers(v)){ if(pid===skipPid) continue; if(!v.t || now-v.t>PRESENCE_MS) continue; if(isNamed(named) && !v.name) continue; } // in a named set you have joined once you have a name
     out[pid]=v; }
   return out; }
+/* ---- what the room may see (backlog G8) ----
+   Participants cannot read the answers of others (database rules). The presenter's screen publishes, under polls/{id}/shown,
+   the answers of the questions the room is shown: revealed ones, the one on screen in the results phase, all in the summary.
+   Each answer is its own record, keyed by question and a position that follows from a hash, with the order of answering as
+   its only time, so records cannot be linked to each other or to a device. In a named set the name goes along, as on screen. */
+function visibleQids(cfg, ses){ const Q=(cfg&&cfg.questions)||[]; if(!ses || !Q.length || ses.phase==="lobby") return [];
+  if(ses.phase==="summary") return Q.map(qu=>qu.id);
+  const s=new Set(ses.revealed||[]); if(ses.phase==="results" && Q[ses.current]) s.add(Q[ses.current].id);
+  return Q.map(qu=>qu.id).filter(id=>s.has(id)); }
+function hashStr(s){ let h=2166136261; s=String(s); for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+function shownVotes(cfg, ses, votes, named){ const out={}, round=(ses&&ses.round)||1, ids=new Set(visibleQids(cfg,ses));
+  for(const qu of ((cfg&&cfg.questions)||[])){ if(!ids.has(qu.id)) continue; const rows=[];
+    for(const [pid,v] of Object.entries(votes||{})){ if(!v || v.round!==round) continue; const a=validAns(v,qu); if(a==null) continue;
+      const d={round, answers:{[qu.id]:a}}; const t=v.texts && v.texts[qu.id];
+      if(typeof t==="string" && t.trim()) d.texts={[qu.id]:t};
+      if(isDilemma(qu)) d.conf={[qu.id]:v.conf[qu.id]};
+      if(isTraffic(qu) && (qu.rev||1)>1) d.revs={[qu.id]:qu.rev};
+      if(isNamed(named) && v.name) d.name=String(v.name);
+      rows.push({d, at:Number.isFinite(v.t)?v.t:0, h:hashStr(pid+"|"+qu.id)}); }
+    rows.sort((x,y)=>x.at-y.at || x.h-y.h).forEach((r,i)=>{ r.d.t=i+1; }); // the order of answering, not the time
+    rows.sort((x,y)=>x.h-y.h).forEach((r,i)=>{ out[qu.id+"_"+i]=r.d; }); }
+  return out; }
+/* names in a named set (polls/{id}/names/{uid} = {n, at}) as the vote docs the name checks expect */
+function namesAsVotes(names){ const out={}; Object.entries(names||{}).forEach(([pid,x])=>{ if(x && typeof x.n==="string" && x.n) out[pid]={name:x.n, nameAt:Number(x.at)||0}; }); return out; }
 function stats(vals,min,max){
   const n=vals.length; if(!n) return {n:0};
   const mean=vals.reduce((a,b)=>a+b,0)/n;
@@ -451,7 +475,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   optLabel, q, qOpen, qDilemma, qNew, qFromObj, shapeQuestion, questionProblems, reviveQuestion, exportQ, followUp,
   CATEGORY_RULES, catRules, catName, kindAllowed, filterForCategory, skippedMessage, categoryBlockers, blockerMessage, dilemmaStats,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
-  PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, stats, parseCSV, csvToQuestions,
+  PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, visibleQids, shownVotes, namesAsVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,

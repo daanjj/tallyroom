@@ -65,9 +65,10 @@ In the exports, a CSV cell that starts with `=`, `+`, `-` or `@` gets an apostro
 
 - **Presenters** sign in at `?host` with an email and password account made in the Firebase console, and are listed by hand in `presenters/{uid}: true`. All presenters see and manage all sets.
 - **Participants** sign in anonymously, without noticing. The uid of that sign-in is the device id and the key of the vote record.
-- `database.rules.json` enforces it: a presenter reads and writes everything; a participant reads `sets/{id}`, `config`, `session` and `votes` of the set whose link it has, and writes only `votes/{own uid}`, in a set that exists and has not expired, in the shape the page writes. The list of sets and the follow-up actions are for presenters only.
+- `database.rules.json` enforces it: a presenter reads and writes everything; a participant reads `sets/{id}`, `config`, `session`, `shown` and `names` of the set whose link it has, and of `votes` only its own record. It writes only `votes/{own uid}` and `names/{own uid}`, in a set that exists and has not expired. Answers are checked for shape: numbers from 0 to 11, only for the questions of the set (`config.qids`).
 - **App Check** (optional, `tallyroom-setup.md` step 1c): with a site key in `config.js` and enforcement switched on in the console, the database accepts requests from this page only.
-- Not covered (see Epic G in `BACKLOG.md`): participants of a set can read each other's answers in the database (G5).
+- **What the room sees** (G5): the presenter's screen publishes the answers of the revealed questions to `shown`, one record per answer, keyed so that records cannot be linked to a device or to each other. Phones only show results while a presenter screen has the set open, which is the case in every session.
+- Not covered: in a named set, `names` (the names in use) can be read by every participant of that set; the answers cannot.
 
 ## Data layout
 
@@ -77,6 +78,8 @@ In the exports, a CSV cell that starts with `=`, `+`, `-` or `@` gets an apostro
 - `polls/{setId}/config`: mode, follow-up prompts and the questions.
 - `polls/{setId}/session`: where the session stands (phase, current question, round).
 - `polls/{setId}/votes/{deviceId}`: one record per device (the device id is the uid of its sign-in), so a phone counts once per set. It holds `answers`, `texts` (comments and open answers), `conf` (dilemma confidence), `revs` (which version of an edited proposal an answer is for) and, in a named set, `name`.
+- `polls/{setId}/shown/{questionId}_{n}`: what the room is shown, written by the presenter's screen: per revealed question, one record per answer (`answers`, and where relevant `texts`, `conf`, `revs`, `name`), with `t` as the order of answering. Empty before a reveal.
+- `polls/{setId}/names/{deviceId}`: in a named set, the name a device uses (`n`, `at`), so names stay unique.
 - `polls/{setId}/actions/{questionId}_{deviceId}_v{version}`: the follow-up action for one remark (`action`, `owner`, `due`, `none`), written by the presenter.
 - Consent sets also use `session.outcome[questionId]` (the light of a proposal as it stood when the presenter left it), `session.revote` (a re-vote in progress) and, on an edited question, `rev` and `history` (earlier texts with their votes and comments).
 

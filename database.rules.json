@@ -23,8 +23,8 @@
           ".read": "auth != null"
         },
         "votes": {
-          ".read": "auth != null",
           "$uid": {
+            ".read": "auth != null && auth.uid === $uid",
             ".write": "auth != null && auth.uid === $uid && root.child('sets').child($set).exists() && (!root.child('sets').child($set).child('expiresAt').exists() || root.child('sets').child($set).child('expiresAt').val() > now)",
             ".validate": "newData.hasChildren(['round', 't'])",
             "round": {
@@ -63,6 +63,25 @@
               "$q": {
                 ".validate": "newData.isNumber() && newData.val() <= now + 60000 && $q.length <= 40 && $q.matches(/^[A-Za-z0-9_-]+$/) && (!root.child('polls').child($set).child('config').child('qids').exists() || root.child('polls').child($set).child('config').child('qids').child($q).val() === true || newData.val() === data.val())"
               }
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "shown": {
+          ".read": "auth != null"
+        },
+        "names": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && root.child('sets').child($set).exists() && (!root.child('sets').child($set).child('expiresAt').exists() || root.child('sets').child($set).child('expiresAt').val() > now)",
+            ".validate": "newData.hasChildren(['n', 'at'])",
+            "n": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30"
+            },
+            "at": {
+              ".validate": "newData.isNumber()"
             },
             "$other": {
               ".validate": false

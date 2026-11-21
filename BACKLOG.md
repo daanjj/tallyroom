@@ -883,6 +883,9 @@ Each of these is tried with the Rules Playground in the Firebase console or from
 
 ### G5. Participants cannot read each other's answers — L
 
+> **Status: built on 21 Nov 2026.** Phones read their own record, `shown` and `names`; the presenter's screen publishes `shown` (core `shownVotes`: one record per answer of a revealed question, keyed by question plus a position from a hash, `t` as the rank of answering, so records cannot be linked to a device or across questions). **Deviations from the specification:** (1) names are a list `names/{uid}: {n, at}` that participants of the set can read, not a register by name that nobody can list; uniqueness keeps the existing check (the later claim gives way). A register by name stays open. (2) Phones show results after a reveal only, as before; there is no "show live" on phones and no joined count, so `shown/_room` is not needed. Tried: tests, and demo mode with a presenter tab and a participant tab (results match, nothing before Reveal, no double count). **Not tried:** the rules against the real database.
+
+
 **Story.** As a participant in a named set I want my answers and comments to reach the presenter only, so that I can be open without everyone in the room being able to pull my answers from the database.
 
 Optional, and the largest item of this epic. Worth building when sets are named (D1) or the topics are sensitive; see open decision 15.

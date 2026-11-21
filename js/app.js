@@ -17,7 +17,7 @@ function joinUrl(id, meta){ return (meta && meta.joinUrl) || urlFor({set:id}); }
 
 /* ============ state ============ */
 /* meta: undefined = not loaded yet, null = this set does not exist */
-const S = { route:(RAW_SET!=null?"set":"home"), setId:SET_ID, booted:false, meta:undefined, metaErr:null, sets:null, setsErr:null, polls:{}, cfg:null, ses:null, votes:{}, actions:{}, auth:{ready:false,uid:null,isHost:false,anon:false,email:"",error:null}, me:{id:null,isHost:false,canWrite:true,ackReset:null}, ui:{view:null,configOpen:false,draft:null,readonly:false,qs:.75,dlg:null}, backend:null, be:null };
+const S = { route:(RAW_SET!=null?"set":"home"), setId:SET_ID, booted:false, meta:undefined, metaErr:null, sets:null, setsErr:null, polls:{}, cfg:null, ses:null, votes:{}, parts:{all:{}, mine:null, shown:{}, names:{}}, actions:{}, auth:{ready:false,uid:null,isHost:false,anon:false,email:"",error:null}, me:{id:null,isHost:false,canWrite:true,ackReset:null}, ui:{view:null,configOpen:false,draft:null,readonly:false,qs:.75,dlg:null}, backend:null, be:null };
 const app = document.getElementById("app");
 const QS_STEPS=[.5,.6,.7,.75,.8,.9,1,1.15,1.3,1.5,1.75,2];
 function getQS(){ try{ const v=parseFloat(localStorage.getItem("tr_qs")); if(QS_STEPS.includes(v)) return v; }catch(e){} return .75; }
@@ -35,7 +35,14 @@ function rampColor(idx,n){ // idx 0..n-1 -> --r1..--r10 spread evenly
 function selInk(idx,n){ const step=1+Math.round(idx*(9/(n-1||1))); return step>=5 ? "var(--surface)" : "var(--ink)"; }
 function isKicked(){ return S.me.ackReset!=null && !!S.ses && (S.ses.resetAt||0) > S.me.ackReset; }
 function noteReset(s){ if(S.me.ackReset==null && s && s.phase) S.me.ackReset = s.resetAt||0; }
-function currentRoundVotes(){ return C.roundVotes(S.votes, S.ses?.round??1, Date.now(), S.me.isHost?S.me.id:null, namedMode()); }
+/* what this device knows of the answers (backlog G8): a presenter reads them all; a participant its own record plus what the
+   room is shown (polls/{id}/shown), which already holds its own shown answers, so its record is left out of the counts */
+function syncVotes(){ if(S.review) return; const P=S.parts;
+  S.votes = S.me.isHost ? (P.all||{}) : {...(P.shown||{}), ...(P.mine ? {[S.me.id]:P.mine} : {})}; }
+function putMine(v){ S.votes[S.me.id]=v; if(S.me.isHost) S.parts.all={...(S.parts.all||{}), [S.me.id]:v}; else S.parts.mine=v; }
+function nameVotes(){ return S.me.isHost ? S.votes : C.namesAsVotes(S.parts.names); }
+function currentRoundVotes(){ let src=S.votes; if(!S.me.isHost && !S.review && src && src[S.me.id]){ src={...src}; delete src[S.me.id]; }
+  return C.roundVotes(src, S.ses?.round??1, Date.now(), S.me.isHost?S.me.id:null, namedMode()); }
 /* in review mode the saved file decides, otherwise the set */
 function namedMode(){ return S.review ? (S.review.info.named||"no") : ((S.meta && S.meta.named)||"no"); }
 function catNow(){ return S.review ? (S.review.info.category||"generic") : ((S.meta && S.meta.category)||"generic"); }
@@ -484,7 +491,7 @@ function saveText(qid){ const val=(S.ui.tx||{})[txKey(qid)]; if(val==null || S.r
   if(same && !flagged) return;
   delete lastPing[qid];
   const next=C.withoutTyping({...mine, round:S.ses.round, answers:{...mine.answers}, texts:{...(mine.texts||{}),[qid]:val}, t:(same && Number.isFinite(mine.t))?mine.t:Date.now()}, qid);
-  S.votes[S.me.id]=next; write(()=>S.backend.setVotes(S.me.id,next)); fuNote(qid); }
+  putMine(next); write(()=>S.backend.setVotes(S.me.id,next)); fuNote(qid); }
 function flushFu(){ clearTimeout(fuTimer); document.querySelectorAll(".tl-fu-in").forEach(t=>saveText(t.dataset.q)); }
 function commentsHTML(qu, always){
   if(!isTraffic(qu)) return "";
@@ -623,6 +630,7 @@ function applyAuth(a){ const wasHost=S.me.isHost, wasId=S.me.id; S.auth=a; S.me.
   if(wasHost===S.me.isHost && wasId===S.me.id) return;
   /* a presenter who signs out on a set page is a participant of that set from here on, without reload */
   S.ui.view=null; S.ui.dlg=null; S.ui.configOpen=false; S.ui.draft=null; if(!S.me.isHost){ S.actions={}; S.ui.act={}; S.review=null; }
+  syncVotes(); if(S.publishShown) S.publishShown(); // a presenter reads every answer, a participant only its own and what is shown
   render(); if(S.heartbeat) setTimeout(S.heartbeat, 300); }
 
 /* ============ overview of all question sets (presenter home) ============ */
@@ -713,7 +721,8 @@ async function saveSetDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id)
       const poll=await S.be.readPoll(d.id), votes=poll.votes||{}, n=Object.values(votes).filter(C.hasAnswers).length;
       if(n && !confirm(fields.named==="no" ? `${n} ${n===1?"person has":"people have"} answered. Their names are removed and no longer shown or exported. Continue?`
                                            : `${n} ${n===1?"person has":"people have"} answered already. They get a name (or are asked for one) the next time their screen changes; until then they show as "unnamed". Continue?`)) return;
-      if(fields.named==="no" && Object.values(votes).some(v=>v && v.name)){ const clean={}; Object.entries(votes).forEach(([pid,v])=>{ if(!v) return; const c={...v}; delete c.name; delete c.nameAt; clean[pid]=c; }); await S.be.poll(d.id).setAllVotes(clean); } }
+      if(fields.named==="no" && Object.values(votes).some(v=>v && v.name)){ const clean={}; Object.entries(votes).forEach(([pid,v])=>{ if(!v) return; const c={...v}; delete c.name; delete c.nameAt; clean[pid]=c; }); await S.be.poll(d.id).setAllVotes(clean); }
+      if(fields.named==="no"){ const pp=S.be.poll(d.id); if(pp.dropNames) await pp.dropNames(); } } // the names list and what is shown go too; an open presenter screen republishes without names
     if(d.id){ await S.be.patchMeta(d.id, {...fields, joinUrl:g("dlgJoin")?g("dlgJoin").value.trim():"", updatedAt:now}); closeDlg(); return; }
     const id=await freshSetId(name), imp=d.imported, cfg=C.emptyConfig();
     if(imp){ const f=C.filterForCategory(fields.category, imp.questions), msg=C.skippedMessage(fields.category, f.skipped);
@@ -844,7 +853,7 @@ app.addEventListener("click", e=>{
     case "expJSON": exportJSON(); break;
     case "expCSV": exportCSV(); break;
     case "hardReset": if(confirm("Reset the session? All answers are cleared, the round counter goes back to 1 and every device has to tap to rejoin."+actionNote())){
-      S.votes={};
+      S.votes={}; S.parts={all:{}, mine:null, shown:{}, names:{}};
       setSession({phase:"lobby", current:0, revealed:[], showLive:false, round:1, resetAt:Date.now(), outcome:null}); dropHistory();
       write(()=>S.backend.clearVotes());
       setTimeout(()=>write(()=>S.backend.clearVotes()), 2500); // sweep answers that were already in flight
@@ -862,19 +871,19 @@ app.addEventListener("click", e=>{
       let next={...mine, round:S.ses.round, answers:{...mine.answers,[qid]:val}, texts, t:Date.now()};
       if(mine.answers[qid]!==val){ next=C.withoutTyping(next,qid); delete lastPing[qid]; }
       const vq=Q.find(x=>x.id===qid); if(isTraffic(vq) && (vq.rev||1)>1) next.revs={...(mine.revs||{}),[qid]:vq.rev}; // which version this answer is for
-      S.votes[S.me.id]=next; render(); write(()=>S.backend.setVotes(S.me.id,next));
+      putMine(next); render(); write(()=>S.backend.setVotes(S.me.id,next));
       if(mine.answers[qid]!==val && isTraffic(Q.find(x=>x.id===qid)) && val!==1){ const box=document.getElementById("fu_"+qid); if(box){ box.scrollIntoView({block:"center",behavior:reduced?"auto":"smooth"}); try{ box.focus({preventScroll:true}); }catch(e){} } }
       break; }
     case "fuDone": clearTimeout(fuTimer); saveText(b.dataset.q); render(); break;
     case "openSubmit": { const qid=b.dataset.q, val=String((S.ui.tx||{})[txKey(qid)] ?? "").trim(); if(!val) break; const mine=myVotes();
       const next={...mine, round:S.ses.round, answers:{...mine.answers,[qid]:1}, texts:{...(mine.texts||{}),[qid]:val}, t:Date.now()};
-      S.votes[S.me.id]=next; const moved=!String((mine.texts||{})[qid]||"").trim() && pqAdvance(qid); render(); if(moved) window.scrollTo(0,0); write(()=>S.backend.setVotes(S.me.id,next)); break; }
+      putMine(next); const moved=!String((mine.texts||{})[qid]||"").trim() && pqAdvance(qid); render(); if(moved) window.scrollTo(0,0); write(()=>S.backend.setVotes(S.me.id,next)); break; }
     case "dlPick": case "dlConf": { const qu=Q.find(x=>x.id===b.dataset.q); if(!qu) break; S.ui.dl=S.ui.dl||{};
       S.ui.dl[txKey(qu.id)]={...dlDraft(qu), [act==="dlPick"?"a":"c"]:+v}; render(); break; }
     case "dlSubmit": { const qu=Q.find(x=>x.id===b.dataset.q); if(!qu) break; const d=dlDraft(qu), mine=myVotes(); if(!Number.isFinite(d.a) || !Number.isFinite(d.c)) break;
       const next={...mine, round:S.ses.round, answers:{...mine.answers,[qu.id]:d.a}, conf:{...(mine.conf||{}),[qu.id]:d.c}, t:Date.now()}; // both parts in one write
       if(S.ui.dl) delete S.ui.dl[txKey(qu.id)];
-      S.votes[S.me.id]=next; const moved=validAns(mine,qu)==null && pqAdvance(qu.id); render(); if(moved) window.scrollTo(0,0); write(()=>S.backend.setVotes(S.me.id,next)); break; }
+      putMine(next); const moved=validAns(mine,qu)==null && pqAdvance(qu.id); render(); if(moved) window.scrollTo(0,0); write(()=>S.backend.setVotes(S.me.id,next)); break; }
     case "config": S.ui.draft=JSON.parse(JSON.stringify(S.cfg)); S.ui.configOpen=true; render(); break;
     case "cfgClose": S.ui.configOpen=false; S.ui.draft=null; S.ui.jsonText=null; S.ui.jsonOpen=false; render(); break;
     case "cfgMode": readDraftFromDOM(); S.ui.draft.mode=v; render(); break;
@@ -914,10 +923,10 @@ app.addEventListener("click", e=>{
     /* ---- named respondents ---- */
     case "nameEdit": S.ui.nameEdit=true; S.ui.nameDraft=null; S.ui.nameErr=""; render(); document.getElementById("nameIn")?.focus(); break;
     case "nameCancel": S.ui.nameEdit=false; S.ui.nameDraft=null; S.ui.nameErr=""; render(); break;
-    case "nameSave": { const el=document.getElementById("nameIn"), n=C.cleanName(el?el.value:""), prob=C.nameProblem(n, C.otherNames(S.votes,S.me.id));
+    case "nameSave": { const el=document.getElementById("nameIn"), n=C.cleanName(el?el.value:""), prob=C.nameProblem(n, C.otherNames(nameVotes(),S.me.id));
       if(prob){ S.ui.nameErr=prob; S.ui.nameDraft=el?el.value:""; render(); document.getElementById("nameIn")?.focus(); break; }
       setName(n); render(); const cur=S.votes[S.me.id];
-      if(cur && cur.round===S.ses.round){ const next=C.presenceDoc(cur, S.ses.round, Date.now()); S.votes[S.me.id]=next; write(()=>S.backend.setVotes(S.me.id,next)); } else if(S.heartbeat) S.heartbeat(); // tell the room right away
+      if(cur && cur.round===S.ses.round){ const next=C.presenceDoc(cur, S.ses.round, Date.now()); putMine(next); write(()=>S.backend.setVotes(S.me.id,next)); } else if(S.heartbeat) S.heartbeat(); // tell the room right away
       break; }
     case "dlgAccent": { const c=document.getElementById("dlgColor"); if(c){ c.value=String(v).toLowerCase(); markSwatch(); } break; }
     case "dlgExpQuick": { const x=document.getElementById("dlgExp"); if(x) x.value=toLocalInput(C.extendedExpiry(Date.now(), +v)); break; }
@@ -1003,6 +1012,7 @@ function bootHome(be){
 function bootSet(be){
   const p=be.poll(S.setId); S.backend=p;
   const raw={cfg:undefined, ses:undefined}; let editDone=!params.has("edit"), votesIn=false;
+  let claimed="", shownJSON=null, shownT=null; // the name this device last put in names/, the last published shown/ (below)
   function settle(){ if(S.review) return;
     if(raw.cfg!==undefined) S.cfg=C.normConfig(raw.cfg);
     if(raw.ses!==undefined) S.ses={...DEFAULT_SESSION,...(raw.ses||{})};
@@ -1010,25 +1020,37 @@ function bootSet(be){
     if(!editDone && S.me.isHost && S.meta && S.cfg && S.ses){ editDone=true; try{ history.replaceState(null,"",urlFor({set:S.setId})); }catch(e){}
       S.ui.draft=JSON.parse(JSON.stringify(S.cfg)); S.ui.configOpen=true; } }
   p.onMeta((m,err)=>{ const was=expired(); S.metaErr=err||null; S.meta=err?undefined:C.normMeta(m); settle(); ensureName(); renderBg(); if(was && !expired()) heartbeat(); });
-  p.onConfig(c=>{ raw.cfg=c||null; if(S.review){ S.review.live.cfg=C.normConfig(c); return; } settle(); renderBg(); });
-  p.onSession(s=>{ s=normSession(s); noteReset(s); raw.ses=s||null; if(S.review){ S.review.live.ses={...DEFAULT_SESSION,...(s||{})}; return; } settle(); renderBg(); });
-  p.onVotes(v=>{ if(S.review){ S.review.live.votes=v||{}; return; } S.votes=v||{}; votesIn=true; ensureName(); renderBg(); });
+  p.onConfig(c=>{ raw.cfg=c||null; if(S.review){ S.review.live.cfg=C.normConfig(c); return; } settle(); publishShown(); renderBg(); });
+  p.onSession(s=>{ s=normSession(s); noteReset(s); raw.ses=s||null; if(S.review){ S.review.live.ses={...DEFAULT_SESSION,...(s||{})}; return; } settle(); publishShown(); renderBg(); });
+  p.onVotes(v=>{ S.parts.all=v||{}; if(be.isHost) votesIn=true; if(S.review){ S.review.live.votes=S.parts.all; return; } syncVotes(); ensureName(); publishShown(); renderBg(); });
+  if(p.onMine) p.onMine(v=>{ S.parts.mine=v||null; if(S.review) return; syncVotes(); renderBg(); });
+  if(p.onShown) p.onShown(v=>{ S.parts.shown=v||{}; if(S.review) return; syncVotes(); renderBg(); });
+  if(p.onNames) p.onNames(v=>{ S.parts.names=v||{}; if(!be.isHost) votesIn=true; if(S.review) return; ensureName(); renderBg(); });
   p.onActions(a=>{ if(!be.isHost) a={}; if(S.review){ S.review.live.actions=a||{}; return; } S.actions=a||{}; renderBg(); }); // follow-up actions are for the presenter only
   try{ const o=JSON.parse(localStorage.getItem("tr_name_"+S.setId)||"null"); if(o && o.n){ S.me.name=String(o.n); S.me.nameAt=o.at||0; } }catch(e){}
-  { const send=p.setVotes; p.setVotes=(pid,v)=>{ if(typingOff && v && v.typing){ v={...v}; delete v.typing; } return send(pid, pid===be.id ? stampDoc(v) : v); }; } // this device's doc always carries (or drops) its name
+  { const send=p.setVotes; p.setVotes=(pid,v)=>{ if(typingOff && v && v.typing){ v={...v}; delete v.typing; } if(pid===be.id){ v=stampDoc(v); claimName(); } return send(pid, v); }; } // this device's doc always carries (or drops) its name
+  /* a named set keeps the names in use in polls/{id}/names, which every device may read, so names stay unique without anyone
+     reading the answers of others (backlog G8) */
+  function claimName(){ if(!p.setName || !be.id || !C.isNamed(S.meta && S.meta.named) || !S.me.name) return; const k=S.me.name+"|"+(S.me.nameAt||0);
+    if(k===claimed) return; claimed=k; p.setName(be.id, {n:S.me.name, at:S.me.nameAt||0}).catch(e=>{ claimed=""; console.warn("name not saved", e); }); }
+  /* the presenter's screen publishes what the room is shown: the answers of the revealed questions, unlinkable (core.shownVotes) */
+  function publishShown(){ if(!be.isHost || S.review || !S.cfg || !S.ses || !p.setShown || be.canWrite===false || expired()) return;
+    clearTimeout(shownT); shownT=setTimeout(()=>{ if(!be.isHost || S.review || !S.cfg || !S.ses) return; const v=C.shownVotes(S.cfg, S.ses, S.votes, namedMode()), j=JSON.stringify(v);
+      if(j===shownJSON) return; shownJSON=j; write(()=>p.setShown(v)); }, 600); }
+  S.publishShown=publishShown;
   /* random names are handed out here; when two devices hold the same name the later one gives way */
   function ensureName(){ if(!be.id || !S.meta || !S.ses || !votesIn || S.review || expired()) return; const nm=S.meta.named; if(!C.isNamed(nm)) return;
     const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
-    const clash = S.me.name && C.mustYieldName(S.votes, be.id, S.me.name, S.me.nameAt);
-    if(nm==="random" && (!S.me.name || clash)){ const n=C.randomName(new Set(C.otherNames(S.votes,be.id).map(x=>x.toLowerCase()))); if(!n) return;
+    const clash = S.me.name && C.mustYieldName(nameVotes(), be.id, S.me.name, S.me.nameAt);
+    if(nm==="random" && (!S.me.name || clash)){ const n=C.randomName(new Set(C.otherNames(nameVotes(),be.id).map(x=>x.toLowerCase()))); if(!n) return;
       setName(n); const cur=S.votes[be.id], doc=C.presenceDoc(cur, S.ses.round, Date.now());
-      S.votes[be.id]=doc; write(()=>p.setVotes(be.id,doc)); renderBg(); }
+      putMine(doc); write(()=>p.setVotes(be.id,doc)); renderBg(); }
     else if(nm==="yes" && clash){ setName(null); S.ui.nameErr="This name is already in use. Choose another."; renderBg(); } }
   // announce presence so the host sees who joined (a vote doc with no answers)
   function heartbeat(){ if(!be.id || !S.ses || !S.meta || expired() || be.canWrite===false || isKicked() || S.review) return; const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
     ensureName(); if(C.isNamed(S.meta.named) && !S.me.name) return; // in a named set you join once you have a name
     const cur=S.votes[be.id]; const doc = C.presenceDoc(cur, S.ses.round, Date.now());
-    S.votes[be.id]=doc; write(()=>p.setVotes(be.id,doc)); }
+    putMine(doc); write(()=>p.setVotes(be.id,doc)); }
   S.heartbeat=heartbeat;
   setTimeout(heartbeat, 800);
   setInterval(heartbeat, 60000);
@@ -1039,8 +1061,9 @@ function bootSet(be){
     if(d.config) raw.cfg=d.config;
     const ss=normSession(d.session); noteReset(ss); if(ss && ss.phase) raw.ses=ss;
     settle(); if(!S.ses) return;
-    const mine=S.votes[S.me.id]; S.votes=d.votes||{}; if(mine && mine.round===S.ses.round) S.votes[S.me.id]=mine;
-    if(be.isHost) S.actions=d.actions||{};
+    if(be.isHost){ const mine=(S.parts.all||{})[S.me.id]; S.parts.all=d.votes||{}; if(mine && mine.round===S.ses.round) S.parts.all[S.me.id]=mine; S.actions=d.actions||{}; }
+    else { S.parts.shown=d.shown||{}; S.parts.names=d.names||{}; if(!(S.parts.mine && S.parts.mine.round===S.ses.round)) S.parts.mine=d.mine||null; }
+    syncVotes();
     renderBg(); }
   let pulling=false, lastPull=0;
   async function pullNow(){ if(!p.pull || pulling) return; pulling=true; lastPull=Date.now();
