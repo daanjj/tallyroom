@@ -913,7 +913,7 @@ Optional, and the largest item of this epic. Worth building when sets are named 
 
 ### G6. App Check — S
 
-> **Status: built on 20 Nov 2026, switched off.** `APPCHECK_SITE_KEY` in `config.js` is empty, so the page runs without App Check, as before. Tried: tests against a stand-in for Firebase, and the real page without a key (no request to Google, database connects). **Not tried:** anything with a real site key. reCAPTCHA under the Content Security Policy, the token on the socket and on plain HTTPS reads, the debug token on `localhost` and enforcement all need the console steps of `tallyroom-setup.md` 1c first.
+> **Status: switched on and enforced for Realtime Database on 21 Nov 2026.** Fraud Defense (reCAPTCHA Enterprise) site key in `config.js`; the App Check metrics showed all requests verified before enforcing. Checked on the live page: the page reads the database, and a plain HTTPS read with a valid ID token but without an App Check token is refused (401). Authentication is not enforced. (Built on 20 Nov 2026, first with the reCAPTCHA v3 provider.)
 >
 > Differences from the specification below:
 > - **The debug token is never in a file.** On `localhost` the Firebase script makes one per browser and prints it in the console; it is registered in the Firebase console by hand. A token in `config.js` would be public.
