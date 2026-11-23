@@ -55,7 +55,10 @@ function metaOf(id){ if(S.route==="set") return id===S.setId ? S.meta : null; re
 function fmtDate(ts){ try{ return new Date(ts).toLocaleString("en-GB",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); }catch(e){ return new Date(ts).toISOString().slice(0,16).replace("T"," "); } }
 let themeFor=null;
 function applyTheme(accent){ const css=C.themeCSS(accent); if(css===themeFor) return; themeFor=css;
-  let el=document.getElementById("tr-theme"); if(!el){ el=document.createElement("style"); el.id="tr-theme"; document.head.appendChild(el); } el.textContent=css; }
+  let el=document.getElementById("tr-theme"); if(!el){ el=document.createElement("style"); el.id="tr-theme"; document.head.appendChild(el); } el.textContent=css; applyIcon(accent); }
+/* the browser tab shows the round table in the accent of the set (index.html holds the purple one for before a set is loaded) */
+function applyIcon(accent){ let el=document.querySelector('link[rel="icon"]'); if(!el){ el=document.createElement("link"); el.rel="icon"; document.head.appendChild(el); }
+  el.type="image/svg+xml"; el.href="data:image/svg+xml,"+encodeURIComponent(C.iconSVG(accent)); }
 function answersFor(qid){ const qu=S.cfg.questions.find(x=>x.id===qid)||{id:qid}; return Object.values(currentRoundVotes()).map(v=>validAns(v,qu)).filter(x=>Number.isFinite(x)); }
 function joinedCount(){ return Object.keys(currentRoundVotes()).length; }
 
@@ -215,7 +218,7 @@ function connPill(){ return S.ui.offline ? `<span class="pill warn" title="Tryin
 
 /* ============ rendering ============ */
 const RULES_MSG="The database does not allow reading question sets yet. Add the <b>sets</b> block to the database rules (tallyroom-setup.md, step 1.3) and reload this page.";
-function brand(text){ return `<div class="brand"><span class="mark"><i></i></span>${esc(text==null?header():text)}</div>`; }
+function brand(text){ return `<div class="brand"><span class="mark"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14"/>${C.ICON_MARK}</svg></span>${esc(text==null?header():text)}</div>`; }
 function notice(title, html, pulse){ return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card big-wait">${pulse?`<div class="pulse"></div>`:""}${title?`<h2 style="font-size:24px">${esc(title)}</h2>`:""}<p class="meta">${html}</p></div></div>`; }
 let lastHTML=null, typT=null;
 function render(bg){
@@ -226,7 +229,7 @@ function render(bg){
   else if(S.route==="home"){ applyTheme(null); document.title="Tally Room"; html=homeHTML(); }
   else if(S.metaErr){ html=notice("Cannot open this question set", RULES_MSG); }
   else if(!S.setId || S.meta===null){ applyTheme(null); document.title="Tally Room";
-    html=notice("This question set does not exist (any more)", "Ask the presenter for a new link or QR code."+(S.me.isHost?` <a href="${esc(urlFor())}">All question sets</a>`:"")); }
+    html=notice("This question set does not exist (any more)", "Ask the presenter for a new link or QR code."+(S.me.isHost?` <a href="${esc(urlFor())}">Manage question sets</a>`:"")); }
   else if(S.meta===undefined || !S.cfg || !S.ses){ html=notice("", "Connecting…", true); }
   else { applyTheme(S.meta.accent); document.title=header(); host = S.me.isHost && S.ui.view!=="participant"; }
   const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.classList.contains("act-in")||ae.id==="nameIn"||ae.id==="siEmail"||ae.id==="siPass")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
@@ -266,7 +269,7 @@ function expiredHTML(){ const back = S.me.isHost ? `<button class="btn sm ghost"
 /* ---- host ---- */
 function hostHTML(){
   const ses=S.ses, cfg=S.cfg, Q=cfg.questions, ph=Q.length?ses.phase:"lobby"; const joined=joinedCount();
-  const controls = `<a class="btn sm ghost" href="${esc(urlFor())}">All question sets</a>${fontCtl()}${ph!=="lobby"?`<button class="btn sm ghost" data-act="lobby">Back to lobby</button>`:""}<button class="btn sm ghost" data-act="config">Edit questions</button><button class="btn sm ghost" data-act="setSettings" data-id="${esc(S.setId)}">Settings</button><button class="btn sm ghost" data-act="asParticipant">View as participant</button>${signOutBtn()}`;
+  const controls = `<a class="btn sm ghost" href="${esc(urlFor())}">Manage question sets</a>${fontCtl()}${ph!=="lobby"?`<button class="btn sm ghost" data-act="lobby">Back to lobby</button>`:""}<button class="btn sm ghost" data-act="config">Edit questions</button><button class="btn sm ghost" data-act="setSettings" data-id="${esc(S.setId)}">Settings</button><button class="btn sm ghost" data-act="asParticipant">View as participant</button>${signOutBtn()}`;
   let main="", side=sideHTML();
   if(ph==="lobby"){
     main=`<div class="card" style="padding:28px"><div class="eyebrow">${Q.length?"Ready to start":"No questions yet"} · ${esc(cap(S.meta.category))}</div><h1 style="font-size:clamp(26px,4vw,40px);margin-top:8px">${esc(header())}</h1>

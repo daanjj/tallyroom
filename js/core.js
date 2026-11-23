@@ -423,7 +423,7 @@ function resultsCSV(p){ const qq=csvCell, s=p.set||{};
   return "﻿"+rows.join("\r\n"); }
 
 /* ============ colour: one accent in, the whole palette out ============ */
-const ACCENT_PRESETS=[["Purple","#5A3BD6"],["Blue","#1F6FD6"],["Teal","#0B7F7F"],["Green","#2E8540"],["Orange","#E8710A"],["Red","#C8372D"],["Pink","#C2338B"],["Slate","#475569"]];
+const ACCENT_PRESETS=[["Purple","#5A3BD6"],["Blue","#0860C6"],["Teal","#006E6E"],["Green","#15722E"],["Orange","#F5921E"],["Red","#BC2A22"],["Pink","#B4237F"],["Slate","#475569"]];
 /* the hand-tuned purple palette of styles.css; other accents are this palette turned to another hue */
 const REF={
   light:{ bg:"#F5F3FA", surface:"#FFFFFF", "surface-2":"#EDE9F6", ink:"#1E1838", "ink-2":"#584F73", muted:"#8B849E", line:"#E2DDEE", "line-2":"#CFC8E2",
@@ -470,6 +470,14 @@ function themeCSS(accent){ const acc=normHex(accent); if(!acc || acc===DEFAULT_A
   const block=v=>Object.entries(v).map(([k,x])=>`--${k}:${x}`).join(";"), l=block(themeVars(acc,false)), d=block(themeVars(acc,true));
   return `:root{${l}}\n@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){${d}}}\n:root[data-theme="dark"]{${d}}`; }
 
+/* ============ icon: the round table, in the colours of the set ============ */
+/* A ring (the room, a result) in two camps (a dilemma) around a check (consent). It is drawn in currentColor, so one drawing
+   serves the mark in the header (CSS variables) and the browser tab (fixed colours). */
+const ICON_MARK='<g fill="none" stroke="currentColor" stroke-width="8" transform="rotate(-90 32 32)"><circle cx="32" cy="32" r="19" stroke-dasharray="69 50.38"/><circle cx="32" cy="32" r="19" stroke-dasharray="40.38 79" stroke-dashoffset="-74" opacity=".55"/></g><path d="M24.5 32.5l5.5 5.5 10-11" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>';
+/* the icon as a file: the tile is the accent as picked, the drawing white, or dark where white would not be readable (yellow, light grey) */
+function iconSVG(accent){ const v=themeVars(accent,false);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${v.accent}"/>${ICON_MARK.replace(/currentColor/g,v["accent-ink"])}</svg>`; }
+
 const api={ clamp, num, fmt, tx, slug, stamp,
   TL_LABELS, TL_COLORS, TL_Q_YELLOW, TL_Q_RED, normOptions, newQid, isTraffic, isOpen, isDilemma, isOpt, kindOf, KIND_LABEL, KIND_NAME, OPEN_MAX, DEFAULT_CONF, normConf,
   optLabel, q, qOpen, qDilemma, qNew, qFromObj, shapeQuestion, questionProblems, reviveQuestion, exportQ, followUp,
@@ -478,7 +486,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, visibleQids, shownVotes, namesAsVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
-  ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS,
+  ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS, ICON_MARK, iconSVG,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,
   answerIsCurrent, trafficCounts, trafficStatus, trafficComments, editQuestion, clearHistory, fixOutcome, questionOutcome, consentRows, consentTotals, consentMarkdown, reviveOutcome,
   actionKey, cleanAction, actionState, actionGroups, actionTotals, actionsByDeadline, actionsMarkdown, reviveActions };

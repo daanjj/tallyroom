@@ -34,8 +34,9 @@ h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;line-height:1.15}
 .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 40px}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-block:6px 14px}
 .brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:800;font-size:18px;letter-spacing:-.01em}
-.brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--r4),var(--r9));display:grid;place-items:center}
-.brand .mark i{display:block;width:4px;height:12px;background:var(--surface);border-radius:2px;box-shadow:-7px 3px 0 0 var(--surface),7px -3px 0 0 var(--surface)}
+.brand .mark{width:26px;height:26px;flex:none}
+.brand .mark svg{display:block;width:100%;height:100%;color:var(--accent-ink)}
+.brand .mark rect{fill:var(--accent)}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);font-size:14px;font-weight:600;font-family:var(--display)}
 .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 .pill.live .dot{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 25%,transparent)}
@@ -48,7 +49,8 @@ h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;line-height:1.15}
 .btn.primary:hover{filter:brightness(1.06)}
 .btn.ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
 .btn.ghost:hover{background:var(--surface-2)}
-.btn.danger{color:#B4232C;border-color:transparent;background:transparent}
+.btn.danger{color:#9C1C25;border-color:#FBE4E5;background:#FBE4E5}
+.btn.danger:hover{background:#F6D3D5;border-color:#F6D3D5}
 .btn.sm{padding:7px 12px;font-size:14px;border-radius:10px}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}
@@ -207,8 +209,12 @@ a{color:var(--accent-text)}
 .menu-list button{text-align:left;padding:9px 10px;border:0;border-radius:8px;background:transparent;font-family:var(--display);font-weight:600;font-size:14px;color:var(--ink)}
 .menu-list button:hover{background:var(--surface-2)}
 .menu-list button.del{color:#B4232C}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .menu-list button.del,:root:not([data-theme="light"]) .btn.danger{color:#FF8C8C}}
-:root[data-theme="dark"] .menu-list button.del,:root[data-theme="dark"] .btn.danger{color:#FF8C8C}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .menu-list button.del{color:#FF8C8C}
+  :root:not([data-theme="light"]) .btn.danger{color:#FFB0B0;background:#44222A;border-color:#44222A}
+  :root:not([data-theme="light"]) .btn.danger:hover{background:#552A33;border-color:#552A33}}
+:root[data-theme="dark"] .menu-list button.del{color:#FF8C8C}
+:root[data-theme="dark"] .btn.danger{color:#FFB0B0;background:#44222A;border-color:#44222A}
+:root[data-theme="dark"] .btn.danger:hover{background:#552A33;border-color:#552A33}
 .modal .card.dlg{width:min(560px,100%)}
 .swatches{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sw{width:34px;height:34px;border-radius:50%;border:3px solid var(--surface);box-shadow:0 0 0 1px var(--line-2);padding:0}

@@ -684,3 +684,14 @@ test("namesAsVotes turns the names list into what the name checks read", () => {
   assert.deepEqual(nv, { u1: { name: "Ann", nameAt: 3 } });
   assert.deepEqual(C.otherNames(nv, "me"), ["Ann"]); assert.equal(C.mustYieldName(nv, "me", "ann", 9), true);
 });
+
+test("icon: the round table takes the accent, and its drawing stays readable on it", () => {
+  for (const [name, hex] of [...C.ACCENT_PRESETS, ["Yellow", "#F5D90A"], ["Light grey", "#D0D0D0"], ["Black", "#000000"]]) {
+    const svg = C.iconSVG(hex), ink = /stroke="(#[0-9A-Fa-f]{6})"/.exec(svg)[1];
+    assert.ok(svg.includes(`fill="${hex}"`), `${name}: tile is the accent`);
+    assert.ok(C.contrast(ink, hex) >= 4.5, `${name}: drawing on tile`);
+    assert.ok(!svg.includes("currentColor"), `${name}: fixed colours, for use as a file`);
+  }
+  assert.equal(C.iconSVG(undefined), C.iconSVG(C.DEFAULT_ACCENT));
+  assert.equal(require("node:fs").readFileSync(require("node:path").join(__dirname, "../icons/icon.svg"), "utf8").trim(), C.iconSVG(C.DEFAULT_ACCENT));
+});

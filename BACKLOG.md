@@ -90,7 +90,7 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 
 **Specification**
 
-- Shown to the presenter when there is no `?set=` in the URL, and reachable from the lobby through a link "All question sets" in the top bar.
+- Shown to the presenter when there is no `?set=` in the URL, and reachable from the lobby through a link "Manage question sets" in the top bar.
 - One row or card per set with: accent colour swatch, name, header, category, number of questions, number of respondents in the current round, phase (lobby / running / finished), expiry status (A7).
 - Sort order: active sets first, most recently updated on top; expired sets below.
 - Clicking a set opens `?set={id}` in the presenter view.
