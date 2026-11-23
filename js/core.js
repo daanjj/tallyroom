@@ -336,11 +336,18 @@ function randomTail(rnd){ rnd=rnd||Math.random; let t=""; for(let i=0;i<4;i++) t
 function newSetId(name, taken, rnd){ const base=slug(name).slice(0,35).replace(/-+$/,"")||"set";
   for(;;){ const id=base+"-"+randomTail(rnd); if(!taken || !taken(id)) return id; } }
 function normHex(v){ let s=String(v||"").trim(); if(/^#?[0-9a-fA-F]{3}$/.test(s)){ s=s.replace("#",""); s="#"+s[0]+s[0]+s[1]+s[1]+s[2]+s[2]; } if(/^[0-9a-fA-F]{6}$/.test(s)) s="#"+s; return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toUpperCase() : null; }
+/* who a set belongs to (backlog H1): owner = the uid of a user, or null for a set from before sets had owners;
+   visibility = private unless it is exactly public; shared = {uid:true} for the users the owner gave access, never the owner */
+const VISIBILITY=["private","public"], ROLES=["admin","user"];
+const UID_RE=/^[A-Za-z0-9_-]{1,128}$/;
+const normUid = v => (typeof v==="string" && UID_RE.test(v)) ? v : null;
+function normShared(s, owner){ const out={}; if(s && typeof s==="object" && !Array.isArray(s)) Object.keys(s).sort().forEach(k=>{ if(s[k]===true && normUid(k) && k!==owner) out[k]=true; }); return out; }
 /* the record at sets/{id}: always complete, never undefined (Firebase refuses undefined) */
 function normMeta(m){ if(!m || typeof m!=="object") return null;
-  const name=String(m.name||"").trim()||"Untitled";
+  const name=String(m.name||"").trim()||"Untitled", owner=normUid(m.owner);
   return { name, header:String(m.header||"").trim().slice(0,80)||name, accent:normHex(m.accent)||DEFAULT_ACCENT,
     category:CATEGORIES.includes(m.category)?m.category:"generic", named:NAMED.includes(m.named)?m.named:"no",
+    owner, visibility:m.visibility==="public"?"public":"private", shared:normShared(m.shared, owner),
     expiresAt:Number.isFinite(m.expiresAt)?m.expiresAt:null, joinUrl:String(m.joinUrl||"").trim(),
     createdAt:Number.isFinite(m.createdAt)?m.createdAt:0, updatedAt:Number.isFinite(m.updatedAt)?m.updatedAt:(Number.isFinite(m.createdAt)?m.createdAt:0) }; }
 function newMeta(fields, now){ const f=fields||{};
@@ -360,8 +367,47 @@ function pollStats(poll){ const cfg=normConfig(poll&&poll.config), ses=(poll&&po
   const respondents=Object.values((poll&&poll.votes)||{}).filter(v=>v && v.round===round && hasAnswers(v)).length;
   const ph=cfg.questions.length?(ses.phase||"lobby"):"lobby";
   return { questions:cfg.questions.length, respondents, phase: ph==="lobby"?"lobby":(ph==="summary"?"finished":"running") }; }
-function duplicateSet(meta, cfg, now){ const m=normMeta(meta), c=normConfig(cfg);
-  return { meta:{...m, name:m.name+" (copy)", joinUrl:"", expiresAt:extendedExpiry(now), createdAt:now, updatedAt:now},
+/* ---- rights on a set (backlog H1). user = {uid, role}; a signed-in account without a role, or a participant, has none ----
+   manage:  edit questions and settings, run sessions, read answers and actions   owner, shared, admin
+   control: delete, change link, private / public, who it is shared with            owner, admin
+   assign:  give the set to another owner                                           admin
+   view:    read the questions and settings, and duplicate                          manage, or any user when the set is public */
+const normRole = r => ROLES.includes(r) ? r : null;
+function setRight(meta, user){ const m=normMeta(meta), uid=normUid(user&&user.uid), role=normRole(user&&user.role);
+  if(!m || !uid || !role) return null;
+  if(m.owner===uid) return "owner"; if(role==="admin") return "admin"; if(m.shared[uid]===true) return "shared";
+  return m.visibility==="public" ? "viewer" : null; }
+const canManage = (meta, user) => ["owner","admin","shared"].includes(setRight(meta, user));
+const canControl = (meta, user) => ["owner","admin"].includes(setRight(meta, user));
+const canAssign = (meta, user) => !!normMeta(meta) && !!normUid(user&&user.uid) && normRole(user&&user.role)==="admin";
+const canView = (meta, user) => setRight(meta, user)!=null;
+const isShared = meta => sharedWith(meta).length>0;
+function sharedWith(meta){ const m=normMeta(meta); return m ? Object.keys(m.shared) : []; }
+/* a changed copy of the record; the original is left alone */
+function withShare(meta, uid, on){ const m=normMeta(meta); if(!m) return null; const shared={...m.shared};
+  if(on && normUid(uid) && uid!==m.owner) shared[uid]=true; else if(!on) delete shared[uid];
+  return {...m, shared}; }
+/* a new owner leaves the shared list; the previous owner keeps no rights */
+function withOwner(meta, uid){ const m=normMeta(meta); if(!m || !normUid(uid)) return m; return normMeta({...m, owner:uid}); }
+
+/* ---- password rule (backlog H1, H8): what is wrong with a password, as sentences; an empty list means it is fine ---- */
+const PW_MIN=12, PW_MAX=128;
+const PW_COMMON=["password","passwords","wachtwoord","welkom","welcome","qwerty","azerty","letmein","iloveyou","admin","administrator","tallyroom","changeme","secret","geheim","monkey","dragon","football","abc","abcdef","qwertyuiop","asdfghjkl","zxcvbnm","123456789012","1234567890"];
+function passwordProblems(password, email){ const p=typeof password==="string" ? password : "", out=[];
+  if(p.length<PW_MIN) out.push(`Use at least ${PW_MIN} characters`);
+  if(p.length>PW_MAX) out.push(`Use at most ${PW_MAX} characters`);
+  if(!/\p{L}/u.test(p)) out.push("Use at least one letter");
+  if(!/[^\p{L}]/u.test(p)) out.push("Use at least one character that is not a letter, such as a digit or a symbol");
+  const low=p.toLowerCase(), mail=String(email||"").trim().toLowerCase(), local=mail.split("@")[0];
+  if(p && ((mail && low.includes(mail)) || (local.length>=4 && low.includes(local)))) out.push("Do not use your email address in the password");
+  if(p.length>=PW_MIN && new Set(p).size<5) out.push("Use more different characters");
+  /* a well-known word with only digits and symbols around it, such as Password2026! */
+  const bare=low.replace(/[^\p{L}]/gu,""), digits=low.replace(/\D/g,"");
+  if(p.length>=PW_MIN && (PW_COMMON.includes(bare) || (!bare && PW_COMMON.includes(digits)) || PW_COMMON.includes(low))) out.push("This password is too easy to guess");
+  return out; }
+
+function duplicateSet(meta, cfg, now, owner){ const m=normMeta(meta), c=normConfig(cfg);
+  return { meta:{...m, name:m.name+" (copy)", joinUrl:"", owner:normUid(owner), visibility:"private", shared:{}, expiresAt:extendedExpiry(now), createdAt:now, updatedAt:now}, // a copy is private and belongs to who made it
     config:{ mode:c.mode, tlYellow:c.tlYellow, tlRed:c.tlRed, questions:JSON.parse(JSON.stringify(clearHistory(c).questions)).map(qu=>({...qu, id:newQid()})) } }; } // a copy starts without earlier versions
 /* one-off: the poll that lived at polls/{pollId} before sets existed gets a record in sets/ */
 function migrationMeta(pollId, cfg, now){ return newMeta({name:pollId, header:tx(cfg&&cfg.title)||pollId, category:"consent", named:"no"}, now); }
@@ -485,6 +531,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, visibleQids, shownVotes, namesAsVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
+  VISIBILITY, ROLES, UID_RE, normUid, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, PW_MIN, PW_MAX, passwordProblems,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS, ICON_MARK, iconSVG,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,

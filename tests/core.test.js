@@ -31,7 +31,100 @@ test("set id pattern refuses characters that break a database path", () => {
 test("new set: defaults are purple, generic, anonymous, 3 days", () => {
   const m = C.newMeta({ name: " Team B " }, NOW);
   assert.deepEqual(m, { name: "Team B", header: "Team B", accent: "#5A3BD6", category: "generic", named: "no",
+    owner: null, visibility: "private", shared: {},
     expiresAt: NOW + 3 * C.DAY, joinUrl: "", createdAt: NOW, updatedAt: NOW });
+});
+
+/* ---------- owners, visibility and sharing (H1) ---------- */
+const ANNA = { uid: "uidAnna", role: "user" }, PIET = { uid: "uidPiet", role: "user" }, SAM = { uid: "uidSam", role: "user" }, ADMIN = { uid: "uidAdmin", role: "admin" };
+const owned = extra => C.newMeta({ name: "Board", owner: ANNA.uid, ...(extra || {}) }, NOW);
+test("set record: a set from before owners is private, without owner and shared with nobody", () => {
+  const m = C.normMeta({ name: "Old" });
+  assert.equal(m.owner, null); assert.equal(m.visibility, "private"); assert.deepEqual(m.shared, {});
+});
+test("set record: visibility is public only when it says so; the shared list holds real uids, not the owner", () => {
+  for (const v of ["Public", "yes", true, 1, "", null, undefined]) assert.equal(C.normMeta({ name: "S", visibility: v }).visibility, "private", String(v));
+  assert.equal(C.normMeta({ name: "S", visibility: "public" }).visibility, "public");
+  const m = C.normMeta({ name: "S", owner: "uidAnna", shared: { uidPiet: true, uidAnna: true, uidSam: false, "a/b": true, "a.b": true, uidX: "yes" } });
+  assert.deepEqual(m.shared, { uidPiet: true });
+  assert.deepEqual(C.normMeta({ name: "S", shared: ["uidPiet"] }).shared, {}, "a list is not a shared map");
+  assert.equal(C.normMeta({ name: "S", owner: "a/b" }).owner, null); assert.equal(C.normMeta({ name: "S", owner: 12 }).owner, null);
+});
+test("rights: the table of who may do what on a private and a public set", () => {
+  const priv = C.withShare(owned(), PIET.uid, true), pub = { ...priv, visibility: "public" };
+  const row = (meta, u) => [C.setRight(meta, u), C.canManage(meta, u), C.canControl(meta, u), C.canAssign(meta, u), C.canView(meta, u)];
+  for (const meta of [priv, pub]) {
+    assert.deepEqual(row(meta, ANNA), ["owner", true, true, false, true]);
+    assert.deepEqual(row(meta, PIET), ["shared", true, false, false, true]);
+    assert.deepEqual(row(meta, ADMIN), ["admin", true, true, true, true]);
+  }
+  assert.deepEqual(row(priv, SAM), [null, false, false, false, false]);
+  assert.deepEqual(row(pub, SAM), ["viewer", false, false, false, true]);
+});
+test("rights: an account without a role, a participant and nobody have no right, also on a public or shared set", () => {
+  const pub = C.withShare(owned({ visibility: "public" }), PIET.uid, true);
+  for (const u of [null, undefined, {}, { uid: "uidSam" }, { uid: "uidSam", role: "presenter" }, { role: "admin" }, { uid: ANNA.uid }, { uid: PIET.uid, role: null }]) {
+    assert.equal(C.setRight(pub, u), null); assert.equal(C.canManage(pub, u), false); assert.equal(C.canControl(pub, u), false);
+    assert.equal(C.canAssign(pub, u), false); assert.equal(C.canView(pub, u), false);
+  }
+  assert.equal(C.setRight(null, ADMIN), null); assert.equal(C.canAssign(null, ADMIN), false);
+});
+test("rights: a set without owner is for admins only; an admin who owns a set is its owner", () => {
+  const old = C.newMeta({ name: "Old" }, NOW);
+  assert.equal(C.setRight(old, ADMIN), "admin"); assert.equal(C.setRight(old, ANNA), null);
+  assert.equal(C.setRight(C.newMeta({ name: "Mine", owner: ADMIN.uid }, NOW), ADMIN), "owner");
+});
+test("sharing: adding and removing leaves the original alone, and the owner is never on the list", () => {
+  const m = owned(), a = C.withShare(m, PIET.uid, true), b = C.withShare(a, SAM.uid, true);
+  assert.deepEqual(C.sharedWith(m), []); assert.equal(C.isShared(m), false);
+  assert.deepEqual(C.sharedWith(b), ["uidPiet", "uidSam"]); assert.equal(C.isShared(b), true);
+  assert.deepEqual(C.sharedWith(C.withShare(b, PIET.uid, false)), ["uidSam"]);
+  assert.deepEqual(C.sharedWith(b), ["uidPiet", "uidSam"], "the record that was passed in is unchanged");
+  assert.deepEqual(C.sharedWith(C.withShare(m, ANNA.uid, true)), [], "the owner");
+  assert.deepEqual(C.sharedWith(C.withShare(m, "a/b", true)), [], "not a uid");
+  assert.deepEqual(C.sharedWith(C.withShare(m, SAM.uid, false)), [], "removing who is not on it");
+  assert.equal(C.withShare(null, PIET.uid, true), null);
+});
+test("assign: the new owner leaves the shared list, the previous owner keeps no rights", () => {
+  const m = C.withShare(C.withShare(owned(), PIET.uid, true), SAM.uid, true), n = C.withOwner(m, PIET.uid);
+  assert.equal(n.owner, PIET.uid); assert.deepEqual(C.sharedWith(n), ["uidSam"]);
+  assert.equal(C.setRight(n, PIET), "owner"); assert.equal(C.setRight(n, ANNA), null); assert.equal(C.setRight(n, SAM), "shared");
+  assert.equal(m.owner, ANNA.uid, "the record that was passed in is unchanged");
+  assert.equal(C.withOwner(m, "a/b").owner, ANNA.uid, "not a uid: nothing changes");
+});
+test("duplicate: the copy of a public, shared set is private, shared with nobody and owned by who made it", () => {
+  const src = C.withShare(owned({ visibility: "public" }), PIET.uid, true);
+  const d = C.duplicateSet(src, { questions: [C.q("A", 1, 5, "", "")] }, NOW, SAM.uid);
+  assert.equal(d.meta.owner, SAM.uid); assert.equal(d.meta.visibility, "private"); assert.deepEqual(d.meta.shared, {});
+  assert.equal(C.setRight(d.meta, ANNA), null); assert.equal(C.setRight(d.meta, PIET), null);
+  assert.equal(C.duplicateSet(src, {}, NOW).meta.owner, null, "no owner given: none taken over from the original");
+  assert.equal(src.visibility, "public"); assert.deepEqual(C.sharedWith(src), ["uidPiet"]);
+});
+test("questions file: it carries no owner, visibility or sharing", () => {
+  const set = C.questionsExport(C.withShare(owned({ visibility: "public" }), PIET.uid, true), { questions: [] }).set;
+  assert.deepEqual(Object.keys(set).sort(), ["accent", "category", "header", "name", "named"]);
+});
+
+/* ---------- password rule (H1) ---------- */
+test("password: a long password with a letter and a non-letter is fine", () => {
+  for (const ok of ["correct horse battery", "Tr0ubadour-en-drie", "zomer in 2026 was nat", "ünïcödé-wachtwoorden1", "abcdefgh".repeat(15) + "1234567!"]) assert.deepEqual(C.passwordProblems(ok, "anna@example.com"), [], ok);
+});
+test("password: each rule gives its own reason", () => {
+  const has = (pw, re, email) => assert.ok(C.passwordProblems(pw, email).some(m => re.test(m)), `${pw}: ${C.passwordProblems(pw, email).join(" | ")}`);
+  has("short1!", /at least 12/); has("elevenchar1", /at least 12/);
+  has("a1" + "b".repeat(127), /at most 128/);
+  has("onlylettershere", /not a letter/);
+  has("123456789012345", /one letter/);
+  has("aaaaaaaaaaaa", /different characters/); has("abababababab1", /different characters/);
+  has("anna.devries-2026", /email address/, "Anna.deVries@example.com");
+  has("xx anna@example.com xx", /email address/, "anna@example.com");
+  has("Password2026!", /easy to guess/); has("Welkom123456", /easy to guess/); has("123456789012", /easy to guess/);
+  assert.equal(C.passwordProblems("", "anna@example.com").length, 3, "empty: too short, no letter, no non-letter");
+  assert.ok(C.passwordProblems(undefined).length >= 1); assert.ok(C.passwordProblems(12345678901234).length >= 1, "not a string");
+});
+test("password: a short name in the email address does not block ordinary words", () => {
+  assert.deepEqual(C.passwordProblems("banana bread 44", "an@example.com"), []);
+  assert.deepEqual(C.passwordProblems("correct horse battery", ""), []);
 });
 test("meta is always complete and never holds undefined", () => {
   const m = C.normMeta({ name: "", accent: "nonsense", category: "x", named: "maybe", header: "h".repeat(200) });

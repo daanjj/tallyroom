@@ -4,7 +4,7 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 
 ## How to read this
 
-- Items are grouped in epics A to G (E is parked for later; G is security and stands apart from the features). IDs are stable (`A1`, `B3`, …) so they can be referenced in commits.
+- Items are grouped in epics A to H (E is parked for later; G is security and stands apart from the features; H brings users, ownership and sharing). IDs are stable (`A1`, `B3`, …) so they can be referenced in commits.
 - Each item has: a user story, the specification, acceptance criteria (AC), dependencies and a rough size (S = up to half a day, M = about a day, L = several days).
 - **Assumption** marks a choice I made where your description left room. They are collected again in [Open decisions](#open-decisions); check those before starting the item.
 - "Set" means question set. "Presenter" is the device that opened the page with `?host=…`.
@@ -41,6 +41,10 @@ Written 20 Nov 2026 against `index.html` at commit `60459c6`.
 | 9 | G1, G2, G3, G4 | Security: sign-in and database rules, as one release, between sessions |
 | 10 | G7 | Small and independent; can also go first |
 | 11 | G6, then G5 | App Check when the rules have run for a session; G5 only when named or sensitive sets ask for it |
+| 12 | H1 | Pure logic for owners, sharing and rights; changes nothing on screen |
+| 13 | H2, H3, H4, H5 | Users, migration, rules and the page, as one release, between sessions |
+| 14 | H6, H7 | Sharing, then the admin screens |
+| 15 | H8, H9 | Onboarding from the page; until then users are added by hand |
 
 ---
 
@@ -975,6 +979,234 @@ Optional, and the largest item of this epic. Worth building when sets are named 
 
 ---
 
+## Epic H: users, ownership and sharing
+
+Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps working without sign-in, as one made-up admin.
+
+> **Status: H1 built on 23 Nov 2026** (pure logic and tests only; no screen, rule or stored record has changed). H2 to H9 are not built.
+
+**Where it stands today** (before this epic)
+
+- Every account in `presenters/{uid}` sees and manages every set (open decision 2). A set has no owner.
+- Accounts are made by hand in the Firebase console; the page has no way to add a user or to change a password, only **Forgot password**.
+
+**What this epic changes**
+
+- A set has an **owner**, a **visibility** (`private` or `public`, private by default) and a list of users it is **shared** with.
+- Users are **admin** or **user**. "Presenter" stops being a right on the whole installation and becomes a right per set.
+
+| Right on a set | Who has it |
+|---|---|
+| **Manage**: edit questions and settings, run sessions, read and export answers and actions, extend, clear, reset | Owner, users it is shared with, admins |
+| **Control**: delete, change link, switch private / public, change who it is shared with | Owner, admins |
+| **Assign** to another owner | Admins |
+| **View** questions and settings read-only, and duplicate | Every user, when the set is public |
+| **Take part** | Everyone with the link, as today |
+
+**What stays as it is**
+
+- Participants do not make an account. Whoever has the link of a set can take part, also in a private set: private means "not listed for other users", not "hidden from link holders".
+- No server and no build step. Users are added from the page with Firebase Authentication's own mail; there is no mail service.
+- The rules stay the real protection; what the page hides is for convenience only.
+- Two users who have the same set open as presenter both steer the session, and the last click wins. That is the case between presenters today.
+
+**H2, H3, H4 and H5 go live as one release**, between sessions: the rules of H4 need the user records of H2 and the owners of H3, and the page of H5 cannot list sets under the old rules. H6 to H8 can follow one by one. Until H8, users are added by hand: an account in the Firebase console plus a `users` record.
+
+### H1. Set record, rights and the password rule as pure logic — S
+
+> **Status: built on 23 Nov 2026**, in `js/core.js` with tests. Nothing calls it yet.
+
+**Story.** As the builder I want ownership, visibility, sharing and the rights that follow from them in one tested place, so that the page, the demo store and the rules checklist all follow the same table.
+
+**Specification**
+
+- `normMeta` gives every set record three more fields: `owner` (a uid, or `null` for a set from before this epic), `visibility` (`private` unless it is exactly `public`) and `shared` (`{uid: true}`, never holding the owner).
+- `duplicateSet(meta, cfg, now, owner)`: the copy belongs to `owner`, is private and is shared with nobody.
+- `setRight(meta, user)` with `user = {uid, role}` gives `owner`, `admin`, `shared`, `viewer` (public set, other user) or `null`. `canManage`, `canControl`, `canAssign` and `canView` follow the table above. A user without a role (a signed-in account that has no `users` record, or an anonymous participant) has no right on any set.
+- `sharedWith(meta)`, `withShare(meta, uid, on)` and `withOwner(meta, uid)` (the new owner leaves the shared list) change a record without touching the original.
+- `passwordProblems(password, email)` gives the list of what is wrong, empty when the password is fine: at least 12 characters, at most 128, at least one letter and at least one character that is not a letter, not the email address or its name part, not one character repeated and not on a short list of well-known passwords. **Assumption:** these are the "standard rules"; see open decision 24.
+- The questions file (export and "Create from file") carries none of the three fields: a file never decides who owns a set.
+
+**AC**
+
+- A record without the new fields reads as: no owner, private, shared with nobody.
+- The rights table above holds for owner, shared user, other user, admin, a user without role and nobody, on a private and on a public set (tests).
+- A duplicate of a public, shared set is private, not shared and owned by who made it.
+
+**Depends on:** A1.
+
+### H2. Users and roles — M
+
+**Story.** As an admin I want a list of who may use this Tally Room and in which role, so that rights no longer depend on one shared presenter list.
+
+**Specification**
+
+- `users/{uid}` = `{email, name, role, createdAt}`, with `role` `admin` or `user`. It replaces `presenters/{uid}: true`. An account without a `users` record has no rights and gets today's "not on the list" message.
+- Every user can read the whole list (names and email addresses), which the share dialog (H6) and the "shared with" pop-up need (open decision 22). Only an admin can write it; nobody can make themself admin. The first admin is written by hand in the Firebase console.
+- The sign-in state of the backend gets `role` next to `uid` and `email`; `isHost` is replaced by `isUser` and `isAdmin`. Whether a device is presenter of a set is decided per set (H5).
+- The demo backend is one made-up admin (`demo-admin`), so `?demo=1` keeps showing everything; `&role=user` shows the page as a normal user, with a second made-up user owning one public and one shared demo set.
+- `tests/backend.test.js` covers the role in the sign-in state.
+
+**AC**
+
+- An account with `role: "user"` signs in and gets the overview; an account without a record gets the message and no sets.
+- A user who writes `users/{own uid}/role` from the browser console is refused (with H4).
+- Demo mode works without sign-in, as admin and with `&role=user`.
+
+**Depends on:** G1, H1. Goes live together with H3, H4 and H5.
+
+### H3. Migration of presenters and existing sets — S
+
+**Story.** As the owner of the installation I want today's presenters and sets carried over, so that nothing is lost or left without an owner at the switch.
+
+**Specification**
+
+- Done once, under the old rules, before H4 is published: a `users` record for each account in `presenters` (by hand in the console; there are only a few), with the installation's owner as `admin`.
+- The first time an admin opens the overview, every set without `owner` gets that admin as owner, private and not shared (open decision 21). The page says how many sets were taken over.
+- `presenters` is removed from the database and from the rules once H4 is live.
+- `tallyroom-setup.md` gets the upgrade steps in order: user records, new files, first load by the admin, new rules.
+
+**AC**
+
+- After the first load by the admin no set is without owner.
+- Running it again changes nothing.
+
+**Depends on:** H1, H2.
+
+### H4. Database rules for owners, sharing and roles — L
+
+**Story.** As a user I want the database itself to keep my private sets mine, so that another user cannot read my answers or change my questions by going around the page.
+
+**Specification**
+
+- "User" in a rule: `users/{auth.uid}/role` exists. "Admin": it is `admin`. "Manages the set": admin, or `sets/{id}/owner` is the uid, or `sets/{id}/shared/{uid}` is `true`. "Controls the set": admin or owner.
+
+| Path | Read | Write |
+|---|---|---|
+| `users` | Every user | Admin |
+| `sets` as a list | Admin; a user only through the two queries below | Admin |
+| `sets/{id}` | Every signed-in device, as today (a participant needs it) | Who controls it. Creating: a user, with `owner` its own uid |
+| `sets/{id}/owner` | | Admin only, after creation |
+| `sets/{id}/visibility`, `shared` | | Who controls it |
+| other fields of `sets/{id}` | | Who manages it |
+| `userSets/{uid}` | That user | |
+| `userSets/{uid}/{id}` | | Who controls set `{id}`; the user itself may remove it |
+| `polls/{id}` and below | Who manages the set; `config`, `session`, `shown`, `names` and the own vote as today | Who manages the set; participants as today |
+
+- A user lists sets with two queries, which the rules allow by query: `orderByChild("owner").equalTo(own uid)` and `orderByChild("visibility").equalTo("public")`, with `.indexOn` for both. The sets shared with a user cannot be found by query, so they are listed in `userSets/{uid}/{setId}: true`, written in the same update as `sets/{id}/shared/{uid}`.
+- `visibility` is `private` or `public`; `shared/{uid}` is `true`; a set cannot be created with another uid as owner.
+- Writes that touch several paths are one update, and the rules look at the data as it will be (`newData`) where the old data cannot answer: creating a set together with its poll, **Change link**, and **Delete**. Today's delete removes the set and its poll in two writes; under these rules the second could be refused and leave a poll without a set.
+- Everything of G3 to G5 for participants stays: the shape of a vote record, expiry, own record only.
+- No automated test runs against the rules (that needs the Firebase emulator, and this repository installs nothing). Instead `tests/rules-checklist.md` lists every case of the tables here and in H1, to be tried in the Rules Playground and noted at each change of the rules.
+
+**AC**
+
+- Each row of the checklist, for: not signed in, anonymous participant, account without record, user (owner, shared, neither) and admin, on a private and a public set.
+- A user cannot read `polls/{id}/votes` of another user's private or public set.
+- A shared user can run a full session and cannot delete the set, change its link, its visibility or its sharing.
+- An owner cannot give the set to someone else; an admin can.
+- A full session with three phones runs without a refused write, as in G3.
+
+**Depends on:** H1, H2, H3; replaces the presenter rules of G3, G4 and G5.
+
+### H5. Rights per set in the page — L
+
+**Story.** As a user I want an overview with my own sets and the public ones, so that I work in my own space and can still reuse what colleagues made public.
+
+**Specification**
+
+- The backend listens to three sources and merges them: own sets, `userSets/{uid}` with one listener per set in it, and public sets. An admin listens to all of `sets`. A set that is in the index but no longer exists is skipped.
+- Whether this device is presenter of the open set follows `canManage` (H1) on the set record, and is decided again whenever that record or the sign-in changes: the listeners for answers and actions are attached and dropped with it. A user who loses access while the set is open gets "You no longer have access to this set" and the participant screen.
+- A user who opens the link of a set they do not manage is a participant, and can vote (open decision 18). On a public set the top bar also offers **Duplicate**.
+- Overview: **My sets** (own and shared with me, with today's actions as far as the right goes), **Public sets** (other people's: name, header, category, owner's name, number of questions; actions **View** and **Duplicate**) and, for an admin, **All sets** with the owner's name on each row.
+- **View** opens the question editor read-only: questions and settings, no answers, no actions, no session controls (open decision 17).
+- A new set is private and owned by who creates it. **Private / Public** is a switch on the row and in Settings, for who controls the set.
+- **Duplicate** gives a private copy owned by who duplicates. **Delete** and **Change link** become one update each (H4).
+- The demo backend follows the same rights, so the screens can be tried without Firebase.
+
+**AC**
+
+- User A does not see user B's private set anywhere; after B makes it public, A sees it under Public sets within a few seconds, can view and duplicate it, and cannot change it.
+- A's duplicate is private, A's own, and independent of B's set.
+- An admin sees every set and can do everything the owner can.
+- Opening B's private link as user A gives the participant screen.
+
+**Depends on:** H1 to H4; touches A2, A3, A8, G1.
+
+### H6. Sharing a set with other users — M
+
+**Story.** As a user I want to give a colleague access to my set, so that I can prepare the questions and they can facilitate the session.
+
+**Specification**
+
+- **Share** on the row and in Settings, for who controls the set: a dialog with the users it is shared with (name, email, **Remove**) and a field to add a user from the list of users, by name or email.
+- Adding and removing write `sets/{id}/shared/{uid}` and `userSets/{uid}/{id}` in one update. The owner is never on the list.
+- A shared set shows a **Shared** mark on its row, for the owner, the people it is shared with and admins. Hovering shows "Owner: Anna. Shared with: Piet, Sam"; the same line is in the share dialog and in Settings, because a tablet has no hover.
+- For the receiver the set sits under **My sets** from that moment, without reload, and behaves as their own except for what needs control (table above; open decision 19). Instead of Share they get **Leave**, which removes them from the list (open decision 20).
+- The owner stays the owner. Duplicate never copies the list.
+- Removing someone who has the set open as presenter takes their presenter rights at once (H5).
+
+**AC**
+
+- B shares a set with A: it appears in A's list within a few seconds, with the mark and both names.
+- A edits a question, runs a session and exports the answers; A finds no Delete, Change link, Private / Public or Share on it.
+- A leaves: the set is gone from A's list and B's row loses the mark.
+- B's list shows which sets are shared and with whom, without opening them.
+
+**Depends on:** H1, H2, H4, H5.
+
+### H7. Admin: all sets and users — M
+
+**Story.** As an admin I want to manage every set and the list of users, so that sets do not get stuck with someone who has left.
+
+**Specification**
+
+- On every set an admin has what the owner has, plus **Assign to…**: pick a user, who becomes owner; a new owner who was on the shared list is taken off it, and the previous owner keeps no rights unless the admin shares the set with them.
+- Screen **Users** (admin only): name, email, role, number of own sets. Actions: change the name, switch role, **Remove access**.
+- **Remove access** deletes the `users` record and takes the user off every shared list (found through `userSets/{uid}`). It is refused while the user still owns sets: assign those first. The account itself stays in Firebase Authentication and can only be deleted in the console (open decision 23); without a record it has no rights.
+- An admin cannot remove or demote themself, so there is always one admin left. The console stays the way back in.
+
+**AC**
+
+- After **Assign to…** the set is under the new owner's My sets and no longer under the old owner's.
+- A removed user who is still signed in loses the overview within a few seconds and gets the "not on the list" message.
+- An admin cannot take away their own admin role.
+
+**Depends on:** H2, H4, H5, H6.
+
+### H8. Onboarding: invitation, first password, change password — M
+
+**Story.** As an admin I want to add a colleague from the page, and as a user I want to choose and change my own password, so that nobody has to go into the Firebase console or pass a password around.
+
+**Specification**
+
+- **Add user** on the Users screen: name, email, role. The page creates the account through a second Firebase connection (a second app instance), so the admin stays signed in, with a random password of 32 characters that is never shown, stored or sent. It then writes the `users` record and lets Firebase send its password mail to the new address. That mail is the invitation. The random password is not mailed: the link replaces it, and a password in a mail can be read by anyone who gets at the mailbox.
+- The mail template in the Firebase console (Authentication → Templates → Password reset) gets a text that fits both a new user and a forgotten password, and its action link points at the page.
+- **Set password** screen, opened by the link (`?mode=resetPassword&oobCode=…`): shows the email address the link is for, two password fields and the rules of H1 with what is still missing. After saving, the user is signed in and lands on the overview.
+- The link is valid for a short time (Firebase's setting, about an hour by default; check in the console). An expired or used link shows "This link is no longer valid" with **Send me a new link**. On the Users screen an admin has **Send invitation again**.
+- **Change password** in the top bar: current password, new password twice, the same rules. The current password is checked first (Firebase asks for a recent sign-in).
+- Passwords do not expire. The rules of H1 are checked in the page; Firebase's own password policy (Authentication → Settings) is set as close to them as it goes (minimum length 12), so the length also holds for someone who goes around the page. Whether the project offers that policy without an upgrade is checked during this item.
+- Anyone can still create an account against the project's key, as today; without a `users` record it has no rights.
+- With App Check enforced for Authentication the second connection needs App Check too; today it is enforced for the database only.
+
+**AC**
+
+- An admin adds an address; the mail arrives; the link opens the Set password screen; after choosing a password the new user sees an empty My sets and the public sets.
+- The admin is still signed in as themself after adding a user.
+- `password`, `aaaaaaaaaaaa`, a password of 11 characters and one of letters only are each refused with the reason.
+- A link opened a second time gives "no longer valid" and a working **Send me a new link**.
+- Change password with a wrong current password is refused without changing anything.
+
+**Depends on:** H2, H7. Independent of H5 and H6: if it turns out harder than it looks, users keep being added by hand.
+
+### H9. Documentation — S
+
+- README: "Who may do what" and "Data layout" follow this epic. `tallyroom-setup.md`: the new rules block, the first admin, the upgrade steps of H3, the mail template and password policy of H8. This backlog: status notes per item, and open decision 2 closed.
+
+**Depends on:** each item updates its own part; this item is the final check.
+
+---
+
 ## Epic E (later): multiple languages for question texts
 
 Not planned now. Specified far enough to check that A to D do not block it.
@@ -1010,7 +1242,7 @@ Not planned now. Specified far enough to check that A to D do not block it.
 Choices I made to keep the items implementable. Change them here before you start the item.
 
 1. **Header versus name (A1, A3).** I gave a set two labels: a `name` for your overview ("MT offsite team B") and a `header` that the audience sees. If one label is enough, drop `name`. AGREE
-2. **Presenter rights (A1).** One shared `HOST_KEY` gives access to all sets. "In parallel in different team settings" could also mean different presenters who should not see each other's sets; that needs a key per set or real sign-in, and is a separate item. AGREE. (G1 brings real sign-in, still with all presenters seeing all sets.)
+2. **Presenter rights (A1).** One shared `HOST_KEY` gives access to all sets. "In parallel in different team settings" could also mean different presenters who should not see each other's sets; that needs a key per set or real sign-in, and is a separate item. AGREE. (G1 brings real sign-in, still with all presenters seeing all sets. Epic H gives each set an owner.)
 3. **Expiry is not enforced by the database (A7).** Good enough for workshops; real enforcement needs rules that compare `now` with `expiresAt`. AGREE. (G3 adds that enforcement.)
 4. **Decided: all purple follows the accent (A5).** Buttons, logo mark and bars, and also the faint page tint, borders and text tints. The alternative, a neutral grey page for every accent, is simpler but changes how today's purple sets look.
 5. **No mixing of consent and dilemma in one set (B1).**  AGREE
@@ -1025,6 +1257,16 @@ Choices I made to keep the items implementable. Change them here before you star
 14. **Readable links stay guessable (G4).** No random suffix on the slug. The alternative is a short random tail (`mt-offsite-x7k2`) on new sets, or a join code per set. ADD A SHORT RANDOM TAIL
 15. **Hiding answers from other participants (G5).** Specified but optional: it is the largest item and changes how phones get their results. Decide per installation whether named or sensitive sets justify it. 
 16. **No migration of answers at the switch (G2).** The switch to the new device ids is made between sessions; old records stay but belong to nobody. AGREE, NO PROBLEM
+17. **Viewing a public set shows questions and settings only (H5).** Not the answers or follow-up actions of the owner's sessions. AGREE
+18. **A user who opens someone else's set link is a participant (H5).** They can vote; on a public set they also get Duplicate. AGREE
+19. **What a shared user may not do (H6).** Delete the set, change its link, switch private / public, or change who it is shared with. Everything else is allowed. AGREE
+20. **A receiver can leave a shared set (H6).** AGREE
+21. **Existing sets go to the first admin, private (H3).** The admin assigns them from there. AGREE
+22. **Names and email addresses of all users are visible to all users (H2, H6).** The alternative is typing an exact email address to share. AGREE
+23. **Removing a user removes the rights, not the account (H7).** The account can only be deleted in the Firebase console; the user's sets must be assigned first. AGREE
+24. **Password rules (H1, H8).** At least 12 characters, at least one letter and one character that is not a letter, not the email address, not one repeated character, not a well-known password. No required capitals or symbols and no expiry: length does more than variety. The alternative is a shorter minimum with more required kinds of character.
+25. **Private means not listed (H4, H5).** Whoever has the join link can take part and read the questions, as today. AGREE
+26. **The invitation holds a link, not the password (H8).** The account gets a random password that nobody sees.
 
 ## Not in this backlog, but worth knowing
 
