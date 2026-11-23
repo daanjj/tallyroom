@@ -753,34 +753,44 @@ function usersHTML(){ const list=S.users ? C.userList(S.users) : null, me=S.me.i
         <button class="btn sm" data-act="userRemove" data-uid="${eu}" ${self?`disabled title="You cannot remove your own access"`:""}>Remove access</button></div></div>`; };
   return `<div class="card" style="padding:26px">
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">Admin</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Users</h1></div>${homeTabs("users")}<button class="btn primary" data-act="userAdd">Add user</button></div>
-    <p class="meta" style="margin:8px 0 6px">Everyone who may sign in to this Tally Room. An admin manages every set and this list; a user manages their own sets and the ones shared with them. A new user gets a mail with a link to choose a password; the link works once and for a short time.</p>
+    <p class="meta" style="margin:8px 0 6px">Everyone who may sign in to this Tally Room. An admin manages every set and this list; a user manages their own sets and the ones shared with them. <b>Add user</b> gives an invitation link to send to the new user yourself; they choose their own password with it.</p>
     ${homeNoteHTML()}
     ${!list ? `<div class="big-wait"><div class="pulse"></div><p class="meta">Loading users…</p></div>` : `<h2 class="sets-h">Users <span class="meta">${list.length}</span></h2><div class="sets">${list.map(row).join("")}</div>`}</div>`; }
 /* a note on the overview; in demo mode, where no mail is sent, with the link the mail would hold */
-function homeNoteHTML(){ if(!S.ui.homeNote) return ""; const mine=S.ui.homeLinkFor===S.ui.homeNote, copy=mine && S.ui.homeCopy;
-  return `<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}${S.ui.homeLink && mine?` <a href="${esc(S.ui.homeLink)}" style="word-break:break-all">${esc(S.ui.homeLink)}</a>`:""}
-    ${copy?`<div class="controls" style="margin-top:10px"><button class="btn sm primary" data-act="inviteCopy">Copy invitation link</button><span class="meta" id="inviteNote" role="status"></span></div>`:""}</div>`; }
-/* code: demo mode, the link a mail would hold, shown as text. copy: an invitation link behind a Copy button; it is kept in
-   memory only, for as long as this note is on screen */
-function homeSay(note, code, copy){ S.ui.homeNote=note+(code?" Demo mode sends no mail. The link would be:":""); S.ui.homeLink=code?resetUrl(code):""; S.ui.homeCopy=copy||""; S.ui.homeLinkFor=S.ui.homeNote; }
+function homeNoteHTML(){ if(!S.ui.homeNote) return ""; const mine=S.ui.homeLinkFor===S.ui.homeNote;
+  return `<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}${S.ui.homeLink && mine?` <a href="${esc(S.ui.homeLink)}" style="word-break:break-all">${esc(S.ui.homeLink)}</a>`:""}</div>`; }
+/* code: demo mode, the link a mail would hold, shown as text */
+function homeSay(note, code){ S.ui.homeNote=note+(code?" Demo mode sends no mail. The link would be:":""); S.ui.homeLink=code?resetUrl(code):""; S.ui.homeLinkFor=S.ui.homeNote; }
 /* a new user (backlog H8): the account, the record and the mail with the link to choose a password */
 function openAddUserDlg(){ if(S.auth.role!=="admin") return; S.ui.dlg={type:"userAdd", title:"Add user", focus:"uName"}; render(); }
-function addUserDlgHTML(d){ return `<div class="field"><label for="uName">Name (shown to other users as owner and in the share dialog)</label><input type="text" id="uName" maxlength="60" value="${esc(d.name||"")}"></div>
+function addUserDlgHTML(d){ if(d.done) return addedUserHTML(d);
+  return `<div class="field"><label for="uName">Name (shown to other users as owner and in the share dialog)</label><input type="text" id="uName" maxlength="60" value="${esc(d.name||"")}"></div>
     <div class="field"><label for="uEmail">Email address</label><input type="email" id="uEmail" maxlength="200" autocapitalize="none" spellcheck="false" autocomplete="off" value="${esc(d.email||"")}"></div>
-    <div class="field"><label for="uRole">Role</label><select id="uRole">${C.ROLES.slice().reverse().map(r=>`<option value="${r}" ${(d.role||"user")===r?"selected":""}>${esc(C.roleName(r))}${r==="admin"?": manages every set and the users":": own sets and the ones shared with them"}</option>`).join("")}</select>
-      ${d.err?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(d.err)}</small>`:""}
-      <label class="meta" style="display:flex;gap:8px;align-items:center;margin-top:4px"><input type="checkbox" id="uMail" ${d.mail===false?"":"checked"}> Send the invitation by mail</label>
-      <div class="meta">The new user chooses their own password through a link: in the mail, or the invitation link you can copy after adding and send yourself, for example in WhatsApp. You do not set or see a password. You stay signed in as yourself.</div></div>
+    <div class="field"><label for="uRole">Role</label><select id="uRole">${C.ROLES.slice().reverse().map(r=>`<option value="${r}" ${(d.role||"user")===r?"selected":""}>${esc(C.roleName(r))}${r==="admin"?": manages every set and the users":": own sets and the ones shared with them"}</option>`).join("")}</select></div>
+    <div class="field"><label>Invitation</label>
+      <div class="meta">After adding, this dialog shows an invitation link to copy and send yourself, for example in WhatsApp. The new user chooses their own password with it. You do not set or see a password, and you stay signed in as yourself.</div>
+      <label class="meta" style="display:flex;gap:8px;align-items:flex-start;margin-top:4px"><input type="checkbox" id="uMail" style="margin-top:3px" ${d.mail?"checked":""}> <span>Also send an invitation by mail. The mail has a standard text and may not arrive, for example when a company mail filter holds it back.</span></label>
+      ${d.err?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(d.err)}</small>`:""}</div>
     <div class="controls"><button class="btn primary" data-act="dlgSave" ${d.busy?"disabled":""}>${d.busy?"Adding…":"Add user"}</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
-async function saveAddUserDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id); if(!d || d.type!=="userAdd" || d.busy || !g("uName")) return;
-  d.name=g("uName").value; d.email=g("uEmail").value.trim(); d.role=g("uRole").value; d.mail=!g("uMail") || g("uMail").checked;
+/* the account is made: the invitation link, to copy before the dialog is closed. It is kept in this dialog only */
+function addedUserHTML(d){ const o=d.done, n=esc(o.name);
+  const mail = !o.wantMail ? "" : o.demo ? `<p class="meta" style="margin:0">Demo mode sends no mail.</p>` : o.mailed ? `<p class="meta" style="margin:0">A mail with a link to choose a password is also on its way to ${esc(o.email)}. It may not arrive; the link above does not depend on it.</p>`
+    : `<div class="banner">The mail could not be sent. Send the link above yourself, or use <b>Send invitation again</b> on the Users screen later.</div>`;
+  return `<p style="margin:0"><b>${n}</b> (${esc(o.email)}) is added as ${esc(C.roleName(o.role).toLowerCase())}.</p>
+    ${o.link ? `<div class="field"><label for="invLink">Invitation link for ${n}</label><div class="controls"><input type="text" id="invLink" readonly value="${esc(o.link)}" style="flex:1;min-width:200px"><button class="btn primary" data-act="inviteCopy">Copy link</button></div>
+      <small class="meta" id="inviteNote" role="status" style="font-weight:700"></small>
+      <div class="meta">Send this link to ${n} yourself, for example in WhatsApp. ${n} opens it and chooses a password. <b>Copy it now:</b> it is shown only here and is gone when you close this dialog. It works until a password is chosen with it. Whoever has the link can take this account, so send it to ${n} only.</div></div>`
+      : `<div class="banner">No invitation link could be made. Use <b>Send invitation again</b> on the Users screen.</div>`}
+    ${mail}
+    <div class="controls"><button class="btn ${o.link?"ghost":"primary"}" data-act="dlgClose">Done</button></div>`; }
+async function saveAddUserDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id); if(!d || d.type!=="userAdd" || d.busy || d.done || !g("uName")) return;
+  d.name=g("uName").value; d.email=g("uEmail").value.trim(); d.role=g("uRole").value; d.mail=!!(g("uMail") && g("uMail").checked);
   const r=C.newUser(d, S.users, Date.now()); if(r.problem){ d.err=r.problem; d.focus=/name/.test(r.problem)?"uName":"uEmail"; render(); return; }
   d.err=""; d.busy=true; render();
-  try{ const out=await S.be.addUser(r.user, {mail:d.mail}), n=r.user.name;
-    const link = out.key ? C.inviteLink(PAGE, r.user.email, out.key) : out.code ? resetUrl(out.code) : "";
-    const mail = out.code ? "" : !d.mail ? " No mail is sent." : out.mailed ? ` A mail with a link to choose a password is on its way to ${r.user.email}.` : " The mail could not be sent.";
-    homeSay(`${n} is added.${mail}${link?` ${d.mail && out.mailed?"You can also":"You can"} copy the invitation link and send it yourself, for example in WhatsApp. It works until ${n} has chosen a password, and can only be copied now: it is gone when you leave this screen. Whoever has the link can take this account, so send it to ${n} only.`:(out.mailed?"":" Use Send invitation again.")}`, out.code, link);
-    S.ui.dlg=null; render(); }
+  try{ const out=await S.be.addUser(r.user, {mail:d.mail});
+    d.busy=false; d.title="User added"; d.focus="invLink";
+    d.done={ name:r.user.name, email:r.user.email, role:r.user.role, wantMail:d.mail, mailed:!!out.mailed, demo:!!out.code, link: out.key ? C.inviteLink(PAGE, r.user.email, out.key) : out.code ? resetUrl(out.code) : "" };
+    S.ui.homeNote=`${r.user.name} is added.`; if(S.ui.dlg===d) render(); }
   catch(e){ console.warn("add user", e&&e.code); d.busy=false; d.err=C.authProblem(e) || (isDenied(e) ? "The account is made, but the database refused the user record. Publish the rules of tallyroom-setup.md, step 1.3" : "Adding failed: "+(e&&e.message||e)); if(S.ui.dlg===d) render(); } }
 async function inviteAgain(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || !u.email || S.auth.role!=="admin") return;
   try{ const r=await S.be.resetPassword(u.email); homeSay(r && r.code ? `A new link for ${u.name}.` : `A mail with a link to choose a password is on its way to ${u.email}.`, r && r.code); render(); }
@@ -799,12 +809,20 @@ async function saveUserDlg(){ const d=S.ui.dlg, n=document.getElementById("uName
   try{ await S.be.setUser(d.uid, {name, ...(r && !r.disabled ? {role:r.value} : {})}); closeDlg(); }
   catch(e){ alert(isDenied(e) ? "The database refused this change." : "Saving failed: "+(e&&e.message||e)); } }
 /* the record goes and the user leaves every shared list; the account stays in Firebase Authentication (open decision 23) */
-async function removeUser(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || S.auth.role!=="admin") return;
-  const no=C.selfChangeProblem(S.me.id, uid, "remove"); if(no){ alert(no); return; }
-  const own=S.sets ? C.ownedIds(S.sets, uid).length : 0; if(own){ alert(C.ownsMessage(u.name, own)); return; }
-  if(!confirm(`Remove the access of ${u.name}${u.email?` (${u.email})`:""}?\n\n${u.name} can no longer use this Tally Room and is taken off every set that is shared with them.${S.be.demo?"":" The account itself stays in Firebase Authentication; delete it in the Firebase console."}`)) return;
-  try{ await S.be.removeUser(uid); S.ui.homeNote=`${u.name} no longer has access.`; render(); }
-  catch(e){ alert(isDenied(e) ? "The database refused this change." : "Removing failed: "+(e&&e.message||e)); } }
+/* always asked first, in a dialog of the page: a browser can be set to skip its own "Are you sure?" boxes */
+function removeUser(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || S.auth.role!=="admin" || uid===S.me.id) return;
+  S.ui.dlg={type:"userDel", uid, title:"Remove this user?"}; render(); }
+function userDelDlgHTML(d){ const u=C.normUser(S.users && S.users[d.uid]); if(!u) return `<p class="meta">This user no longer has access.</p><div class="controls"><button class="btn ghost" data-act="dlgClose">Close</button></div>`;
+  const own=S.sets ? C.ownedIds(S.sets, d.uid).length : 0, who=`<b>${esc(u.name)}</b>${u.email?` (${esc(u.email)})`:""}`;
+  if(own) return `<p style="margin:0">${who} cannot be removed yet. ${esc(C.ownsMessage(u.name, own))}</p><div class="controls"><button class="btn ghost" data-act="dlgClose">Close</button></div>`;
+  return `<p style="margin:0">Are you sure you want to remove ${who} from this Tally Room?</p>
+    <p class="meta" style="margin:0">${esc(u.name)} can no longer sign in to any screen here, and is taken off every set that is shared with them. ${S.be.demo?"":"The sign-in account itself is not deleted by this: the page cannot do that. Delete it afterwards in the Firebase console (Authentication → Users); until then this address cannot be added again."}</p>
+    ${d.err?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(d.err)}</small>`:""}
+    <div class="controls"><span class="spacer"></span><button class="btn ghost" data-act="dlgClose">Cancel</button><button class="btn danger-solid" data-act="userDelConfirm" ${d.busy?"disabled":""}>Remove user</button></div>`; }
+async function confirmRemoveUser(){ const d=S.ui.dlg; if(!d || d.type!=="userDel" || d.busy) return; const u=C.normUser(S.users && S.users[d.uid]); if(!u){ closeDlg(); return; }
+  d.busy=true; d.err="";
+  try{ await S.be.removeUser(d.uid); S.ui.dlg=null; S.ui.homeNote=`${u.name} no longer has access.`; render(); }
+  catch(e){ d.busy=false; d.err=isDenied(e) ? "The database refused this change." : "Removing failed: "+(e&&e.message||e); if(S.ui.dlg===d) render(); } }
 /* ---- an admin gives a set to another owner (backlog H7) ---- */
 function openAssignDlg(id){ const m=metaOf(id); if(!m || !C.canAssign(m, meNow())) return;
   const back = S.ui.dlg && S.ui.dlg.type==="set" ? (keepSetDlg(), S.ui.dlg) : null;
@@ -879,7 +897,7 @@ function openSetDlg(id, focus){ const m=id?metaOf(id):null; if(id && !m) return;
     f: m ? {...m} : {name:"", header:"", accent:C.DEFAULT_ACCENT, category:"generic", named:"no", expiresAt:C.extendedExpiry(Date.now()), joinUrl:""} };
   render(); }
 function dlgHTML(){ const d=S.ui.dlg; if(!d) return "";
-  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="link" ? linkDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : d.type==="view" ? viewDlgHTML(d) : d.type==="share" ? shareDlgHTML(d) : d.type==="assign" ? assignDlgHTML(d) : d.type==="user" ? userDlgHTML(d) : d.type==="userAdd" ? addUserDlgHTML(d) : d.type==="pw" ? pwDlgHTML(d) : "";
+  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="link" ? linkDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : d.type==="view" ? viewDlgHTML(d) : d.type==="share" ? shareDlgHTML(d) : d.type==="assign" ? assignDlgHTML(d) : d.type==="user" ? userDlgHTML(d) : d.type==="userAdd" ? addUserDlgHTML(d) : d.type==="userDel" ? userDelDlgHTML(d) : d.type==="pw" ? pwDlgHTML(d) : "";
   return `<div class="modal" id="dlg"><div class="card dlg${d.type==="edit"?" wide":""}" role="dialog" aria-modal="true" aria-label="${esc(d.title)}">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:22px;flex:1">${esc(d.title)}</h2><button class="btn sm ghost" data-act="dlgClose">Close</button></div>${body}</div></div>`; }
 /* what is typed in Settings is kept while another dialog (Share) lies over it; d.f stays what was saved, to compare with */
@@ -1166,12 +1184,14 @@ app.addEventListener("click", e=>{
     case "userEdit": openUserDlg(b.dataset.uid); break;
     case "userAdd": openAddUserDlg(); break;
     case "userInvite": inviteAgain(b.dataset.uid); break;
-    case "inviteCopy": { const note=document.getElementById("inviteNote"), url=S.ui.homeCopy||"", done=ok=>{ if(note) note.textContent=ok?"Invitation link copied.":"Copying is blocked in this browser."; };
+    case "inviteCopy": { const d=S.ui.dlg, note=document.getElementById("inviteNote"), url=(d && d.done && d.done.link)||"", box=document.getElementById("invLink");
+      const done=ok=>{ if(note) note.textContent=ok?"Link copied. Paste it in a message to the new user.":"Copying is blocked in this browser. The link is selected: copy it with Ctrl+C or Cmd+C."; if(!ok && box){ box.focus(); box.select(); } };
       try{ navigator.clipboard.writeText(url).then(()=>done(true),()=>done(false)); }catch(e){ done(false); } break; }
     case "pwChange": openPwDlg(); break;
     case "spSave": doSetPw(); break;
     case "spResend": doResend(); break;
     case "userRemove": removeUser(b.dataset.uid); break;
+    case "userDelConfirm": confirmRemoveUser(); break;
     case "setLeave": leaveSet(id); break;
     case "shareAdd": shareAdd(); break;
     case "shareRemove": shareRemove(b.dataset.uid); break;
