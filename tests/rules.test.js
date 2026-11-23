@@ -103,6 +103,14 @@ test("users: removing access is one write by an admin: the record, and the user 
   assert.deepEqual(who((a) => canWrite(DB(), a, up)), only("ADM"));
   assert.equal(canWrite(DB(), ADM, { "users/piet": null, "userSets/piet": null }), false, "the index is removed entry by entry, as the page does");
 });
+test("former users: the accounts whose access was removed are remembered for admins only, to give them access again (H8)", () => {
+  const note = { email: "piet@x.nl", name: "piet", removedAt: NOW }, db = () => ({ ...DB(), formerUsers: { gone1: note } });
+  assert.deepEqual(who((a) => canWrite(DB(), a, { "users/piet": null, "sets/priv/shared/piet": null, "userSets/piet/priv": null, "formerUsers/piet": note })), only("ADM"), "removing access, with the note");
+  assert.deepEqual(who((a) => canRead(db(), a, "formerUsers")), only("ADM")); assert.deepEqual(who((a) => canRead(db(), a, "formerUsers/gone1")), only("ADM"));
+  assert.deepEqual(who((a) => canWrite(db(), a, { "users/gone1": user("piet", "user"), "formerUsers/gone1": null })), only("ADM"), "giving access back");
+  for (const bad of [{ name: "x" }, { email: 5 }, { email: "a@x.nl", extra: 1 }, { email: "a@x.nl", removedAt: "now" }, { email: "a@x.nl", name: "n".repeat(61) }]) assert.equal(canWrite(DB(), ADM, { "formerUsers/x1": bad }), false, JSON.stringify(bad));
+  assert.equal(canWrite(DB(), PIET, { "formerUsers/piet": null }), false);
+});
 /* ---------- the list of sets ---------- */
 test("list of sets: an admin reads it whole; a user only through the two queries; nobody else", () => {
   assert.deepEqual(who((a) => canRead(DB(), a, "sets")), only("ADM"));
@@ -198,7 +206,7 @@ test("what a participant writes: its own answers and name, in a set that exists 
   for (const p of ["config", "session", "shown", "actions/k"]) assert.equal(canWrite(DB(), P2, { ["polls/priv/" + p]: { x: 1 } }), false, p);
   assert.equal(canWrite(DB(), ANN, { "polls/gone/votes/phone2": vote() }), true, "who manages the set also writes in an expired one");
 });
-test("nothing outside users, sets, userSets and polls can be read or written, also not by an admin; presenters is gone", () => {
+test("nothing outside users, formerUsers, sets, userSets and polls can be read or written, also not by an admin; presenters is gone", () => {
   assert.equal(RULES.presenters, undefined);
   for (const p of ["presenters/adm", "other", ""]) { assert.equal(canRead(DB(), ADM, p), false, p); if (p) assert.equal(canWrite(DB(), ADM, { [p]: true }), false, p); }
 });

@@ -24,6 +24,8 @@ Needed: an admin, two users (A and B), an account without a `users` record, and 
 | 16 | Admin | **Assign to…** A's set to B; change B's name and role on **Users** | allowed; the set moves from A's My sets to B's |
 | 17 | Admin | **Remove access** of a user who owns no sets, while that user has the overview open | allowed; that user gets "This account has no access" within a few seconds |
 | 18 | Admin | write `users/{own uid}/role` with `user`; remove `users/{own uid}` | refused |
+| 19 | Admin | **Remove access** of a user, then **Add user** with the same address | allowed; the dialog says "Access given back" and the user signs in with the old password |
+| 20 | User A | read `formerUsers` from the browser console | refused |
 
 ## Log
 

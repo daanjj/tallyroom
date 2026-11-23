@@ -23,6 +23,25 @@
         }
       }
     },
+    "formerUsers": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      "$uid": {
+        ".validate": "newData.hasChildren(['email'])",
+        "email": {
+          ".validate": "newData.isString() && newData.val().length <= 200"
+        },
+        "name": {
+          ".validate": "newData.isString() && newData.val().length <= 60"
+        },
+        "removedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
     "sets": {
       ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && (root.child('users').child(auth.uid).child('role').val() === 'admin' || (query.orderByChild === 'owner' && query.equalTo === auth.uid) || (query.orderByChild === 'visibility' && query.equalTo === 'public'))",
       ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",

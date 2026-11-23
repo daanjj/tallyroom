@@ -214,6 +214,8 @@ test("assign, change a user and remove a user are one write each; an admin canno
   await assert.rejects(be.setUser("u_adm", { role: "user" }), /own admin role/); await assert.rejects(be.removeUser("u_adm"), /own access/);
   await assert.rejects(be.removeUser("u_piet"), /piet still owns 1 question set/, "its sets are assigned first");
   delete data.sets.c; await be.removeUser("u_piet");
+  assert.deepEqual({ ...log.update[3][1]["formerUsers/u_piet"], removedAt: 0 }, { email: "piet@x.nl", name: "piet", removedAt: 0 }, "the account is remembered, so the address can get its access back");
+  delete log.update[3][1]["formerUsers/u_piet"];
   assert.deepEqual(log.update[3], ["", { "users/u_piet": null, "userSets/u_piet/a": null, "sets/a/shared/u_piet": null, "userSets/u_piet/b": null, "sets/b/shared/u_piet": null }]);
   assert.equal(log.update.length, 4);
 });
@@ -242,13 +244,13 @@ test("add user: the account is made through a second connection with a random pa
   assert.deepEqual({ ...out, key: "" }, { uid: "u_new", mailed: true, key: "" }); assert.equal(out.key, log.second[1][2], "the key of the invitation link is the random password, handed to the page once");
   assert.deepEqual(log.second.map((x) => x[0]), ["persistence", "create", "signOut", "delete"]); assert.deepEqual(log.second[0], ["persistence", "none"], "nothing of the new account is kept on the device");
   const pw = log.second[1][2]; assert.equal(pw.length, 32); assert.deepEqual(global.TRCore.passwordProblems(pw, "new@x.nl"), []);
-  const [path, rec] = log.set.at(-1); assert.equal(path, "users/u_new"); assert.deepEqual({ ...rec, createdAt: 0 }, { email: "new@x.nl", name: "New One", role: "user", createdAt: 0 }); assert.ok(Math.abs(rec.createdAt - Date.now()) < 5000);
-  assert.deepEqual(log.mail, ["new@x.nl"]); assert.ok(!JSON.stringify([log.set, log.mail]).includes(pw), "the password is not stored or sent");
+  assert.deepEqual(Object.keys(log.update.at(-1)[1]), ["users/u_new"]); const rec = log.update.at(-1)[1]["users/u_new"]; assert.deepEqual({ ...rec, createdAt: 0 }, { email: "new@x.nl", name: "New One", role: "user", createdAt: 0 }); assert.ok(Math.abs(rec.createdAt - Date.now()) < 5000);
+  assert.deepEqual(log.mail, ["new@x.nl"]); assert.ok(!JSON.stringify([log.update, log.mail]).includes(pw), "the password is not stored or sent");
   assert.equal(log.out, 0); assert.equal(be.id, "u_adm"); assert.equal(states.at(-1).uid, "u_adm");
   const nm = await be.addUser({ name: "No Mail", email: "nomail@x.nl", role: "admin" }); assert.deepEqual([nm.uid, nm.mailed, nm.key.length], ["u_nomail", false, 32], "the record is there; the invitation can be sent again");
   const quiet = await be.addUser({ name: "Quiet", email: "quiet@x.nl" }, { mail: false }); assert.deepEqual([quiet.uid, quiet.mailed, quiet.key.length], ["u_quiet", false, 32]); assert.deepEqual(log.mail, ["new@x.nl", "nomail@x.nl"], "no mail when the admin sends the link themself");
-  assert.equal(log.set.at(-2)[1].role, "admin");
-  const sets = log.set.length; await assert.rejects(be.addUser({ name: "Taken", email: "taken@x.nl" }), (e) => e.code === "auth/email-already-in-use"); assert.equal(log.set.length, sets, "no record without an account");
+  assert.equal(log.update.at(-2)[1]["users/u_nomail"].role, "admin");
+  const writes = log.update.length; await assert.rejects(be.addUser({ name: "Taken", email: "taken@x.nl" }), (e) => e.code === "auth/email-already-in-use"); assert.equal(log.update.length, writes, "no record for an account the page does not know");
   assert.equal(log.second.at(-1)[0], "delete", "the second connection is always thrown away");
   await assert.rejects(be.addUser({ name: "", email: "x@x.nl" }), /name/); await assert.rejects(be.addUser({ name: "X", email: "not an address" }), /valid email/);
 });
@@ -258,6 +260,27 @@ test("the password mail carries the address of the sign-in screen as continue ad
   assert.deepEqual(await at({ protocol: "https:", origin: "https://blocked.example", pathname: "/" }), [["ann@x.nl", "ann@x.nl"], [{ url: "https://blocked.example/?host=1" }, null]], "sent again without it");
   assert.deepEqual(await at({ protocol: "file:", origin: "null", pathname: "/C:/index.html" }), [["ann@x.nl"], [null]]);
   assert.deepEqual(await at(undefined), [["ann@x.nl"], [null]]);
+});
+test("adding an address whose access was removed gives its remembered account the access back, without an invitation link (H8)", async () => {
+  global.crypto = global.crypto || require("node:crypto").webcrypto;
+  const data = JSON.parse(JSON.stringify(DATA)); data.formerUsers = { u_old: { email: "Taken@x.nl", name: "Old Name", removedAt: 5 }, u_stale: { email: "fresh@x.nl", name: "Fresh", removedAt: 5 } };
+  const { be, log } = load({ data, user: { uid: "u_adm", isAnonymous: false, email: "adm@x.nl" } }, null, "", false); await tick();
+  const out = await be.addUser({ name: "Taken Again", email: "taken@x.nl", role: "admin" }, { mail: false });
+  assert.deepEqual(out, { uid: "u_old", mailed: false, restored: true }, "the same account as before, and no key: its password is the one it had");
+  const up = log.update.at(-1)[1]; assert.deepEqual(Object.keys(up), ["users/u_old", "formerUsers/u_old"]); assert.equal(up["formerUsers/u_old"], null);
+  assert.deepEqual({ ...up["users/u_old"], createdAt: 0 }, { email: "taken@x.nl", name: "Taken Again", role: "admin", createdAt: 0 });
+  assert.equal(log.second.at(-1)[0], "delete"); assert.deepEqual(log.mail, []);
+  data.formerUsers.u_old = { email: "taken@x.nl", name: "Old" }; assert.deepEqual(await be.addUser({ name: "Taken", email: "taken@x.nl" }, { mail: true }), { uid: "u_old", mailed: true, restored: true }); assert.deepEqual(log.mail, ["taken@x.nl"], "the mail on request: a link to choose a new password");
+  const fresh = await be.addUser({ name: "Fresh", email: "fresh@x.nl" }, { mail: false }); assert.equal(fresh.uid, "u_fresh"); assert.equal(fresh.restored, undefined); assert.equal(fresh.key.length, 32);
+  assert.deepEqual(Object.keys(log.update.at(-1)[1]), ["users/u_fresh", "formerUsers/u_stale"], "a new account for that address: the note of the old one, deleted in the console, goes");
+});
+test("demo mode: a removed user is remembered and gets the same account back when added again (H8)", async () => {
+  global.localStorage = fakeStorage(); global.addEventListener = () => {};
+  delete require.cache[require.resolve("../js/backend.js")]; const B = require("../js/backend.js"), adm = B.make({ firebaseConfig: {}, params: new URLSearchParams("demo=1") });
+  let users = null; adm.onUsers((u) => (users = u)); await adm.removeUser("demo-user"); assert.equal(users["demo-user"], undefined);
+  const out = await adm.addUser({ name: "Back Again", email: "DEMO.user@demo.example", role: "user" }); assert.deepEqual(out, { uid: "demo-user", mailed: false, restored: true });
+  assert.equal(users["demo-user"].name, "Back Again"); await adm.removeUser("demo-user"); assert.equal((await adm.addUser({ name: "Twice", email: "demo.user@demo.example" })).restored, true);
+  assert.ok((await adm.addUser({ name: "New", email: "brand.new@demo.example" })).code, "someone new gets a link");
 });
 test("the copied invitation link: checked and used on a second connection, so nobody is signed in on the page before a password is chosen (H8)", async () => {
   const { be, log, states } = load({ data: DATA }, null, "", false); await tick(); const C = global.TRCore;

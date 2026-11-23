@@ -11,6 +11,9 @@
               link the admin copies and sends themself (core.inviteLink). It is in memory only, and only at that moment.
               openInvite(email, key) -> the address, when the link still works; finishInvite(password) sets the chosen password.
               Both run on a second connection, so nobody is signed in on this page before a password is chosen
+              removeUser remembers the account in formerUsers/{uid} (admins only). addUser for an address that already has an
+              account gives that remembered account its access back -> {uid, restored:true}, without a key: its password is
+              the one the person chose before
               id and the role follow the sign-in and can change while the page is open (backlog G1, G2, H2)
               isHost is the same as isUser: someone who may have sets. Who is presenter of a set is decided per set, see poll(id)
      users    onUsers(f(map|null, err)): everyone who may use this Tally Room, for users only
@@ -121,6 +124,7 @@ function makeDemoBackend(isHost, role){
     changePassword:async(cur,next)=>{ if(!me) throw new Error("Not signed in"); if(String(cur)!==((db.pw||{})[uid]||"demo")) throw Object.assign(new Error("wrong password"), {code:"auth/wrong-password"});
       db.pw=db.pw||{}; db.pw[uid]=String(next); save(); },
     addUser:async(fields)=>{ adminOnly(); const r=C.newUser(fields, db.users, Date.now()); if(r.problem) throw new Error(r.problem);
+      const old=C.findFormer(db.former, r.user.email); if(old){ db.users[old]=r.user; delete db.former[old]; save(); emitUsers(); return {uid:old, mailed:false, restored:true}; } // the account is still there
       const nu="demo-"+Math.random().toString(36).slice(2,10); db.users[nu]=r.user; const code=demoCode(nu); emitUsers(); return {uid:nu, mailed:false, code}; },
     onUsers:f=>{ if(!me){ f({}); return; } L.users.push(f); f(copy(db.users)||{}); },
     onSets:f=>{ L.sets.push(f); f(mySets()); },
@@ -145,6 +149,7 @@ function makeDemoBackend(isHost, role){
       db.users[u]={...db.users[u], ...p}; save(); emitUsers(); },
     removeUser:async u=>{ adminOnly(); const no=C.selfChangeProblem(uid,u,"remove"); if(no) throw new Error(no);
       const rec=C.normUser((db.users||{})[u]), r=C.userRemoval(u, db.sets, null); if(r.owned.length) throw new Error(C.ownsMessage(rec?rec.name:"This user", r.owned.length));
+      const f=C.formerRecord(rec, Date.now()); if(f){ db.former=db.former||{}; db.former[u]=f; }
       delete db.users[u]; Object.keys(db.sets).forEach(id=>{ const m=db.sets[id]; if(m && m.shared && m.shared[u]){ const shared={...m.shared}; delete shared[u]; db.sets[id]={...m, shared}; } });
       save(); emitUsers(); emitSets(); Object.keys(L.poll).forEach(id=>emit(id,"meta")); },
     readPoll:async id=>copy(db.polls[id])||{},
@@ -312,11 +317,20 @@ function makeFirebaseBackend(config, opts){
        never shown, stored or sent: the mail holds a link to choose one (open decision 26) */
     addUser:async(fields, o)=>{ const r=C.newUser(fields, null, Math.round(now())); if(r.problem) throw new Error(r.problem);
       const rnd=()=>{ const a=new Uint32Array(1); root.crypto.getRandomValues(a); return a[0]/4294967296; };
-      const s=await second(), key=C.randomPassword(rnd); let nu=null;
-      try{ nu=(await s.auth.createUserWithEmailAndPassword(r.user.email, key)).user.uid; } finally{ await s.close(); }
-      await db.ref("users/"+nu).set(r.user);
-      let mailed=false; if(!(o && o.mail===false)){ try{ await sendPwMail(r.user.email); mailed=true; }catch(e){ console.warn("invitation mail", e&&e.code); } }
-      return {uid:nu, mailed, key}; },
+      const s=await second(), key=C.randomPassword(rnd), sendMail=async()=>{ if(o && o.mail===false) return false; try{ await sendPwMail(r.user.email); return true; }catch(e){ console.warn("invitation mail", e&&e.code); return false; } };
+      const former=async()=>(await db.ref("formerUsers").once("value")).val()||{}; let nu=null;
+      try{ nu=(await s.auth.createUserWithEmailAndPassword(r.user.email, key)).user.uid; }
+      catch(e){ if(!/email-already-in-use/.test(String((e&&e.code)||""))) throw e;
+        /* the address has an account already. When it is one whose access was removed here, it gets its access back; the
+           person signs in with the password they chose before, so there is no key for an invitation link */
+        const old=C.findFormer(await former(), r.user.email); if(!old) throw e;
+        await db.ref().update({["users/"+old]:r.user, ["formerUsers/"+old]:null});
+        return {uid:old, mailed:await sendMail(), restored:true}; }
+      finally{ await s.close(); }
+      /* a new account: a remembered one for the same address is gone from Firebase Authentication, so its note goes too */
+      const up={["users/"+nu]:r.user}; try{ const stale=C.findFormer(await former(), r.user.email); if(stale) up["formerUsers/"+stale]=null; }catch(e){}
+      await db.ref().update(up);
+      return {uid:nu, mailed:await sendMail(), key}; },
     /* the invitation link (core.inviteLink): signed in with it on a second connection, only to set the chosen password */
     openInvite:async(email,key)=>{ await dropInvite(); const s=await second();
       try{ const u=(await s.auth.signInWithEmailAndPassword(email, key)).user; invite={s, user:u}; return u.email||email; }catch(e){ await s.close(); throw e; } },
@@ -348,7 +362,7 @@ function makeFirebaseBackend(config, opts){
     /* the record and every entry on a shared list go in one write; the account itself stays in Firebase Authentication */
     removeUser:async u=>{ const no=C.selfChangeProblem(st.uid,u,"remove"); if(no) throw new Error(no);
       const val=async p=>(await db.ref(p).once("value")).val(), [sets,index,rec]=await Promise.all([val("sets"), val("userSets/"+u), val("users/"+u)]);
-      const r=C.userRemoval(u, sets, index), nu=C.normUser(rec); if(r.owned.length) throw new Error(C.ownsMessage(nu?nu.name:"This user", r.owned.length));
+      const r=C.userRemoval(u, sets, index, rec, Math.round(now())), nu=C.normUser(rec); if(r.owned.length) throw new Error(C.ownsMessage(nu?nu.name:"This user", r.owned.length));
       return db.ref().update(r.update); },
     readPoll:async id=>{ try{ return await rest("polls/"+id); }catch(e){ return (await db.ref("polls/"+id).once("value")).val()||{}; } },
     /* the questions only: what a user may read of a public set that is not theirs */

@@ -192,11 +192,11 @@ async function exportSet(id, kind){ const meta=metaOf(id); if(!meta) return;
   try{ const poll=await S.be.readPoll(id);
     if(kind==="questions"){ download(`${fileBase(meta)}-questions.json`, JSON.stringify(C.questionsExport(meta, poll.config),null,1), "application/json"); return; }
     const payload=C.resultsPayload({setId:id, meta, cfg:poll.config, ses:normSession(poll.session)||{}, votes:poll.votes||{}, actions:poll.actions||{}, now:Date.now()});
-    if(!payload.respondents && !confirm("This set has no answers in its current round. Export anyway?")) return;
+    if(!payload.respondents && !(await ask("This set has no answers in its current round. Export anyway?", {ok:"Export"}))) return;
     saveResults(payload, meta, kind);
   }catch(e){ alert("Export failed: "+(e&&e.message||e)); } }
 
-function importResults(text, fname){
+async function importResults(text, fname){
   let p=null; try{ p=JSON.parse(text); }catch(e){ alert("That file is not valid JSON."); return; }
   if(!p || !Array.isArray(p.questions) || !p.questions.length){ alert("No questions found in that file. Load a JSON saved by Tally Room."); return; }
   const qs=p.questions.map(C.reviveQuestion);
@@ -206,7 +206,7 @@ function importResults(text, fname){
     const tx={}; qs.forEach(qu=>{ const t=r&&r.texts?r.texts[qu.id]:null; if(typeof t==="string"&&t.trim()) tx[qu.id]=t; });
     const cf={}; qs.forEach(qu=>{ const c=r&&r.confidence?r.confidence[qu.id]:null; if(Number.isFinite(c)) cf[qu.id]=c; });
     if(Object.keys(a).length) votes[String((r&&r.respondent)||("R"+(i+1)))]={round:1, answers:a, texts:tx, conf:cf, revs:Object.fromEntries(qs.filter(qu=>isTraffic(qu)&&qu.rev>1&&a[qu.id]!=null).map(qu=>[qu.id,qu.rev])), ...(C.isNamed(p.named)&&r&&r.respondent?{name:String(r.respondent)}:{}), t:Date.parse((r&&r.at)||"")||Date.now()}; });
-  if(!Object.keys(votes).length && !confirm("That file has questions but no answers. Open it anyway?")) return;
+  if(!Object.keys(votes).length && !(await ask("That file has questions but no answers. Open it anyway?", {ok:"Open"}))) return;
   S.review={ live:{cfg:S.cfg, ses:S.ses, votes:S.votes, actions:S.actions},
     info:{ title:String(p.title||"Saved results"), n:Object.keys(votes).length, file:String(fname||""), named:C.isNamed(p.named)?p.named:"no", category:(p.set&&p.set.category)||"generic",
            exportedAt:String(p.exportedAt||"").slice(0,16).replace("T"," ") } };
@@ -776,10 +776,17 @@ function addUserDlgHTML(d){ if(d.done) return addedUserHTML(d);
 function addedUserHTML(d){ const o=d.done, n=esc(o.name);
   const mail = !o.wantMail ? "" : o.demo ? `<p class="meta" style="margin:0">Demo mode sends no mail.</p>` : o.mailed ? `<p class="meta" style="margin:0">A mail with a link to choose a password is also on its way to ${esc(o.email)}. It may not arrive; the link above does not depend on it.</p>`
     : `<div class="banner">The mail could not be sent. Send the link above yourself, or use <b>Send invitation again</b> on the Users screen later.</div>`;
+  /* an address whose access was removed earlier: the account was still there and has its access back */
+  if(o.restored) return `<p style="margin:0"><b>${n}</b> (${esc(o.email)}) has access again, as ${esc(C.roleName(o.role).toLowerCase())}.</p>
+    <div class="banner">This address still had its account from before its access was removed. ${n} signs in with the password they chose then. There is no invitation link this time: a link can only be made for a new account.</div>
+    <p class="meta" style="margin:0">If ${n} no longer knows the password: <b>Forgot password</b> on the sign-in screen, or <b>Send invitation again</b> on the Users screen, sends a mail with a link to choose a new one. That mail may not arrive.</p>
+    ${mail}
+    <div class="controls"><button class="btn primary" data-act="dlgClose">Done</button></div>`;
   return `<p style="margin:0"><b>${n}</b> (${esc(o.email)}) is added as ${esc(C.roleName(o.role).toLowerCase())}.</p>
     ${o.link ? `<div class="field"><label for="invLink">Invitation link for ${n}</label><div class="controls"><input type="text" id="invLink" readonly value="${esc(o.link)}" style="flex:1;min-width:200px"><button class="btn primary" data-act="inviteCopy">Copy link</button></div>
       <small class="meta" id="inviteNote" role="status" style="font-weight:700"></small>
-      <div class="meta">Send this link to ${n} yourself, for example in WhatsApp. ${n} opens it and chooses a password. <b>Copy it now:</b> it is shown only here and is gone when you close this dialog. It works until a password is chosen with it. Whoever has the link can take this account, so send it to ${n} only.</div></div>`
+      <div class="once-warn" role="note"><b>Copy this link now.</b> It is shown only once: it is gone when you close this dialog and cannot be made again.</div>
+      <div class="meta">Send it to ${n} yourself, for example in WhatsApp. ${n} opens it and chooses a password. It works until a password is chosen with it. Whoever has the link can take this account, so send it to ${n} only.</div></div>`
       : `<div class="banner">No invitation link could be made. Use <b>Send invitation again</b> on the Users screen.</div>`}
     ${mail}
     <div class="controls"><button class="btn ${o.link?"ghost":"primary"}" data-act="dlgClose">Done</button></div>`; }
@@ -788,9 +795,9 @@ async function saveAddUserDlg(){ const d=S.ui.dlg, g=id=>document.getElementById
   const r=C.newUser(d, S.users, Date.now()); if(r.problem){ d.err=r.problem; d.focus=/name/.test(r.problem)?"uName":"uEmail"; render(); return; }
   d.err=""; d.busy=true; render();
   try{ const out=await S.be.addUser(r.user, {mail:d.mail});
-    d.busy=false; d.title="User added"; d.focus="invLink";
-    d.done={ name:r.user.name, email:r.user.email, role:r.user.role, wantMail:d.mail, mailed:!!out.mailed, demo:!!out.code, link: out.key ? C.inviteLink(PAGE, r.user.email, out.key) : out.code ? resetUrl(out.code) : "" };
-    S.ui.homeNote=`${r.user.name} is added.`; if(S.ui.dlg===d) render(); }
+    d.busy=false; d.title=out.restored?"Access given back":"User added"; d.focus="invLink";
+    d.done={ restored:!!out.restored, name:r.user.name, email:r.user.email, role:r.user.role, wantMail:d.mail, mailed:!!out.mailed, demo:!!out.code, link: out.key ? C.inviteLink(PAGE, r.user.email, out.key) : out.code ? resetUrl(out.code) : "" };
+    S.ui.homeNote=out.restored ? `${r.user.name} has access again.` : `${r.user.name} is added.`; if(S.ui.dlg===d) render(); }
   catch(e){ console.warn("add user", e&&e.code); d.busy=false; d.err=C.authProblem(e) || (isDenied(e) ? "The account is made, but the database refused the user record. Publish the rules of tallyroom-setup.md, step 1.3" : "Adding failed: "+(e&&e.message||e)); if(S.ui.dlg===d) render(); } }
 async function inviteAgain(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || !u.email || S.auth.role!=="admin") return;
   try{ const r=await S.be.resetPassword(u.email); homeSay(r && r.code ? `A new link for ${u.name}.` : `A mail with a link to choose a password is on its way to ${u.email}.`, r && r.code); render(); }
@@ -816,7 +823,7 @@ function userDelDlgHTML(d){ const u=C.normUser(S.users && S.users[d.uid]); if(!u
   const own=S.sets ? C.ownedIds(S.sets, d.uid).length : 0, who=`<b>${esc(u.name)}</b>${u.email?` (${esc(u.email)})`:""}`;
   if(own) return `<p style="margin:0">${who} cannot be removed yet. ${esc(C.ownsMessage(u.name, own))}</p><div class="controls"><button class="btn ghost" data-act="dlgClose">Close</button></div>`;
   return `<p style="margin:0">Are you sure you want to remove ${who} from this Tally Room?</p>
-    <p class="meta" style="margin:0">${esc(u.name)} can no longer sign in to any screen here, and is taken off every set that is shared with them. ${S.be.demo?"":"The sign-in account itself is not deleted by this: the page cannot do that. Delete it afterwards in the Firebase console (Authentication → Users); until then this address cannot be added again."}</p>
+    <p class="meta" style="margin:0">${esc(u.name)} can no longer sign in to any screen here, and is taken off every set that is shared with them. ${S.be.demo?"":"The sign-in account itself is not deleted by this: the page cannot do that. Adding the same address again later gives that account its access back, with the password it has. To remove the account for good, delete it in the Firebase console (Authentication → Users)."}</p>
     ${d.err?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(d.err)}</small>`:""}
     <div class="controls"><span class="spacer"></span><button class="btn ghost" data-act="dlgClose">Cancel</button><button class="btn danger-solid" data-act="userDelConfirm" ${d.busy?"disabled":""}>Remove user</button></div>`; }
 async function confirmRemoveUser(){ const d=S.ui.dlg; if(!d || d.type!=="userDel" || d.busy) return; const u=C.normUser(S.users && S.users[d.uid]); if(!u){ closeDlg(); return; }
@@ -891,6 +898,23 @@ async function freshSetId(name){ for(let i=0;i<20;i++){ const id=C.newSetId(name
 
 /* ============ dialogs: set settings, QR code, delete ============ */
 function toLocalInput(ts){ const d=new Date(ts), p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+/* "Are you sure?" as a dialog of the page, not the browser's own box: a browser can be told to skip those, and then the
+   action went ahead without asking. Gives a promise of true (go ahead) or false. It sits outside #app, so a redraw of the
+   page leaves it alone, and it can lie over an open dialog (Settings) without closing it.
+   The first paragraph of the text is the question; opts: {ok: label of the button, danger: the action destroys something} */
+let askOpen=null;
+function ask(text, opts){ const o=opts||{}; if(askOpen) askOpen(false);
+  return new Promise(done=>{ const parts=String(text||"").split(/\n\n+/), el=document.createElement("div"), back=document.activeElement;
+    el.className="modal ask"; el.innerHTML=`<div class="card dlg" role="alertdialog" aria-modal="true" aria-labelledby="askQ"><h2 id="askQ" style="font-size:20px">${esc(parts[0])}</h2>
+      ${parts.slice(1).map(p=>`<p class="meta" style="margin:0">${esc(p)}</p>`).join("")}
+      <div class="controls"><span class="spacer"></span><button class="btn ghost" data-ask="no">Cancel</button><button class="btn ${o.danger?"danger-solid":"primary"}" data-ask="yes">${esc(o.ok||"Continue")}</button></div></div>`;
+    const close=v=>{ if(askOpen!==close) return; askOpen=null; el.remove(); try{ if(back && back.isConnected) back.focus(); }catch(e){} done(v); };
+    askOpen=close;
+    el.addEventListener("click", e=>{ const b=e.target.closest("[data-ask]"); if(b) close(b.dataset.ask==="yes"); else if(e.target===el) close(false); });
+    /* keys stay in this dialog: Escape says no, Tab goes round its two buttons, and nothing reaches the shortcuts of the page */
+    el.addEventListener("keydown", e=>{ e.stopPropagation(); if(e.key==="Escape"){ e.preventDefault(); close(false); return; }
+      if(e.key==="Tab"){ e.preventDefault(); const bs=[...el.querySelectorAll("button")], i=bs.indexOf(document.activeElement); bs[(i+(e.shiftKey?bs.length-1:1))%bs.length].focus(); } });
+    document.body.appendChild(el); el.querySelector(o.danger?'[data-ask="no"]':'[data-ask="yes"]').focus(); }); }
 function closeDlg(){ S.ui.dlg=(S.ui.dlg && S.ui.dlg.back)||null; render(); } // a dialog opened from Settings returns to it
 function openSetDlg(id, focus){ const m=id?metaOf(id):null; if(id && !m) return;
   S.ui.dlg={ type:"set", id:id||null, focus:focus||(id?null:"dlgName"), title:id?"Settings of this question set":"New question set", imported:null,
@@ -939,14 +963,14 @@ async function saveSetDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id)
       const bl=C.categoryBlockers(fields.category, qs); if(bl.length){ alert(C.blockerMessage(fields.category, bl)); return; } }
     if(d.id && fields.named!==(d.f.named||"no")){ // changing who is named while people are in the set
       const poll=await S.be.readPoll(d.id), votes=poll.votes||{}, n=Object.values(votes).filter(C.hasAnswers).length;
-      if(n && !confirm(fields.named==="no" ? `${n} ${n===1?"person has":"people have"} answered. Their names are removed and no longer shown or exported. Continue?`
-                                           : `${n} ${n===1?"person has":"people have"} answered already. They get a name (or are asked for one) the next time their screen changes; until then they show as "unnamed". Continue?`)) return;
+      if(n && !(await ask(fields.named==="no" ? `${n} ${n===1?"person has":"people have"} answered. Their names are removed and no longer shown or exported. Continue?`
+                                           : `${n} ${n===1?"person has":"people have"} answered already. They get a name (or are asked for one) the next time their screen changes; until then they show as "unnamed". Continue?`, {danger:fields.named==="no"}))) return;
       if(fields.named==="no" && Object.values(votes).some(v=>v && v.name)){ const clean={}; Object.entries(votes).forEach(([pid,v])=>{ if(!v) return; const c={...v}; delete c.name; delete c.nameAt; clean[pid]=c; }); await S.be.poll(d.id).setAllVotes(clean); }
       if(fields.named==="no"){ const pp=S.be.poll(d.id); if(pp.dropNames) await pp.dropNames(); } } // the names list and what is shown go too; an open presenter screen republishes without names
     if(d.id){ await S.be.patchMeta(d.id, {...fields, joinUrl:g("dlgJoin")?g("dlgJoin").value.trim():"", updatedAt:now}); closeDlg(); return; }
     const id=await freshSetId(name), imp=d.imported, cfg=C.emptyConfig();
     if(imp){ const f=C.filterForCategory(fields.category, imp.questions), msg=C.skippedMessage(fields.category, f.skipped);
-      if(msg && !confirm(msg+"\n\nCreate the set without them?")) return;
+      if(msg && !(await ask("Create the set without them?\n\n"+msg, {ok:"Create the set"}))) return;
       const probs=C.questionProblems(f.kept); if(probs.length){ alert("This file cannot be used as it is.\n\n"+probs.join("\n")); return; }
       cfg.questions=f.kept; cfg.tlYellow=imp.tlYellow; cfg.tlRed=imp.tlRed; if(imp.set && imp.set.mode) cfg.mode=imp.set.mode; }
     await S.be.createSet(id, C.newMeta({...fields, owner:S.me.id}, now), {config:cfg, session:{...DEFAULT_SESSION}}); // private, and owned by who makes it
@@ -1033,7 +1057,7 @@ async function shareRemove(uid){ const d=S.ui.dlg; if(!d || d.type!=="share" || 
   catch(e){ shareSay(isDenied(e) ? "The database refused this. Reload the page" : "Removing failed: "+(e&&e.message||e), true); } }
 /* who a set is shared with can take itself off the list (open decision 20) */
 async function leaveSet(id){ const m=metaOf(id); if(!m || C.setRight(m, meNow())!=="shared") return;
-  if(!confirm(`Leave "${tx(m.name)}"?\n\nIt disappears from your sets and you can no longer present it. ${userName(m.owner)} can share it with you again.`)) return;
+  if(!(await ask(`Leave "${tx(m.name)}"?\n\nIt disappears from your sets and you can no longer present it. ${userName(m.owner)} can share it with you again.`, {ok:"Leave", danger:true}))) return;
   try{ await S.be.shareSet(id, S.me.id, false); if(S.route==="set"){ location.href=urlFor(); return; }
     S.ui.dlg=null; S.ui.homeNote=`You left "${tx(m.name)}".`; render(); }
   catch(e){ alert("Leaving failed: "+(e&&e.message||e)); } }
@@ -1116,22 +1140,23 @@ app.addEventListener("click", e=>{
     case "impPick": document.getElementById("impFile")?.click(); break;
     case "reviewExit": if(S.review){ const l=S.review.live; S.review=null; S.cfg=l.cfg; S.ses=l.ses; S.votes=l.votes; S.actions=l.actions||{}; S.ui.act={}; render(); } break;
     case "reviewPublish": { if(!S.review) break;
-      if(!confirm("Publish these results to the live poll? The questions and answers everyone sees are replaced.")) break;
-      const cfg=S.cfg, next={...S.ses}, votes=S.votes; S.review=null;
-      write(()=>S.backend.setConfig(cfg));
-      if(S.backend.setAllVotes) write(()=>S.backend.setAllVotes(votes));
-      write(()=>S.backend.setSession(next));
-      render(); break; }
+      ask("Publish these results to the live poll?\n\nThe questions and answers everyone sees are replaced.", {ok:"Publish", danger:true}).then(ok=>{ if(!ok || !S.review) return;
+        const cfg=S.cfg, next={...S.ses}, votes=S.votes; S.review=null;
+        write(()=>S.backend.setConfig(cfg));
+        if(S.backend.setAllVotes) write(()=>S.backend.setAllVotes(votes));
+        write(()=>S.backend.setSession(next));
+        render(); }); break; }
     case "expJSON": exportJSON(); break;
     case "expCSV": exportCSV(); break;
-    case "hardReset": if(confirm("Reset the session? All answers are cleared, the round counter goes back to 1 and every device has to tap to rejoin."+actionNote())){
+    case "hardReset": ask("Reset the session?\n\nAll answers are cleared, the round counter goes back to 1 and every device has to tap to rejoin."+actionNote(), {ok:"Reset session", danger:true}).then(ok=>{ if(!ok || S.review || expired()) return;
       S.votes={}; S.parts={all:{}, mine:null, shown:{}, names:{}};
       setSession({phase:"lobby", current:0, revealed:[], showLive:false, round:1, resetAt:Date.now(), outcome:null}); dropHistory();
       write(()=>S.backend.clearVotes());
       setTimeout(()=>write(()=>S.backend.clearVotes()), 2500); // sweep answers that were already in flight
-    } break;
+    }); break;
     case "rejoin": S.me.ackReset=(S.ses.resetAt||0); render(); if(S.heartbeat) S.heartbeat(); break;
-    case "reset": if(confirm("Clear all answers and start a new round?"+actionNote())){ const r=(ses.round||1)+1; setSession({phase:"lobby", current:0, revealed:[], round:r, outcome:null}); dropHistory(); write(()=>S.backend.clearVotes()); } break;
+    case "reset": ask("Clear all answers and start a new round?"+(actionNote()?"\n\n"+actionNote().trim():""), {ok:"Clear answers", danger:true}).then(ok=>{ if(!ok || S.review || expired()) return;
+      const r=((S.ses&&S.ses.round)||1)+1; setSession({phase:"lobby", current:0, revealed:[], round:r, outcome:null}); dropHistory(); write(()=>S.backend.clearVotes()); }); break;
     case "signIn": doSignIn(); break;
     case "forgot": doForgot(); break;
     case "signOut": S.be.signOut().catch(e=>alert("Signing out failed: "+(e&&e.message||e))); break;
@@ -1196,8 +1221,8 @@ app.addEventListener("click", e=>{
     case "shareAdd": shareAdd(); break;
     case "shareRemove": shareRemove(b.dataset.uid); break;
     case "setVis": { const m=metaOf(id); if(!m || !C.canControl(m, meNow())) break; const pub=m.visibility!=="public";
-      if(pub && !confirm(`Make "${tx(m.name)}" public?\n\nEvery user of this Tally Room can then read its questions and settings, and duplicate it. Answers and follow-up actions stay with you.`)) break;
-      S.be.patchMeta(id, {visibility:pub?"public":"private", updatedAt:Date.now()}).catch(e=>alert("Changing this failed: "+(e&&e.message||e))); break; }
+      (pub ? ask(`Make "${tx(m.name)}" public?\n\nEvery user of this Tally Room can then read its questions and settings, and duplicate it. Answers and follow-up actions stay with you.`, {ok:"Make public"}) : Promise.resolve(true))
+        .then(ok=>{ if(ok) return S.be.patchMeta(id, {visibility:pub?"public":"private", updatedAt:Date.now()}); }).catch(e=>alert("Changing this failed: "+(e&&e.message||e))); break; }
     case "setDup": duplicateSet(id); break;
     case "setExpQ": exportSet(id,"questions"); break;
     case "setExpJSON": exportSet(id,"json"); break;

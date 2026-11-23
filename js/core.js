@@ -420,10 +420,17 @@ function selfChangeProblem(me, uid, change){ if(!me || me!==uid) return null;
   return change && change.role && change.role!=="admin" ? "You cannot take away your own admin role." : null; }
 /* taking a user's access away: the record goes, and the user leaves every shared list. index = userSets/{uid}; the sets are
    looked through as well, in case the index missed one. owned = the sets the user still owns: those are assigned first */
-function userRemoval(uid, sets, index){ const owned=ownedIds(sets, uid), ids=new Set(Object.keys(index||{}));
+/* rec = the record of the user: with an email address in it, the account is remembered in formerUsers/{uid} (admins only),
+   so that this address can be given access again later. The account itself stays in Firebase Authentication, and the page
+   could not find it back by address */
+function userRemoval(uid, sets, index, rec, now){ const owned=ownedIds(sets, uid), ids=new Set(Object.keys(index||{}));
   Object.keys(sets||{}).forEach(id=>{ const s=sets[id] && sets[id].shared; if(s && s[uid]===true) ids.add(id); });
-  const update={["users/"+uid]:null}; [...ids].sort().forEach(id=>{ update["userSets/"+uid+"/"+id]=null; if(sets && sets[id]) update["sets/"+id+"/shared/"+uid]=null; });
+  const update={["users/"+uid]:null}, f=formerRecord(rec, now); if(f) update["formerUsers/"+uid]=f; [...ids].sort().forEach(id=>{ update["userSets/"+uid+"/"+id]=null; if(sets && sets[id]) update["sets/"+id+"/shared/"+uid]=null; });
   return {owned, update}; }
+function formerRecord(rec, now){ const u=normUser(rec); return u && u.email ? {email:u.email, name:u.name, removedAt:Number.isFinite(now)?now:0} : null; }
+/* the remembered account of an email address, or null */
+function findFormer(former, email){ const e=String(email||"").trim().toLowerCase(); if(!e) return null;
+  return Object.keys(former||{}).filter(normUid).find(uid=>former[uid] && String(former[uid].email||"").trim().toLowerCase()===e) || null; }
 const ownsMessage = (name, n) => `${name} still owns ${n} question ${n===1?"set":"sets"}. Assign ${n===1?"it":"them"} to another user first.`;
 /* a new owner leaves the shared list; the previous owner keeps no rights */
 function withOwner(meta, uid){ const m=normMeta(meta); if(!m || !normUid(uid)) return m; return normMeta({...m, owner:uid}); }
@@ -454,7 +461,7 @@ function authProblem(e){ const c=String((e&&e.code)||"");
   if(/too-many-requests/.test(c)) return "Too many attempts. Wait a few minutes and try again.";
   if(/wrong-password|invalid-credential|invalid-login-credentials/.test(c)) return "The current password is not right";
   if(/weak-password|password-does-not-meet-requirements/.test(c)) return "Firebase refused this password. Choose a longer one";
-  if(/email-already-in-use/.test(c)) return "This email address already has an account in Firebase Authentication, without access here. Delete that account in the Firebase console, or add its record by hand (tallyroom-setup.md, step 1b)";
+  if(/email-already-in-use/.test(c)) return "This email address already has an account in Firebase Authentication that this page does not know. Delete that account in the Firebase console, or add its record by hand (tallyroom-setup.md, step 1b)";
   if(/invalid-email/.test(c)) return "Type a valid email address.";
   if(/operation-not-allowed/.test(c)) return "Email and password sign-in is switched off in the Firebase project (tallyroom-setup.md, step 1b).";
   return null; }
@@ -604,7 +611,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, visibleQids, shownVotes, namesAsVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
-  VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, userList, userLabel, matchUsers, shareLine, ownedIds, userPatch, selfChangeProblem, userRemoval, ownsMessage, PW_MIN, PW_MAX, passwordProblems, randomPassword, emailOk, newUser, authProblem, linkIsDead, inviteLink, parseInvite, inviteIsDead,
+  VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, userList, userLabel, matchUsers, shareLine, ownedIds, userPatch, selfChangeProblem, userRemoval, formerRecord, findFormer, ownsMessage, PW_MIN, PW_MAX, passwordProblems, randomPassword, emailOk, newUser, authProblem, linkIsDead, inviteLink, parseInvite, inviteIsDead,
   sortSets, pollStats, duplicateSet, migrationMeta, ownerlessIds, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS, ICON_MARK, iconSVG,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,

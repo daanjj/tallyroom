@@ -899,3 +899,14 @@ test("the invitation link holds the address and the key behind the #, and reads 
   for (const dead of ["auth/wrong-password", "auth/invalid-credential", "auth/user-not-found", "auth/user-disabled"]) assert.equal(C.inviteIsDead({ code: dead }), true, dead);
   assert.equal(C.inviteIsDead({ code: "auth/network-request-failed" }), false); assert.equal(C.inviteIsDead(null), false);
 });
+test("a removed user is remembered by account, and found back by email address", () => {
+  const rec = { email: " Piet@Example.com ", name: "Piet", role: "user" };
+  assert.deepEqual(C.formerRecord(rec, NOW), { email: "Piet@Example.com", name: "Piet", removedAt: NOW });
+  assert.equal(C.formerRecord({ name: "No address", role: "user" }, NOW), null, "without an address there is nothing to find it back by"); assert.equal(C.formerRecord(null, NOW), null);
+  assert.deepEqual(C.userRemoval("uidPiet", {}, null, rec, NOW).update, { "users/uidPiet": null, "formerUsers/uidPiet": { email: "Piet@Example.com", name: "Piet", removedAt: NOW } });
+  assert.deepEqual(C.userRemoval("uidPiet", {}, null).update, { "users/uidPiet": null });
+  const former = { uidPiet: C.formerRecord(rec, NOW), uidSam: { email: "sam@example.com" }, "a/b": { email: "odd@example.com" }, uidNone: null };
+  assert.equal(C.findFormer(former, "piet@example.COM "), "uidPiet"); assert.equal(C.findFormer(former, "sam@example.com"), "uidSam");
+  for (const none of ["nobody@example.com", "odd@example.com", "", null]) assert.equal(C.findFormer(former, none), null, String(none));
+  assert.equal(C.findFormer(null, "piet@example.com"), null);
+});

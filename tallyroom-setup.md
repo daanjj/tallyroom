@@ -34,6 +34,25 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
         }
       }
     },
+    "formerUsers": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      "$uid": {
+        ".validate": "newData.hasChildren(['email'])",
+        "email": {
+          ".validate": "newData.isString() && newData.val().length <= 200"
+        },
+        "name": {
+          ".validate": "newData.isString() && newData.val().length <= 60"
+        },
+        "removedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
     "sets": {
       ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && (root.child('users').child(auth.uid).child('role').val() === 'admin' || (query.orderByChild === 'owner' && query.equalTo === auth.uid) || (query.orderByChild === 'visibility' && query.equalTo === 'public'))",
       ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
@@ -152,7 +171,7 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
 }
 ```
 
-Click **Publish**. `users` is the list of people who may sign in, with their role; `sets` is the list of question sets with their owner, header, colour and expiry date; `polls` holds the questions and answers of each set; `userSets` lists per user the sets that others shared with them. In short: an admin may read and write everything; a user may read and write their own sets and the sets shared with them, and read the questions of public sets; a participant may read the one set of the link and write only its own answers, and only while the set exists and has not expired. Nobody can read or write anything without being signed in. Who has the Firebase CLI can publish with `firebase deploy --only database` instead.
+Click **Publish**. `users` is the list of people who may sign in, with their role; `formerUsers` remembers the accounts whose access was removed; `sets` is the list of question sets with their owner, header, colour and expiry date; `polls` holds the questions and answers of each set; `userSets` lists per user the sets that others shared with them. In short: an admin may read and write everything; a user may read and write their own sets and the sets shared with them, and read the questions of public sets; a participant may read the one set of the link and write only its own answers, and only while the set exists and has not expired. Nobody can read or write anything without being signed in. Who has the Firebase CLI can publish with `firebase deploy --only database` instead.
 
 **Upgrading to the version with users and owners (Epic H):** do this between sessions, in this order.
 
@@ -162,7 +181,7 @@ Click **Publish**. `users` is the list of people who may sign in, with their rol
 4. Remove the key `presenters` from the data; nothing reads it any more.
 5. Set up the password mail and the password policy (steps 1b.5 and 1b.6). From then on new users are added from the **Users** screen.
 
-**Upgrading to the version with sharing and the Users screen (23 Nov 2026):** publish the rules of step 1.3 again and put the new files online; the order does not matter. The rules changed in one place: an admin can no longer remove or demote themself.
+**Upgrading to the version with sharing and the Users screen (23 Nov 2026):** publish the rules of step 1.3 again and put the new files online; the order does not matter. The rules changed in two places: an admin can no longer remove or demote themself, and there is a new list `formerUsers` for admins. With the new page and the old rules, **Remove access** is refused ("The database refused this change").
 
 **Upgrading to the version where participants cannot read each other's answers (21 Nov 2026):** publish the rules of step 1.3 and put the new files online together, between sessions. Old page with new rules, or new page with old rules: phones still vote, but show no results after a reveal. Phones that still have the old page open need a reload.
 
@@ -193,7 +212,7 @@ Participants never see a sign-in: their phone signs in anonymously, which is how
    - **Whoever has the link can take the account**, like the link in the mail. Send it to the new user only, not to a group. If it went to the wrong person or is not used, click **Remove access** and delete the account under Authentication → Users.
    - The address and the key sit behind the `#` of the link, a part that is not sent to any server, so not to the service that makes a link preview in a chat either.
 
-Passwords do not expire. A signed-in user changes theirs with **Change password** in the top bar (current password, then the new one twice). **Remove access** on the Users screen takes away the rights but leaves the account under Authentication → Users; delete it there. Until you do, that address cannot be added again from the page ("already has an account"): delete the account first, or give it a record by hand as in step 3.
+Passwords do not expire. A signed-in user changes theirs with **Change password** in the top bar (current password, then the new one twice). **Remove access** on the Users screen takes away the rights but leaves the account under Authentication → Users; the page cannot delete it. The page remembers which account went with the address (`formerUsers` in the database, readable by admins only), so **Add user** with the same address later gives that account its access back. The person then signs in with the password they had; there is no invitation link in that case, because a link can only be made for a new account. To remove someone for good, also delete the account under Authentication → Users; adding the address after that makes a new account, with a link. An address whose access was removed before 23 Nov 2026, or whose record was removed by hand, is not remembered: Add user then says "already has an account that this page does not know"; delete the account first, or give it a record by hand as in step 3.
 
 Anonymous users pile up under Users, one per phone per browser. That is harmless; a project upgraded to Identity Platform can delete them automatically after 30 days.
 
@@ -277,13 +296,14 @@ Firebase Spark plan: free, no credit card, 1 GB storage and 100 simultaneous con
 - "Could not connect. Check your connection and reload" on a phone: the **Anonymous** provider is off (step 1b), the phone blocks storage (some private modes), or there is no network.
 - Votes are refused ("Your answer could not be saved"): the rules are published but the Anonymous provider is off, or the page online is still the old version.
 - "This account has no access": the UID of the account has no record under `users` with a `role` of `admin` or `user` (step 1b.3), or the rules are not published yet.
-- **Add user** says "already has an account": the address has an account under Authentication → Users without a `users` record, for example after **Remove access**. Delete the account there and add the user again, or add the record by hand (step 1b.3).
+- **Add user** says "already has an account that this page does not know": the address has an account under Authentication → Users that was not made or removed through the Users screen (or was removed before 23 Nov 2026). Delete the account there and add the user again, or add the record by hand (step 1b.3).
+- **Add user** says "Access given back" and shows no invitation link: the address still had its account from before **Remove access**. The person signs in with their old password. For a fresh start with a link, remove the access again, delete the account under Authentication → Users and add the user once more.
 - The invitation or Forgot password mail does not arrive (or one arrives and another does not): Firebase keeps no list of the mails it sent and never reports whether one was delivered. What can be checked:
   - **The account exists**: Authentication → Users lists the address with its creation date. Check the spelling there; a typo is the commonest cause.
   - **The page asked for the mail**: the note "A mail … is on its way" only appears when Firebase accepted the request; a refused request gives "added, but the mail could not be sent". The Network tab of the browser console shows it as a request to `accounts:sendOobCode` with status 200.
   - **The mailbox**: the mail comes from `noreply@<project>.firebaseapp.com`, a sender that company mail filters often hold back. Look in the junk folder, and for a work address ask the mail administrator to look in the quarantine. To tell the mailbox from Firebase, add a user with a private address (Gmail, for example) and see whether that mail arrives.
   - Then click **Send invitation again** on the Users screen. Firebase limits how many of these mails a project sends per day.
-  - Or go around the mail: for a new user, copy the invitation link in the **Add user** dialog and send it yourself (step 1b.7). For a user who was added already there is no link to copy: click **Remove access**, delete the account under Authentication → Users, add the user again and copy the link then.
+  - Or go around the mail: for a new user, copy the invitation link in the **Add user** dialog and send it yourself (step 1b.7). For a user who was added already there is no link to copy: click **Remove access**, delete the account under Authentication → Users (without that step the old account only gets its access back, without a link), add the user again and copy the link then.
   - If mails to one domain keep disappearing: Authentication → Templates → SMTP settings lets Firebase send through your own mail server, which has its own delivery log. A project upgraded to Identity Platform can also switch on activity logging, which shows each request for a mail in Google Cloud Logging (the request, not the delivery).
 - A copied invitation link says "This link is no longer valid": a password was already chosen with it or through the mail, or the link was not pasted whole (it must include everything after the `#`). **Send me a new link** on that screen sends a mail; otherwise remove and add the user again for a new link.
 - The link in the mail opens a Firebase page instead of **Choose your password**: the action URL of the template is not set, or the console does not allow changing templates for this project (step 1b.5). The user chooses a password on that page and clicks **Continue** to get to the sign-in screen. No Continue button there: the domain of the page is not under Authorised domains (step 1b.4). It says "This link is no longer valid": the link was used already or is older than Firebase allows; **Send me a new link** on that screen sends another.
