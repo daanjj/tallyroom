@@ -1,6 +1,9 @@
 (function(){
 "use strict";
 const C=window.TRCore, B=window.TRBackend;
+/* the version of the page is the ?v= number behind the file names in index.html, which is raised with every release.
+   It shows when the pointer rests on the logo, and as a faint line under the overview */
+const VERSION=(()=>{ try{ const m=/[?&]v=([\w.-]+)/.exec(document.currentScript.src||""); return m?m[1]:""; }catch(e){ return ""; } })();
 const { clamp, fmt, tx, normOptions, isTraffic, isOpen, isDilemma, kindOf, isOpt, optLabel, q, exportQ, stats, hasAnswers, validAns, normSession, csvToQuestions, TL_LABELS, TL_COLORS, TL_Q_YELLOW, TL_Q_RED, DEFAULT_SESSION } = C;
 const tlPrompt = v => C.followUp(S.cfg, v);
 const qColor = (qu,i,n) => (isTraffic(qu) && TL_COLORS[i]) ? TL_COLORS[i] : rampColor(i,n);
@@ -223,7 +226,7 @@ function connPill(){ return S.ui.offline ? `<span class="pill warn" title="Tryin
 
 /* ============ rendering ============ */
 const RULES_MSG="The database does not allow reading question sets yet. Add the <b>sets</b> block to the database rules (tallyroom-setup.md, step 1.3) and reload this page.";
-function brand(text){ return `<div class="brand"><span class="mark"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14"/>${C.ICON_MARK}</svg></span>${esc(text==null?header():text)}</div>`; }
+function brand(text){ return `<div class="brand"${VERSION?` title="Tally Room, version ${esc(VERSION)}"`:""}><span class="mark"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14"/>${C.ICON_MARK}</svg></span>${esc(text==null?header():text)}</div>`; }
 function notice(title, html, pulse){ return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card big-wait">${pulse?`<div class="pulse"></div>`:""}${title?`<h2 style="font-size:24px">${esc(title)}</h2>`:""}<p class="meta">${html}</p></div></div>`; }
 let lastHTML=null, typT=null;
 function render(bg){
@@ -722,7 +725,7 @@ function homeHTML(){
   if(!S.me.isHost && S.auth.uid && !S.auth.anon) return notPresenterHTML();
   if(!S.me.isHost) return notice("Scan the QR code or open the link you received", "Each question set has its own link. Ask the presenter for the QR code."+(S.be&&S.be.demo?"":`<br><br><a href="${esc(urlFor({host:true}))}" style="font-size:13px">Sign in to make or present question sets</a>`));
   const top=`<div class="topbar">${brand("Tally Room")}<div class="controls">${connPill()}${S.be&&S.be.demo?`<span class="pill warn">Demo data, this browser only</span>`:""}${signOutBtn()}</div></div>`;
-  if(S.auth.role==="admin" && S.ui.homeTab==="users") return `<div class="wrap">${top}${usersHTML()}</div>`;
+  if(S.auth.role==="admin" && S.ui.homeTab==="users") return `<div class="wrap">${top}${usersHTML()}${versionLine()}</div>`;
   if(S.setsErr) return `<div class="wrap">${top}<div class="banner">${RULES_MSG}</div></div>`;
   if(!S.sets) return `<div class="wrap">${top}<div class="card big-wait"><div class="pulse"></div><p class="meta">Loading question sets…</p></div></div>`;
   /* own sets and the ones shared with this user; public sets of others, read-only; for an admin, everything else (backlog H5) */
@@ -736,9 +739,10 @@ function homeHTML(){
     ${homeNoteHTML()}
     ${section("My sets", "", mine, "No question sets yet. Create the first one.")}
     ${admin ? (rest.length?section("All other sets", "Sets of other users. As admin you can do everything their owner can.", rest, ""):"")
-            : section("Public sets", "Made public by other users. You can view their questions and duplicate them; the answers stay with their owner.", pub, "No public sets from other users.")}</div></div>`;
+            : section("Public sets", "Made public by other users. You can view their questions and duplicate them; the answers stay with their owner.", pub, "No public sets from other users.")}</div>${versionLine()}</div>`;
 }
 /* ---- the admin's screen Users (backlog H7): who may use this Tally Room, in which role, and how many sets they own ---- */
+function versionLine(){ return VERSION ? `<p class="version">Tally Room, version ${esc(VERSION)}</p>` : ""; }
 function homeTabs(on){ return `<div class="seg" role="group" aria-label="Screen"><button data-act="homeTab" data-v="sets" class="${on==="sets"?"on":""}">Question sets</button><button data-act="homeTab" data-v="users" class="${on==="users"?"on":""}">Users</button></div>`; }
 function usersHTML(){ const list=S.users ? C.userList(S.users) : null, me=S.me.id;
   const row=u=>{ const n=S.sets ? C.ownedIds(S.sets, u.uid).length : null, self=u.uid===me, eu=esc(u.uid);
