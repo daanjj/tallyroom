@@ -615,7 +615,7 @@ function notPresenterHTML(){ return `<div class="p-wrap"><div class="topbar">${b
 function signInHTML(){
   if(S.auth.uid && !S.auth.anon) return notPresenterHTML();
   const busy=!!S.ui.siBusy;
-  return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card p-q"><div class="eyebrow">Presenter</div><h2 style="font-size:22px;margin-top:6px">Sign in</h2>
+  return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card p-q"><div class="eyebrow">Make or present question sets</div><h2 style="font-size:22px;margin-top:6px">Sign in</h2>
     <div class="field" style="margin-top:14px"><label for="siEmail">Email</label><input type="email" id="siEmail" autocomplete="username" autocapitalize="none" spellcheck="false" value="${esc(S.ui.siEmail||"")}"></div>
     <div class="field" style="margin-top:12px"><label for="siPass">Password</label><input type="password" id="siPass" autocomplete="current-password">
       ${S.ui.siErr?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(S.ui.siErr)}</small>`:""}${S.ui.siNote?`<small class="meta" role="status">${esc(S.ui.siNote)}</small>`:""}</div>
@@ -713,7 +713,7 @@ const PHASE_LABEL={lobby:"In lobby", running:"Running", finished:"Finished"};
 const cap = s => String(s||"").charAt(0).toUpperCase()+String(s||"").slice(1);
 function homeHTML(){
   if(!S.me.isHost && S.auth.uid && !S.auth.anon) return notPresenterHTML();
-  if(!S.me.isHost) return notice("Scan the QR code or open the link you received", "Each question set has its own link. Ask the presenter for the QR code."+(S.be&&S.be.demo?"":`<br><br><a href="${esc(urlFor({host:true}))}" style="font-size:13px">Presenter sign-in</a>`));
+  if(!S.me.isHost) return notice("Scan the QR code or open the link you received", "Each question set has its own link. Ask the presenter for the QR code."+(S.be&&S.be.demo?"":`<br><br><a href="${esc(urlFor({host:true}))}" style="font-size:13px">Sign in to make or present question sets</a>`));
   const top=`<div class="topbar">${brand("Tally Room")}<div class="controls">${connPill()}${S.be&&S.be.demo?`<span class="pill warn">Demo data, this browser only</span>`:""}${signOutBtn()}</div></div>`;
   if(S.auth.role==="admin" && S.ui.homeTab==="users") return `<div class="wrap">${top}${usersHTML()}</div>`;
   if(S.setsErr) return `<div class="wrap">${top}<div class="banner">${RULES_MSG}</div></div>`;
@@ -724,7 +724,7 @@ function homeHTML(){
   const section=(title, note, rows, empty)=>`<h2 class="sets-h">${title} <span class="meta">${rows.length}</span></h2>${note?`<p class="meta" style="margin:4px 0 0">${note}</p>`:""}
     <div class="sets">${rows.map(x=>setRowHTML(x.id,x.meta,now,x.right)).join("")||`<div class="empty">${empty}</div>`}</div>`;
   return `<div class="wrap">${top}<div class="card" style="padding:26px">
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">${admin?"Admin":"Presenter"}</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Question sets</h1></div>${admin?homeTabs("sets"):""}<button class="btn primary" data-act="setNew">New question set</button></div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">${admin?"Admin":"User"}</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Question sets</h1></div>${admin?homeTabs("sets"):""}<button class="btn primary" data-act="setNew">New question set</button></div>
     <p class="meta" style="margin:8px 0 6px">Each set has its own link, QR code, header, colour and expiry date. A new set is private: only you and the admins see it in this overview.</p>
     ${homeNoteHTML()}
     ${section("My sets", "", mine, "No question sets yet. Create the first one.")}
