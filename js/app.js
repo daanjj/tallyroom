@@ -649,6 +649,7 @@ function homeHTML(){
   return `<div class="wrap">${top}<div class="card" style="padding:26px">
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">Presenter</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Question sets</h1></div><button class="btn primary" data-act="setNew">New question set</button></div>
     <p class="meta" style="margin:8px 0 6px">${list.length} ${list.length===1?"set":"sets"}. Each set has its own link, QR code, header, colour and expiry date.</p>
+    ${S.ui.homeNote?`<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}</div>`:""}
     <div class="sets">${list.map(x=>setRowHTML(x.id,x.meta,now)).join("")||`<div class="empty">No question sets yet. Create the first one.</div>`}</div></div></div>`;
 }
 function setRowHTML(id, meta, now){
@@ -683,7 +684,8 @@ async function loadStats(){ if(S.route!=="home" || !S.sets || statsBusy || docum
 /* read fresh, so a set made on another device in the meantime is not overwritten */
 function rnd(){ try{ const a=new Uint32Array(1); crypto.getRandomValues(a); return a[0]/4294967296; }catch(e){ return Math.random(); } }
 const LINK_NOTE="Anyone who knows or guesses this link can join and see the results shown to the room.";
-async function freshSetId(name){ const sets=await S.be.getSets(); return C.newSetId(name, id=>!!sets[id], rnd); }
+/* a user cannot read the list of all sets, so a new link is checked one at a time (backlog H4) */
+async function freshSetId(name){ for(let i=0;i<20;i++){ const id=C.newSetId(name, null, rnd); if(!(await S.be.setExists(id))) return id; } throw new Error("No free link found"); }
 
 /* ============ dialogs: set settings, QR code, delete ============ */
 function toLocalInput(ts){ const d=new Date(ts), p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
@@ -732,8 +734,7 @@ async function saveSetDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id)
       if(msg && !confirm(msg+"\n\nCreate the set without them?")) return;
       const probs=C.questionProblems(f.kept); if(probs.length){ alert("This file cannot be used as it is.\n\n"+probs.join("\n")); return; }
       cfg.questions=f.kept; cfg.tlYellow=imp.tlYellow; cfg.tlRed=imp.tlRed; if(imp.set && imp.set.mode) cfg.mode=imp.set.mode; }
-    await S.be.writePoll(id, {config:cfg, session:{...DEFAULT_SESSION}});
-    await S.be.setMeta(id, C.newMeta(fields, now));
+    await S.be.createSet(id, C.newMeta({...fields, owner:S.me.id}, now), {config:cfg, session:{...DEFAULT_SESSION}}); // private, and owned by who makes it
     location.href=urlFor({set:id, edit:true});
   }catch(e){ alert("Saving failed: "+(e&&e.message||e)); } }
 function readSetFile(file){ const r=new FileReader(); r.onerror=()=>alert("Could not read that file.");
@@ -783,8 +784,8 @@ async function saveLinkDlg(){ const d=S.ui.dlg, el=document.getElementById("dlgL
     if(S.route==="set") location.href=urlFor({set:nid}); else closeDlg();
   }catch(e){ alert("Changing the link failed: "+(e&&e.message||e)); } }
 async function duplicateSet(id){ const meta=metaOf(id); if(!meta) return;
-  try{ const poll=await S.be.readPoll(id), d=C.duplicateSet(meta, poll.config, Date.now()), nid=await freshSetId(d.meta.name);
-    await S.be.writePoll(nid, {config:d.config, session:{...DEFAULT_SESSION}}); await S.be.setMeta(nid, d.meta); loadStats();
+  try{ const poll=await S.be.readPoll(id), d=C.duplicateSet(meta, poll.config, Date.now(), S.me.id), nid=await freshSetId(d.meta.name);
+    await S.be.createSet(nid, d.meta, {config:d.config, session:{...DEFAULT_SESSION}}); loadStats();
   }catch(e){ alert("Duplicating failed: "+(e&&e.message||e)); } }
 function extendSet(id){ const now=Date.now(); return S.be.patchMeta(id, {expiresAt:C.extendedExpiry(now), updatedAt:now}).catch(e=>alert("Extending failed: "+(e&&e.message||e))); }
 /* ============ actions ============ */
@@ -987,7 +988,7 @@ function withTimeout(p, ms){ return Promise.race([p, new Promise((_,rej)=>setTim
 /* one-off: the poll from before sets existed (MIGRATE_POLL_ID in config.js) gets its record in sets/ */
 async function migrate(be){ const id=(typeof MIGRATE_POLL_ID!=="undefined" && MIGRATE_POLL_ID) || ""; if(!id || !C.SET_ID_RE.test(id)) return;
   try{ const sets=await withTimeout(be.getSets(), 6000); if(Object.keys(sets).length) return;
-    const poll=await withTimeout(be.readPoll(id), 6000); if(poll && poll.config) await be.setMeta(id, C.migrationMeta(id, poll.config, Date.now()));
+    const poll=await withTimeout(be.readPoll(id), 6000); if(poll && poll.config) await be.setMeta(id, C.migrationMeta(id, poll.config, Date.now(), be.id));
   }catch(e){ console.warn("migration skipped", e); } }
 async function boot(){
   S.ui.qs=getQS(); applyQS();
@@ -1001,13 +1002,21 @@ async function boot(){
   /* wait for the first sign-in state before deciding between presenter and participant */
   await new Promise(done=>be.onAuth(a=>{ applyAuth(a); done(); }));
   if(SIGNIN && !be.demo){ if(be.isHost){ location.replace(urlFor({set:SET_ID})); return; } S.route="signin"; S.booted=true; render(); return; }
-  if(be.isHost && !be.demo) await migrate(be);
+  if(be.isAdmin && !be.demo) await migrate(be); // only an admin can read the list of all sets
   S.booted=true;
   if(S.route==="home") bootHome(be); else if(S.setId) bootSet(be); else render();
 }
+/* sets from before sets had owners go to the first admin who opens the overview, private and not shared (backlog H3).
+   Once per page load; a second load finds nothing to take over */
+let tookOver=false;
+function takeOver(be){ if(tookOver || !be.isAdmin || !be.id || !S.sets) return; tookOver=true;
+  const ids=C.ownerlessIds(S.sets); if(!ids.length) return;
+  Promise.all(ids.map(id=>be.patchMeta(id, {owner:be.id})))
+    .then(()=>{ S.ui.homeNote=`${ids.length} question ${ids.length===1?"set":"sets"} from before sets had owners ${ids.length===1?"is":"are"} now yours. Assign ${ids.length===1?"it":"them"} to another user where needed.`; renderBg(); })
+    .catch(e=>{ console.warn("taking over sets failed", e); S.ui.homeNote="Some question sets have no owner yet, and giving them one failed. Reload the page to try again."; renderBg(); }); }
 function bootHome(be){
   render(); if(!be.isHost) return; // a participant without a set link only gets the "scan the QR code" page
-  be.onSets((sets,err)=>{ S.setsErr=err||null; if(!err) S.sets=sets||{}; renderBg(); loadStats(); });
+  be.onSets((sets,err)=>{ S.setsErr=err||null; if(!err) S.sets=sets||{}; takeOver(be); renderBg(); loadStats(); });
   setInterval(loadStats, 30000);
   setInterval(renderBg, 60000); // expiry labels move with the clock
   document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") loadStats(); });

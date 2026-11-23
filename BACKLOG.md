@@ -983,7 +983,7 @@ Optional, and the largest item of this epic. Worth building when sets are named 
 
 Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps working without sign-in, as one made-up admin.
 
-> **Status: H1 and H2 built on 23 Nov 2026**, with tests and tried in demo mode. **Not live, and not to be published on its own:** the page now takes the role from `users/{uid}`, which the published rules do not let anyone read, so against the real database nobody would be a user until H3 and H4 are done. H3 to H9 are not built.
+> **Status: H1 to H4 built on 23 Nov 2026**, with tests and tried in demo mode. **Not live:** the rules are not published and nothing has run against the real database. **Not to be published before H5:** under the new rules a normal user cannot read the list of all sets, and the overview still asks for exactly that, so only an admin would get an overview. H5 to H9 are not built.
 
 **Where it stands today** (before this epic)
 
@@ -1066,6 +1066,14 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 
 ### H3. Migration of presenters and existing sets — S
 
+> **Status: built on 23 Nov 2026**, with tests and tried in demo mode (a set without owner goes to the demo admin, with the note; a second load changes nothing). Not run against the real database.
+>
+> Differences from the specification below:
+> - **New sets and duplicates get their owner from this item on** (the specification had that under H5): the rules of H4 refuse a set without owner from a normal user.
+> - **The one-off migration of `MIGRATE_POLL_ID`** runs for an admin only and gives the migrated set that admin as owner.
+> - The note names **Assign**, which comes with H7.
+> - `presenters` is removed from the rules in H4; removing it from the data is a step in the setup guide.
+
 **Story.** As the owner of the installation I want today's presenters and sets carried over, so that nothing is lost or left without an owner at the switch.
 
 **Specification**
@@ -1084,6 +1092,17 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 **Depends on:** H1, H2.
 
 ### H4. Database rules for owners, sharing and roles — L
+
+> **Status: built on 23 Nov 2026.** `database.rules.json` and the block in `tallyroom-setup.md` are rewritten; create, delete and change link are one write each. **Not tried on the real database:** the rules are not published, and `tests/rules-checklist.md` is still empty.
+>
+> Differences from the specification below:
+> - **The rules are tested after all**, in `tests/rules.test.js`: a small stand-in for the way Firebase evaluates rules (cascading read and write, validation, updates of several paths, `newData`, queries) runs every row of the rights table for seven kinds of visitor. It is not Firebase, so the checklist stays, but as a short list of spot checks on the real database instead of the full table.
+> - **An account reads its own `users` record**, also when it is no user (yet), so the page can follow a record that is added later.
+> - **Sharing is only possible with a user**, the owner cannot be on the shared list, and an owner can only be an account with a `users` record: the rules check all three.
+> - **A shared user removes itself** from `shared` and from `userSets` (Leave, H6); nobody else's entry.
+> - **A free link is checked one set at a time** (`setExists`), because a user cannot read the list of all sets. Change link no longer looks for a leftover poll under the new link; such a poll cannot be read by a user and is overwritten.
+> - **Change link onto a set the same user owns** is allowed by the rules; the page checks that the link is free.
+> - README and the setup guide (first admin, upgrade steps, troubleshooting) are updated with this item instead of waiting for H9.
 
 **Story.** As a user I want the database itself to keep my private sets mine, so that another user cannot read my answers or change my questions by going around the page.
 
@@ -1107,7 +1126,7 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 - `visibility` is `private` or `public`; `shared/{uid}` is `true`; a set cannot be created with another uid as owner.
 - Writes that touch several paths are one update, and the rules look at the data as it will be (`newData`) where the old data cannot answer: creating a set together with its poll, **Change link**, and **Delete**. Today's delete removes the set and its poll in two writes; under these rules the second could be refused and leave a poll without a set.
 - Everything of G3 to G5 for participants stays: the shape of a vote record, expiry, own record only.
-- No automated test runs against the rules (that needs the Firebase emulator, and this repository installs nothing). Instead `tests/rules-checklist.md` lists every case of the tables here and in H1, to be tried in the Rules Playground and noted at each change of the rules.
+- No automated test runs against real rules (that needs the Firebase emulator, and this repository installs nothing). `tests/rules-checklist.md` lists the cases to be tried in the Rules Playground and noted at each change of the rules.
 
 **AC**
 

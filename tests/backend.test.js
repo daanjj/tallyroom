@@ -4,7 +4,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const tick = () => new Promise((r) => setTimeout(r, 5));
+const tick = () => new Promise((r) => setTimeout(r, 25)); // long enough for a chain of timers on a busy machine
 function fakeStorage(init) { const m = new Map(Object.entries(init || {}));
   return { get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), has: (k) => m.has(k) }; }
 /* data = the database; data.users = who may sign in, with their role; user = who is signed in when the page loads */
@@ -19,7 +19,7 @@ function fakeFirebase({ data = {}, user = null, anonFails = false, noAppCheck = 
   /* the listener on users/{uid} is the sign-in itself, so it has its own log; log.on holds the listeners the page asked for */
   const db = { ref: (path) => ({ on: (ev, cb) => { if (path && path[0] !== ".") { (path.startsWith("users/") ? (log.user = log.user || []) : log.on).push(path); live.push([path, cb]); setTimeout(() => cb({ val: () => get(path) ?? null }), 0); } return cb; },
     off: (ev, cb) => { log.off.push(path); const i = live.findIndex((l) => l[1] === cb); if (i >= 0) live.splice(i, 1); }, once: async () => ({ val: () => get(path) ?? null }),
-    set: async (v) => (log.set = log.set || []).push([path, v]), child: (p) => db.ref(path + "/" + p) }) };
+    set: async (v) => (log.set = log.set || []).push([path, v]), update: async (v) => (log.update = log.update || []).push([path || "", v]), child: (p) => db.ref(path + "/" + p) }) };
   const appCheck = () => ({ activate: (p, refresh) => log.appCheck.push([p instanceof appCheck.ReCaptchaEnterpriseProvider ? "enterprise:" + p.siteKey : p, refresh, global.FIREBASE_APPCHECK_DEBUG_TOKEN === true]), getToken: async () => ({ token: "ac-token" }) });
   appCheck.ReCaptchaEnterpriseProvider = class { constructor(k) { this.siteKey = k; } };
   log.appCheck = [];
@@ -156,6 +156,26 @@ test("every config written to Firebase carries the ids of its questions, for the
   await be.writePoll("a", { config: cfg, session: {} }); await be.poll("a").setConfig(cfg);
   assert.deepEqual(log.set.map(([p, v]) => [p, (v.config || v).qids]), [["polls/a", { qabc123: true }], ["polls/a/config", { qabc123: true }]]);
   assert.equal(cfg.qids, undefined, "the caller's object is left alone");
+});
+test("creating, deleting and moving a set are one write each, and take the share index along", async () => {
+  const data = JSON.parse(JSON.stringify(DATA)); data.sets.a = { name: "A", owner: "u_ann", shared: { u_adm: true, u_x: true } };
+  const { be, log } = load({ data, user: { uid: "u_ann", isAnonymous: false } }, null, "", false); await tick();
+  assert.equal(await be.setExists("a"), true); assert.equal(await be.setExists("nope"), false);
+  await be.createSet("b", { name: "B", owner: "u_ann" }, { config: { mode: "live", questions: [{ id: "q1", text: "x" }] }, session: { phase: "lobby" } });
+  assert.deepEqual(log.update[0], ["", { "sets/b": { name: "B", owner: "u_ann" }, "polls/b": { config: { mode: "live", questions: [{ id: "q1", text: "x" }], qids: { q1: true } }, session: { phase: "lobby" } } }]);
+  await be.removeSet("a");
+  assert.deepEqual(log.update[1], ["", { "sets/a": null, "polls/a": null, "userSets/u_adm/a": null, "userSets/u_x/a": null }]);
+  await be.moveSet("a", "c");
+  assert.deepEqual(log.update[2], ["", { "sets/c": data.sets.a, "polls/c": data.polls.a, "sets/a": null, "polls/a": null, "userSets/u_adm/c": true, "userSets/u_adm/a": null, "userSets/u_x/c": true, "userSets/u_x/a": null }]);
+  await assert.rejects(be.moveSet("nope", "d"), /does not exist/); data.sets.taken = { name: "T" }; await assert.rejects(be.moveSet("a", "taken"), /already in use/);
+  assert.equal(log.update.length, 3);
+});
+test("demo mode: a set is created with its poll, and not over an existing one", async () => {
+  global.localStorage = fakeStorage(); global.addEventListener = () => {};
+  delete require.cache[require.resolve("../js/backend.js")]; const be = require("../js/backend.js").make({ firebaseConfig: {}, params: new URLSearchParams("demo=1") });
+  assert.equal(await be.setExists("new1"), false); await be.createSet("new1", { name: "N", owner: be.id }, { config: { questions: [] }, session: {} });
+  assert.equal(await be.setExists("new1"), true); assert.deepEqual(await be.readPoll("new1"), { config: { questions: [] }, session: {} });
+  await assert.rejects(be.createSet("new1", { name: "Again" }, {}), /already in use/); assert.equal((await be.getSets()).new1.name, "N");
 });
 test("a participant listens to its own record, what is shown and the names, never to all votes; a presenter to all votes", async () => {
   const part = load({ data: DATA }, null, "set=a", true); await tick();

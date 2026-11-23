@@ -5,10 +5,14 @@
               id and the role follow the sign-in and can change while the page is open (backlog G1, G2, H2)
               isHost is the same as isUser until rights are decided per set (backlog H5)
      users    onUsers(f(map|null, err)): everyone who may use this Tally Room, for users only
-     sets     onSets(f(map|null, err)), getSets(), setMeta(id, meta), patchMeta(id, patch), removeSet(id), moveSet(id, newId)
+     sets     onSets(f(map|null, err)), getSets(), setExists(id), createSet(id, meta, {config, session}), setMeta(id, meta),
+              patchMeta(id, patch), removeSet(id), moveSet(id, newId)
+              creating, removing and moving a set are one write each: the rules decide on a poll by the owner of its set,
+              so a set and its poll never exist without each other (backlog H4)
      polls    readPoll(id), writePoll(id, {config, session}), poll(id) -> live access to one set
    Data layout: users/{uid} = who may sign in and in which role, sets/{id} = attributes of a set, polls/{id}/config|session|votes = its questions, state and answers,
-   polls/{id}/actions = follow-up actions the presenter records for concerns and objections. */
+   polls/{id}/actions = follow-up actions the presenter records for concerns and objections,
+   userSets/{uid}/{id} = the sets that are shared with a user, kept next to sets/{id}/shared so they can be listed. */
 (function(root){
 "use strict";
 const C=root.TRCore;
@@ -84,10 +88,12 @@ function makeDemoBackend(isHost, role){
     onUsers:f=>{ if(!me){ f({}); return; } L.users.push(f); f(copy(db.users)||{}); },
     onSets:f=>{ L.sets.push(f); f(copy(db.sets)||{}); },
     getSets:async()=>copy(db.sets)||{},
+    setExists:async id=>!!db.sets[id],
+    createSet:async(id,m,p)=>{ if(db.sets[id]) throw new Error("That link is already in use."); db.sets[id]=copy(m); db.polls[id]=copy(p)||{}; save(); emitSets(); emit(id); },
     setMeta:async(id,m)=>{ db.sets[id]=copy(m); save(); emitSets(); emit(id,"meta"); },
     patchMeta:async(id,p)=>{ db.sets[id]={...(db.sets[id]||{}),...copy(p)}; save(); emitSets(); emit(id,"meta"); },
     removeSet:async id=>{ delete db.sets[id]; delete db.polls[id]; save(); emitSets(); emit(id); },
-    moveSet:async(id,nid)=>{ if(!db.sets[id]) throw new Error("This set does not exist any more."); if(db.sets[nid] || db.polls[nid]) throw new Error("That link is already in use.");
+    moveSet:async(id,nid)=>{ if(!db.sets[id]) throw new Error("This set does not exist any more."); if(db.sets[nid]) throw new Error("That link is already in use.");
       db.sets[nid]=db.sets[id]; if(db.polls[id]) db.polls[nid]=db.polls[id]; delete db.sets[id]; delete db.polls[id]; save(); emitSets(); emit(id); emit(nid); },
     readPoll:async id=>copy(db.polls[id])||{},
     writePoll:async(id,p)=>{ db.polls[id]=copy(p)||{}; save(); emit(id); },
@@ -198,14 +204,21 @@ function makeFirebaseBackend(config, opts){
     onUsers:f=>listen("users", v=>f(v||{}), e=>f(null,e), true, ()=>f({})),
     onSets:f=>listen("sets", v=>f(v||{}), e=>f(null,e), true),
     getSets:async()=>(await db.ref("sets").once("value")).val()||{},
+    /* one set record can be read by every signed-in device; the list as a whole only by an admin */
+    setExists:async id=>(await db.ref("sets/"+id).once("value")).val()!=null,
+    createSet:(id,m,p)=>db.ref().update({["sets/"+id]:m, ["polls/"+id]:(p && p.config) ? {...p, config:C.withQids(p.config)} : (p||null)}),
     setMeta:(id,m)=>db.ref("sets/"+id).set(m),
     patchMeta:(id,p)=>db.ref("sets/"+id).update(p),
-    removeSet:id=>Promise.all([db.ref("sets/"+id).remove(), db.ref("polls/"+id).remove()]),
+    /* the set, its poll and its entries in the share index go in one write */
+    removeSet:async id=>{ const meta=(await db.ref("sets/"+id).once("value")).val(), up={["sets/"+id]:null, ["polls/"+id]:null};
+      C.sharedWith(meta).forEach(u=>{ up["userSets/"+u+"/"+id]=null; }); return db.ref().update(up); },
     /* the set under another id: everything is copied and the old id removed in one write, so it is never half moved */
     moveSet:async(id,nid)=>{ const val=async p=>(await db.ref(p).once("value")).val();
-      const [meta,poll,m2,p2]=await Promise.all([val("sets/"+id), val("polls/"+id), val("sets/"+nid), val("polls/"+nid)]);
-      if(!meta) throw new Error("This set does not exist any more."); if(m2 || p2) throw new Error("That link is already in use.");
-      try{ await db.ref().update({["sets/"+nid]:meta, ["polls/"+nid]:poll, ["sets/"+id]:null, ["polls/"+id]:null}); }
+      const [meta,poll,m2]=await Promise.all([val("sets/"+id), val("polls/"+id), val("sets/"+nid)]);
+      if(!meta) throw new Error("This set does not exist any more."); if(m2) throw new Error("That link is already in use.");
+      const up={["sets/"+nid]:meta, ["polls/"+nid]:poll, ["sets/"+id]:null, ["polls/"+id]:null};
+      C.sharedWith(meta).forEach(u=>{ up["userSets/"+u+"/"+nid]=true; up["userSets/"+u+"/"+id]=null; });
+      try{ await db.ref().update(up); }
       catch(e){ if(denied(e)) throw new Error("This set holds answers in an old format. Clear the answers or export them first"); throw e; } },
     readPoll:async id=>{ try{ return await rest("polls/"+id); }catch(e){ return (await db.ref("polls/"+id).once("value")).val()||{}; } },
     /* the config carries the ids of its questions (qids), which the database rules check every answer against */

@@ -105,6 +105,13 @@ test("questions file: it carries no owner, visibility or sharing", () => {
   assert.deepEqual(Object.keys(set).sort(), ["accent", "category", "header", "name", "named"]);
 });
 
+test("sets from before owners: found for the first admin, and the old poll is migrated with an owner", () => {
+  const sets = { b: { name: "B" }, a: { name: "A", owner: "" }, mine: { name: "M", owner: "uidAnna" }, bad: { name: "X", owner: "a/b" }, junk: null };
+  assert.deepEqual(C.ownerlessIds(sets), ["a", "b", "bad"]);
+  assert.deepEqual(C.ownerlessIds({ mine: sets.mine }), []); assert.deepEqual(C.ownerlessIds(null), []);
+  assert.equal(C.migrationMeta("workshop-4", { title: "T" }, NOW, "uidAdmin").owner, "uidAdmin");
+  assert.equal(C.migrationMeta("workshop-4", { title: "T" }, NOW).owner, null);
+});
 test("user record: a valid role makes a user; the name falls back on the email address", () => {
   assert.deepEqual(C.normUser({ email: " anna@example.com ", name: " Anna ", role: "admin", createdAt: NOW }), { email: "anna@example.com", name: "Anna", role: "admin", createdAt: NOW });
   assert.deepEqual(C.normUser({ email: "piet@example.com", role: "user" }), { email: "piet@example.com", name: "piet", role: "user", createdAt: 0 });

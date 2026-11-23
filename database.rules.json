@@ -1,21 +1,68 @@
 {
   "rules": {
-    "presenters": {
+    "users": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user')",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
       "$uid": {
-        ".read": "auth != null && auth.uid === $uid"
+        ".read": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['role'])",
+        "role": {
+          ".validate": "newData.val() === 'admin' || newData.val() === 'user'"
+        },
+        "email": {
+          ".validate": "newData.isString() && newData.val().length <= 200"
+        },
+        "name": {
+          ".validate": "newData.isString() && newData.val().length <= 60"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
       }
     },
     "sets": {
-      ".read": "auth != null && root.child('presenters').child(auth.uid).val() === true",
-      ".write": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && (root.child('users').child(auth.uid).child('role').val() === 'admin' || (query.orderByChild === 'owner' && query.equalTo === auth.uid) || (query.orderByChild === 'visibility' && query.equalTo === 'public'))",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".indexOn": [
+        "owner",
+        "visibility"
+      ],
       "$set": {
-        ".read": "auth != null"
+        ".read": "auth != null",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && ((!data.exists() && newData.child('owner').val() === auth.uid) || (data.child('owner').val() === auth.uid && (!newData.exists() || newData.child('owner').val() === auth.uid)))",
+        "owner": {
+          ".validate": "newData.isString() && root.child('users').child(newData.val()).child('role').exists()"
+        },
+        "visibility": {
+          ".validate": "newData.val() === 'private' || newData.val() === 'public'"
+        },
+        "shared": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && !newData.exists()",
+            ".validate": "newData.val() === true && root.child('users').child($uid).child('role').exists() && newData.parent().parent().child('owner').val() !== $uid"
+          }
+        },
+        "$field": {
+          ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && root.child('sets').child($set).child('shared').child(auth.uid).val() === true"
+        }
+      }
+    },
+    "userSets": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+        "$set": {
+          ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || (auth.uid === $uid && !newData.exists()) || root.child('sets').child($set).child('owner').val() === auth.uid || newData.parent().parent().parent().child('sets').child($set).child('owner').val() === auth.uid)",
+          ".validate": "newData.val() === true"
+        }
       }
     },
     "polls": {
       "$set": {
-        ".read": "auth != null && root.child('presenters').child(auth.uid).val() === true",
-        ".write": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('sets').child($set).child('owner').val() === auth.uid || root.child('sets').child($set).child('shared').child(auth.uid).val() === true)",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('sets').child($set).child('owner').val() === auth.uid || root.child('sets').child($set).child('shared').child(auth.uid).val() === true || (!root.child('sets').child($set).exists() && newData.parent().parent().child('sets').child($set).child('owner').val() === auth.uid))",
         "config": {
           ".read": "auth != null"
         },

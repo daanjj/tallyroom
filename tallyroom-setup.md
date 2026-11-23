@@ -11,22 +11,69 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
 ```json
 {
   "rules": {
-    "presenters": {
+    "users": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user')",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
       "$uid": {
-        ".read": "auth != null && auth.uid === $uid"
+        ".read": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['role'])",
+        "role": {
+          ".validate": "newData.val() === 'admin' || newData.val() === 'user'"
+        },
+        "email": {
+          ".validate": "newData.isString() && newData.val().length <= 200"
+        },
+        "name": {
+          ".validate": "newData.isString() && newData.val().length <= 60"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
       }
     },
     "sets": {
-      ".read": "auth != null && root.child('presenters').child(auth.uid).val() === true",
-      ".write": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && (root.child('users').child(auth.uid).child('role').val() === 'admin' || (query.orderByChild === 'owner' && query.equalTo === auth.uid) || (query.orderByChild === 'visibility' && query.equalTo === 'public'))",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".indexOn": [
+        "owner",
+        "visibility"
+      ],
       "$set": {
-        ".read": "auth != null"
+        ".read": "auth != null",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && ((!data.exists() && newData.child('owner').val() === auth.uid) || (data.child('owner').val() === auth.uid && (!newData.exists() || newData.child('owner').val() === auth.uid)))",
+        "owner": {
+          ".validate": "newData.isString() && root.child('users').child(newData.val()).child('role').exists()"
+        },
+        "visibility": {
+          ".validate": "newData.val() === 'private' || newData.val() === 'public'"
+        },
+        "shared": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && !newData.exists()",
+            ".validate": "newData.val() === true && root.child('users').child($uid).child('role').exists() && newData.parent().parent().child('owner').val() !== $uid"
+          }
+        },
+        "$field": {
+          ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && root.child('sets').child($set).child('shared').child(auth.uid).val() === true"
+        }
+      }
+    },
+    "userSets": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+        "$set": {
+          ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || (auth.uid === $uid && !newData.exists()) || root.child('sets').child($set).child('owner').val() === auth.uid || newData.parent().parent().parent().child('sets').child($set).child('owner').val() === auth.uid)",
+          ".validate": "newData.val() === true"
+        }
       }
     },
     "polls": {
       "$set": {
-        ".read": "auth != null && root.child('presenters').child(auth.uid).val() === true",
-        ".write": "auth != null && root.child('presenters').child(auth.uid).val() === true",
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('sets').child($set).child('owner').val() === auth.uid || root.child('sets').child($set).child('shared').child(auth.uid).val() === true)",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user') && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('sets').child($set).child('owner').val() === auth.uid || root.child('sets').child($set).child('shared').child(auth.uid).val() === true || (!root.child('sets').child($set).exists() && newData.parent().parent().child('sets').child($set).child('owner').val() === auth.uid))",
         "config": {
           ".read": "auth != null"
         },
@@ -105,7 +152,14 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
 }
 ```
 
-Click **Publish**. `sets` is the list of question sets with their header, colour and expiry date; `polls` holds the questions and answers of each set; `presenters` is the list of accounts that may present. In short: a presenter may read and write everything; a participant may read the one set of the link and write only its own answers, and only while the set exists and has not expired. Nobody can read or write anything without being signed in. Who has the Firebase CLI can publish with `firebase deploy --only database` instead.
+Click **Publish**. `users` is the list of people who may sign in, with their role; `sets` is the list of question sets with their owner, header, colour and expiry date; `polls` holds the questions and answers of each set; `userSets` lists per user the sets that others shared with them. In short: an admin may read and write everything; a user may read and write their own sets and the sets shared with them, and read the questions of public sets; a participant may read the one set of the link and write only its own answers, and only while the set exists and has not expired. Nobody can read or write anything without being signed in. Who has the Firebase CLI can publish with `firebase deploy --only database` instead.
+
+**Upgrading to the version with users and owners (Epic H):** do this between sessions, in this order.
+
+1. In **Realtime Database → Data**, add a key `users`, and under it one record per account that was under `presenters`: the UID as key, with the fields `role` (`admin` for yourself, `user` for the others), `email` and `name`. The old page ignores these records, so this can be done days ahead.
+2. Publish the rules of step 1.3 and put the new files online together. The old page cannot work under the new rules and the new page cannot work under the old ones, so there is no order in which one can wait for the other.
+3. Sign in as the admin and open the overview. Every existing set becomes yours, private and not shared; the page says how many. Until you do this, those sets are visible to admins only.
+4. Remove the key `presenters` from the data; nothing reads it any more.
 
 **Upgrading to the version where participants cannot read each other's answers (21 Nov 2026):** publish the rules of step 1.3 and put the new files online together, between sessions. Old page with new rules, or new page with old rules: phones still vote, but show no results after a reveal. Phones that still have the old page open need a reload.
 
@@ -123,8 +177,8 @@ Click **Publish**. `sets` is the list of question sets with their header, colour
 Participants never see a sign-in: their phone signs in anonymously, which is how the database tells devices apart. Presenters sign in with email and password.
 
 1. In the left menu: **Authentication → Get started → Sign-in method**. Switch on **Email/Password** (not the email link option) and **Anonymous**.
-2. **Authentication → Users → Add user**: an email address and a password for each presenter. The page has no sign-up. Copy the **User UID** of the new user.
-3. **Realtime Database → Data**: add a key `presenters`, and under it the UID as key with the value `true` (type boolean), so the data reads `presenters / {UID}: true`. Only the console can change this list; the page cannot.
+2. **Authentication → Users → Add user**: an email address and a password for each person who makes or presents question sets. The page has no sign-up. Copy the **User UID** of the new user.
+3. **Realtime Database → Data**: add a key `users`, under it the UID as key, and under that the fields `role` (`admin` or `user`, as text), `email` and `name`, so the data reads `users / {UID} / role: "admin"`. Make yourself `admin`: an admin sees and manages every set, a user only their own and the ones shared with them. An account without such a record can sign in but has no access.
 4. **Authentication → Settings → Authorised domains**: add the domain of your page (`<yourname>.github.io` or your Netlify domain). `localhost` is there already.
 
 Anonymous users pile up under Users, one per phone per browser. That is harmless; a project upgraded to Identity Platform can delete them automatically after 30 days.
@@ -206,7 +260,7 @@ Firebase Spark plan: free, no credit card, 1 GB storage and 100 simultaneous con
 - The browser console shows "violates the following Content Security Policy directive": the page tried to load or connect to something the policy in `index.html` does not list. A database on another host than `*.firebasedatabase.app` or `*.firebaseio.com` has to be added to `connect-src` there.
 - "Could not connect. Check your connection and reload" on a phone: the **Anonymous** provider is off (step 1b), the phone blocks storage (some private modes), or there is no network.
 - Votes are refused ("Your answer could not be saved"): the rules are published but the Anonymous provider is off, or the page online is still the old version.
-- "This account is not a presenter": the UID of the account is not under `presenters` with the value `true` (step 1b.3), or the rules are not published yet.
+- "This account has no access": the UID of the account has no record under `users` with a `role` of `admin` or `user` (step 1b.3), or the rules are not published yet.
 - Signing in fails on the live page but works on `localhost`: the domain is missing under Authentication → Settings → Authorised domains.
 - Change link reports "This set holds answers in an old format": the set holds answers from before the rules, with a field or a text the rules refuse. Export the answers, clear them, then change the link.
 - "The database does not allow reading question sets yet": the rules of step 1.3 are not published.

@@ -20,6 +20,8 @@ There is no build step: the browser loads these files as they are.
 | `tests/hardening.test.js` | Tests for the script sources, the security policy and the escaping in exports |
 | `tests/fixtures/hostile-set.json` | A question set whose every text tries to inject HTML (see below) |
 | `tests/backend.test.js` | Tests for the sign-in logic of `js/backend.js`, against a stand-in for Firebase |
+| `tests/rules.test.js` | Tests for `database.rules.json`, against a stand-in for the way Firebase evaluates rules |
+| `tests/rules-checklist.md` | What to try on the real database after publishing the rules |
 
 ## Trying it without touching the database
 
@@ -63,18 +65,19 @@ In the exports, a CSV cell that starts with `=`, `+`, `-` or `@` gets an apostro
 
 ## Who may do what
 
-- **Presenters** sign in at `?host` with an email and password account made in the Firebase console, and are listed by hand in `presenters/{uid}: true`. All presenters see and manage all sets.
+- **Users** sign in at `?host` with an email and password account made in the Firebase console, and have a record `users/{uid}` with the role `admin` or `user`, made by hand for now. An admin manages every set. A user manages their own sets and the ones shared with them, and can read the questions of public sets. (Backlog Epic H; the screens still treat every user as presenter of every set until H5 is built, the rules do not.)
 - **Participants** sign in anonymously, without noticing. The uid of that sign-in is the device id and the key of the vote record.
-- `database.rules.json` enforces it: a presenter reads and writes everything; a participant reads `sets/{id}`, `config`, `session`, `shown` and `names` of the set whose link it has, and of `votes` only its own record. It writes only `votes/{own uid}` and `names/{own uid}`, in a set that exists and has not expired. Answers are checked for shape: numbers from 0 to 11, only for the questions of the set (`config.qids`).
+- `database.rules.json` enforces it: who manages a set (its owner, the users it is shared with, admins) reads and writes its questions, answers and actions, and only the owner or an admin deletes it, changes its link, its visibility or its sharing; a participant reads `sets/{id}`, `config`, `session`, `shown` and `names` of the set whose link it has, and of `votes` only its own record. It writes only `votes/{own uid}` and `names/{own uid}`, in a set that exists and has not expired. Answers are checked for shape: numbers from 0 to 11, only for the questions of the set (`config.qids`).
 - **App Check** (optional, `tallyroom-setup.md` step 1c): with a site key in `config.js` and enforcement switched on in the console, the database accepts requests from this page only.
 - **What the room sees** (G5): the presenter's screen publishes the answers of the revealed questions to `shown`, one record per answer, keyed so that records cannot be linked to a device or to each other. Phones only show results while a presenter screen has the set open, which is the case in every session.
 - Not covered: in a named set, `names` (the names in use) can be read by every participant of that set; the answers cannot.
 
 ## Data layout
 
-- `presenters/{uid}`: `true` for each presenter account. Console only.
+- `users/{uid}`: who may sign in (`role`: `admin` or `user`, `email`, `name`, `createdAt`). Written by admins only.
+- `userSets/{uid}/{setId}`: `true` for each set that is shared with that user, kept in step with `sets/{setId}/shared` so those sets can be listed.
 
-- `sets/{setId}`: the attributes of a set (`name`, `header`, `accent`, `category`, `named`, `expiresAt`, `joinUrl`, `createdAt`, `updatedAt`). This is the list the presenter's overview shows.
+- `sets/{setId}`: the attributes of a set (`name`, `header`, `accent`, `category`, `named`, `owner`, `visibility`, `shared`, `expiresAt`, `joinUrl`, `createdAt`, `updatedAt`). This is the list the presenter's overview shows.
 - `polls/{setId}/config`: mode, follow-up prompts and the questions.
 - `polls/{setId}/session`: where the session stands (phase, current question, round).
 - `polls/{setId}/votes/{deviceId}`: one record per device (the device id is the uid of its sign-in), so a phone counts once per set. It holds `answers`, `texts` (comments and open answers), `conf` (dilemma confidence), `revs` (which version of an edited proposal an answer is for) and, in a named set, `name`.

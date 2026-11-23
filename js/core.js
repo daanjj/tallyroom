@@ -415,7 +415,9 @@ function duplicateSet(meta, cfg, now, owner){ const m=normMeta(meta), c=normConf
   return { meta:{...m, name:m.name+" (copy)", joinUrl:"", owner:normUid(owner), visibility:"private", shared:{}, expiresAt:extendedExpiry(now), createdAt:now, updatedAt:now}, // a copy is private and belongs to who made it
     config:{ mode:c.mode, tlYellow:c.tlYellow, tlRed:c.tlRed, questions:JSON.parse(JSON.stringify(clearHistory(c).questions)).map(qu=>({...qu, id:newQid()})) } }; } // a copy starts without earlier versions
 /* one-off: the poll that lived at polls/{pollId} before sets existed gets a record in sets/ */
-function migrationMeta(pollId, cfg, now){ return newMeta({name:pollId, header:tx(cfg&&cfg.title)||pollId, category:"consent", named:"no"}, now); }
+function migrationMeta(pollId, cfg, now, owner){ return newMeta({name:pollId, header:tx(cfg&&cfg.title)||pollId, category:"consent", named:"no", owner}, now); }
+/* sets from before sets had owners (backlog H3): the first admin who opens the overview takes them over */
+function ownerlessIds(sets){ return Object.keys(sets||{}).filter(id=>{ const m=normMeta(sets[id]); return m && !m.owner; }).sort(); }
 
 /* ---- questions file (export / "create from file") ---- */
 function questionsExport(meta, cfg){ const m=normMeta(meta)||normMeta({}), c=normConfig(cfg);
@@ -537,7 +539,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, visibleQids, shownVotes, namesAsVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
   VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, PW_MIN, PW_MAX, passwordProblems,
-  sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
+  sortSets, pollStats, duplicateSet, migrationMeta, ownerlessIds, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS, ICON_MARK, iconSVG,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,
   answerIsCurrent, trafficCounts, trafficStatus, trafficComments, editQuestion, clearHistory, fixOutcome, questionOutcome, consentRows, consentTotals, consentMarkdown, reviveOutcome,
