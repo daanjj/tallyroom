@@ -983,7 +983,7 @@ Optional, and the largest item of this epic. Worth building when sets are named 
 
 Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps working without sign-in, as one made-up admin.
 
-> **Status: H1 built on 23 Nov 2026** (pure logic and tests only; no screen, rule or stored record has changed). H2 to H9 are not built.
+> **Status: H1 and H2 built on 23 Nov 2026**, with tests and tried in demo mode. **Not live, and not to be published on its own:** the page now takes the role from `users/{uid}`, which the published rules do not let anyone read, so against the real database nobody would be a user until H3 and H4 are done. H3 to H9 are not built.
 
 **Where it stands today** (before this epic)
 
@@ -1037,6 +1037,15 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 
 ### H2. Users and roles — M
 
+> **Status: built on 23 Nov 2026**, with tests against the stand-in for Firebase and tried in demo mode (as admin and with `&role=user`).
+>
+> Differences from the specification below:
+> - **`isHost` is still there**, as another name for `isUser`: every user is presenter of every set until H5 decides it per set. The overview and the set screens are unchanged.
+> - **The role is followed live**, not read once at sign-in: a record that is added, changed or removed works within a moment, without signing in again (needed for H7).
+> - **The backend only reads the list of users** (`onUsers`). Writing it comes with H7 and H8.
+> - **Demo:** the extra people and Sam's two sets are added once per browser, also to a demo store from before this item; its existing sets get the demo admin as owner. A participant tab (`&host=off`) keeps its own device id, so it is no longer the same record as the presenter tab.
+> - The message for an account without a record now reads "This account has no access".
+
 **Story.** As an admin I want a list of who may use this Tally Room and in which role, so that rights no longer depend on one shared presenter list.
 
 **Specification**
@@ -1061,10 +1070,11 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 
 **Specification**
 
-- Done once, under the old rules, before H4 is published: a `users` record for each account in `presenters` (by hand in the console; there are only a few), with the installation's owner as `admin`.
-- The first time an admin opens the overview, every set without `owner` gets that admin as owner, private and not shared (open decision 21). The page says how many sets were taken over.
+- Before the switch: a `users` record for each account in `presenters` (by hand in the console; there are only a few), with the installation's owner as `admin`. The old rules ignore these records.
+- The switch: the new files and the rules of H4 are published together. The new page cannot read `users` under the old rules, so there is no order in which the old rules and the new page work together.
+- After the switch: the first time an admin opens the overview, every set without `owner` gets that admin as owner, private and not shared (open decision 21). Until then such a set is managed by admins only, which the rules of H4 allow. The page says how many sets were taken over.
 - `presenters` is removed from the database and from the rules once H4 is live.
-- `tallyroom-setup.md` gets the upgrade steps in order: user records, new files, first load by the admin, new rules.
+- `tallyroom-setup.md` gets the upgrade steps in order: user records, new files and new rules together, first load by the admin.
 
 **AC**
 

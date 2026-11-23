@@ -105,6 +105,15 @@ test("questions file: it carries no owner, visibility or sharing", () => {
   assert.deepEqual(Object.keys(set).sort(), ["accent", "category", "header", "name", "named"]);
 });
 
+test("user record: a valid role makes a user; the name falls back on the email address", () => {
+  assert.deepEqual(C.normUser({ email: " anna@example.com ", name: " Anna ", role: "admin", createdAt: NOW }), { email: "anna@example.com", name: "Anna", role: "admin", createdAt: NOW });
+  assert.deepEqual(C.normUser({ email: "piet@example.com", role: "user" }), { email: "piet@example.com", name: "piet", role: "user", createdAt: 0 });
+  assert.equal(C.normUser({ role: "user" }).name, "Unnamed");
+  for (const bad of [null, undefined, true, "admin", {}, { email: "x@example.com" }, { role: "presenter" }, { role: "Admin" }, { role: true }]) assert.equal(C.normUser(bad), null, JSON.stringify(bad));
+  assert.equal(C.normUser({ role: "user", name: "n".repeat(200) }).name.length, 60);
+  assert.deepEqual([C.roleName("admin"), C.roleName("user"), C.roleName("x"), C.roleName(null)], ["Admin", "User", "", ""]);
+});
+
 /* ---------- password rule (H1) ---------- */
 test("password: a long password with a letter and a non-letter is fine", () => {
   for (const ok of ["correct horse battery", "Tr0ubadour-en-drie", "zomer in 2026 was nat", "ünïcödé-wachtwoorden1", "abcdefgh".repeat(15) + "1234567!"]) assert.deepEqual(C.passwordProblems(ok, "anna@example.com"), [], ok);

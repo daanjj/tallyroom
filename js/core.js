@@ -373,6 +373,11 @@ function pollStats(poll){ const cfg=normConfig(poll&&poll.config), ses=(poll&&po
    assign:  give the set to another owner                                           admin
    view:    read the questions and settings, and duplicate                          manage, or any user when the set is public */
 const normRole = r => ROLES.includes(r) ? r : null;
+/* the record at users/{uid} (backlog H2): who may use this Tally Room and in which role. Without a valid role there is no user */
+function normUser(u){ if(!u || typeof u!=="object" || !normRole(u.role)) return null;
+  const email=String(u.email||"").trim().slice(0,200);
+  return { email, name:String(u.name||"").trim().slice(0,60) || email.split("@")[0] || "Unnamed", role:u.role, createdAt:Number.isFinite(u.createdAt)?u.createdAt:0 }; }
+const roleName = r => r==="admin" ? "Admin" : r==="user" ? "User" : "";
 function setRight(meta, user){ const m=normMeta(meta), uid=normUid(user&&user.uid), role=normRole(user&&user.role);
   if(!m || !uid || !role) return null;
   if(m.owner===uid) return "owner"; if(role==="admin") return "admin"; if(m.shared[uid]===true) return "shared";
@@ -531,7 +536,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, visibleQids, shownVotes, namesAsVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
-  VISIBILITY, ROLES, UID_RE, normUid, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, PW_MIN, PW_MAX, passwordProblems,
+  VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, PW_MIN, PW_MAX, passwordProblems,
   sortSets, pollStats, duplicateSet, migrationMeta, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS, ICON_MARK, iconSVG,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,

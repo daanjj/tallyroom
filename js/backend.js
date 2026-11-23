@@ -1,11 +1,13 @@
 /* Tally Room backends: where the data lives.
    Both backends offer the same interface:
-     global   id, isHost, canWrite, demo, isConnected(), onConn(f), downFor(), nudge(), now()
+     global   id, role, isUser, isAdmin, isHost, canWrite, demo, isConnected(), onConn(f), downFor(), nudge(), now()
      sign-in  onAuth(f(state)), signIn(email, password), signOut(), resetPassword(email)
-              id and isHost follow the sign-in and can change while the page is open (backlog G1, G2)
+              id and the role follow the sign-in and can change while the page is open (backlog G1, G2, H2)
+              isHost is the same as isUser until rights are decided per set (backlog H5)
+     users    onUsers(f(map|null, err)): everyone who may use this Tally Room, for users only
      sets     onSets(f(map|null, err)), getSets(), setMeta(id, meta), patchMeta(id, patch), removeSet(id), moveSet(id, newId)
      polls    readPoll(id), writePoll(id, {config, session}), poll(id) -> live access to one set
-   Data layout: sets/{id} = attributes of a set, polls/{id}/config|session|votes = its questions, state and answers,
+   Data layout: users/{uid} = who may sign in and in which role, sets/{id} = attributes of a set, polls/{id}/config|session|votes = its questions, state and answers,
    polls/{id}/actions = follow-up actions the presenter records for concerns and objections. */
 (function(root){
 "use strict";
@@ -19,14 +21,17 @@ function dropLegacyKeys(){ try{ const old=[]; for(let i=0;i<localStorage.length;
 
 /* ---- Demo backend: no network. Data sits in this browser (localStorage) and is shared between its tabs.
         Eight simulated participants answer in the tab that presents, to preview the design. ---- */
-function makeDemoBackend(isHost){
+/* demo people (backlog H2): the page is the admin, or with &role=user the user; Sam owns a public set and one shared with the user */
+const DEMO_ADMIN="demo-admin", DEMO_USER="demo-user", DEMO_SAM="demo-sam";
+function makeDemoBackend(isHost, role){
   const KEY="tr_demo_db"; let mem=null;
   const load=()=>{ try{ const v=JSON.parse(localStorage.getItem(KEY)||"null"); if(v && v.sets && v.polls) return v; }catch(e){} return mem||{sets:{},polls:{}}; };
   let db=load();
   const save=()=>{ mem=db; try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){} };
-  const L={sets:[], poll:{}}; // listeners
+  const L={sets:[], users:[], poll:{}}; // listeners
   const pl=id=>(L.poll[id]=L.poll[id]||{meta:[],cfg:[],ses:[],votes:[],mine:[],shown:[],names:[],actions:[]});
-  const myId=demoId();
+  /* a presenter is one of the demo people; a participant (?host=off) keeps the id of this browser */
+  const uid = isHost ? (role==="user" ? DEMO_USER : DEMO_ADMIN) : null, myId = uid || demoId();
   const P=id=>(db.polls[id]=db.polls[id]||{});
   const copy=v=>v==null?null:JSON.parse(JSON.stringify(v));
   function emit(id, what){ const l=L.poll[id]; if(!l) return; const p=db.polls[id]||{};
@@ -38,7 +43,7 @@ function makeDemoBackend(isHost){
     if(!what||what==="names") l.names.forEach(f=>f(copy(p.names)||{}));
     if(!what||what==="actions") l.actions.forEach(f=>f(copy(p.actions)||{})); }
   const emitSets=()=>L.sets.forEach(f=>f(copy(db.sets)||{}));
-  const emitAll=()=>{ emitSets(); Object.keys(L.poll).forEach(id=>emit(id)); };
+  const emitAll=()=>{ emitSets(); L.users.forEach(f=>f(copy(db.users)||{})); Object.keys(L.poll).forEach(id=>emit(id)); };
   try{ root.addEventListener("storage", e=>{ if(e.key===KEY){ db=load(); emitAll(); } }); }catch(e){}
   if(!Object.keys(db.sets).length){ const now=Date.now();
     db.sets.demo0001=C.newMeta({name:"Demo set", header:"Tally Room demo", category:"consent"}, now);
@@ -49,6 +54,15 @@ function makeDemoBackend(isHost){
       C.q("How confident are you that we will follow through?",1,7,"Not at all","Completely"),
       C.qOpen("What should we do differently next time?") ] } };
     save(); }
+  /* once per browser, also for a demo store from before users existed: the demo people, an owner on every set, and Sam's two sets */
+  if(!db.users){ const now=Date.now(), u=(name,r)=>({email:name.toLowerCase().replace(/\s+/g,".")+"@demo.example", name, role:r, createdAt:now});
+    db.users={[DEMO_ADMIN]:u("Demo admin","admin"), [DEMO_USER]:u("Demo user","user"), [DEMO_SAM]:u("Sam Demo","user")};
+    Object.keys(db.sets).forEach(id=>{ if(db.sets[id] && !db.sets[id].owner) db.sets[id]={...db.sets[id], owner:DEMO_ADMIN}; });
+    const add=(id,fields,questions)=>{ if(db.sets[id] || db.polls[id]) return; db.sets[id]=C.newMeta({...fields, owner:DEMO_SAM}, now); db.polls[id]={session:{...C.DEFAULT_SESSION}, config:{...C.emptyConfig(), questions}}; };
+    add("demo0002", {name:"Public demo set", header:"Team check-in", visibility:"public"}, [C.q("How is your week going?",1,5,"Badly","Very well"), C.qOpen("What do you need from the team?")]);
+    add("demo0003", {name:"Shared demo set", header:"Retrospective", shared:{[DEMO_USER]:true}}, [C.q("How did this sprint go?",1,5,"Badly","Very well"), C.q("What should we keep?",1,3,"","",["Planning","Pairing","Demos"])]);
+    save(); }
+  const me=uid ? C.normUser(db.users[uid]) : null;
   const names=["a","b","c","d","e","f","g","h"];
   function simulate(id){ const p=db.polls[id]; if(!isHost || !p || !p.session || !p.config) return; const ses=p.session, cfg=C.normConfig(p.config); if(!cfg.questions.length) return;
     const put=(n,v)=>{ const pp=P(id); pp.votes=pp.votes||{}; if(C.isNamed((db.sets[id]||{}).named)){ v.name=n+String(names.indexOf(n)+1); v.nameAt=1; pp.names=pp.names||{}; pp.names["demo_"+n]={n:v.name, at:1}; } else delete v.name; pp.votes["demo_"+n]=v; save(); emit(id,"votes"); };
@@ -64,8 +78,10 @@ function makeDemoBackend(isHost){
         v.t=Date.now(); put(n,v); }, 500+400*i+150*j))); } }
   return { id:myId, isHost, canWrite:true, demo:true,
     isConnected:()=>true, onConn:f=>f(true), downFor:()=>0, nudge:()=>{}, now:()=>Date.now(),
-    onAuth:f=>f({ready:true, uid:null, isHost, anon:false, email:"", error:null}), // nothing to sign in to
+    role:me?me.role:null, isUser:!!me, isAdmin:!!me && me.role==="admin",
+    onAuth:f=>f({ready:true, uid, role:me?me.role:null, name:me?me.name:"", isUser:!!me, isAdmin:!!me && me.role==="admin", isHost, anon:false, email:me?me.email:"", error:null}), // nothing to sign in to
     signIn:async()=>{}, signOut:async()=>{}, resetPassword:async()=>{},
+    onUsers:f=>{ if(!me){ f({}); return; } L.users.push(f); f(copy(db.users)||{}); },
     onSets:f=>{ L.sets.push(f); f(copy(db.sets)||{}); },
     getSets:async()=>copy(db.sets)||{},
     setMeta:async(id,m)=>{ db.sets[id]=copy(m); save(); emitSets(); emit(id,"meta"); },
@@ -98,7 +114,8 @@ function makeDemoBackend(isHost){
 
 /* ---- Firebase Realtime Database backend ----
    Who you are comes from Firebase Authentication (backlog G1, G2):
-     presenter    signed in with email and password, and listed in presenters/{uid}
+     user         signed in with email and password, and with a record users/{uid} that holds the role: admin or user (backlog H2).
+                  An account without that record has no rights
      participant  signed in anonymously, without any screen; the uid is the device id and the key of its vote record
    The database rules (database.rules.json) decide what each of them may read and write.
    opts.anon: sign in anonymously when nobody is signed in (a set page); opts.signOut: ?host=off
@@ -133,7 +150,8 @@ function makeFirebaseBackend(config, opts){
     const r=await fetch(BASE+"/"+path+".json?auth="+encodeURIComponent(tok)+"&_="+Date.now(), headers ? {cache:"no-store", headers} : {cache:"no-store"}); if(!r.ok) throw new Error("rest "+r.status); return (await r.json())||{}; };
 
   /* ---- sign-in state ---- */
-  const st={ready:false, uid:null, isHost:false, anon:false, email:"", error:null}, authFns=[];
+  const NOBODY={role:null, name:"", isUser:false, isAdmin:false, isHost:false};
+  const st={ready:false, uid:null, ...NOBODY, anon:false, email:"", error:null}, authFns=[];
   let wantOut=!!opts.signOut, seq=0;
   /* live listeners are attached again whenever the identity changes: the server drops the ones the new identity may not
      keep, and a presenter-only path (the list of sets, the actions) is only listened to by a presenter */
@@ -146,22 +164,27 @@ function makeFirebaseBackend(config, opts){
   /* path: a string, or a function of the uid (a participant's own record); hostOnly / partOnly: only for a presenter / a participant,
      the other gets empty() instead */
   function listen(path, f, err, hostOnly, empty, partOnly){ const sub={path, f, err, hostOnly:!!hostOnly, partOnly:!!partOnly, empty:empty||(()=>{}), live:null}; subs.push(sub); if(st.ready) attach(sub); }
-  function publish(next){ const changed = !st.ready || next.uid!==st.uid || next.isHost!==st.isHost;
+  function publish(next){ const changed = !st.ready || next.uid!==st.uid || next.isHost!==st.isHost || next.role!==st.role;
     Object.assign(st, next, {ready:true}); if(changed) subs.forEach(attach); authFns.forEach(f=>f({...st})); }
-  async function resolve(user){ const my=++seq;
+  /* the record of the signed-in account is followed live: a role that is given, changed or taken away works at once */
+  let userSub=null;
+  function dropUser(){ if(userSub){ const u=userSub; userSub=null; try{ u.ref.off("value", u.cb); }catch(e){} } }
+  async function resolve(user){ const my=++seq; dropUser();
     if(user && !user.isAnonymous && wantOut){ wantOut=false; try{ await auth.signOut(); }catch(e){} return; } // ?host=off
     wantOut=false;
     if(!user){
-      if(!opts.anon){ publish({uid:null, isHost:false, anon:false, email:"", error:null}); return; }
-      try{ await auth.signInAnonymously(); }catch(e){ console.warn("anonymous sign-in failed", e); if(my===seq) publish({uid:null, isHost:false, anon:false, email:"", error:"anon"}); }
+      if(!opts.anon){ publish({uid:null, ...NOBODY, anon:false, email:"", error:null}); return; }
+      try{ await auth.signInAnonymously(); }catch(e){ console.warn("anonymous sign-in failed", e); if(my===seq) publish({uid:null, ...NOBODY, anon:false, email:"", error:"anon"}); }
       return; } // the sign-in itself brings the next state
-    if(user.isAnonymous){ publish({uid:user.uid, isHost:false, anon:true, email:"", error:null}); return; }
-    let host=false; try{ host=(await db.ref("presenters/"+user.uid).once("value")).val()===true; }catch(e){ console.warn("presenter check failed", e); }
-    if(my===seq) publish({uid:user.uid, isHost:host, anon:false, email:user.email||"", error:null}); }
-  auth.onAuthStateChanged(resolve, e=>{ console.warn("auth", e); publish({uid:null, isHost:false, anon:false, email:"", error:"anon"}); });
+    if(user.isAnonymous){ publish({uid:user.uid, ...NOBODY, anon:true, email:"", error:null}); return; }
+    const is=rec=>{ if(my!==seq) return; const u=C.normUser(rec);
+      publish({uid:user.uid, role:u?u.role:null, name:u?u.name:"", isUser:!!u, isAdmin:!!u && u.role==="admin", isHost:!!u, anon:false, email:user.email||"", error:null}); };
+    const ref=db.ref("users/"+user.uid), cb=ref.on("value", s=>is(s.val()), e=>{ console.warn("user check failed", e); is(null); });
+    userSub={ref, cb}; }
+  auth.onAuthStateChanged(resolve, e=>{ console.warn("auth", e); publish({uid:null, ...NOBODY, anon:false, email:"", error:"anon"}); });
 
   const denied=e=>!!e && /permission.denied/i.test(String(e.code||"")+" "+String(e.message||""));
-  return { get id(){ return st.uid; }, get isHost(){ return st.isHost; }, canWrite:true, demo:false,
+  return { get id(){ return st.uid; }, get role(){ return st.role; }, get isUser(){ return st.isUser; }, get isAdmin(){ return st.isAdmin; }, get isHost(){ return st.isHost; }, canWrite:true, demo:false,
     isConnected:()=>connected,
     onConn:f=>{ connFns.push(f); f(connected); },
     downFor:()=>connected ? 0 : Date.now()-downSince,
@@ -172,6 +195,7 @@ function makeFirebaseBackend(config, opts){
     /* on a set page the presenter turns straight into an anonymous participant, without a moment as nobody */
     signOut:()=>opts.anon ? auth.signInAnonymously() : auth.signOut(),
     resetPassword:email=>auth.sendPasswordResetEmail(email),
+    onUsers:f=>listen("users", v=>f(v||{}), e=>f(null,e), true, ()=>f({})),
     onSets:f=>listen("sets", v=>f(v||{}), e=>f(null,e), true),
     getSets:async()=>(await db.ref("sets").once("value")).val()||{},
     setMeta:(id,m)=>db.ref("sets/"+id).set(m),
@@ -218,7 +242,7 @@ function makeFirebaseBackend(config, opts){
 function make(opts){ const fc=opts.firebaseConfig||{}, params=opts.params;
   const demo = params.has("demo") || !(root.firebase && root.firebase.auth && fc.apiKey && fc.databaseURL);
   if(demo){ if(!params.has("demo")) console.warn("Firebase not configured: running in single-browser demo mode.");
-    return makeDemoBackend(params.get("host")!=="off"); } // demo: presenter unless asked otherwise, nothing is stored
+    return makeDemoBackend(params.get("host")!=="off", params.get("role")==="user" ? "user" : "admin"); } // demo: presenter unless asked otherwise, admin unless &role=user
   return makeFirebaseBackend(fc, {anon:!!opts.anon, signOut:params.get("host")==="off", appCheckKey:String(opts.appCheckKey||"").trim()});
 }
 root.TRBackend={ make };

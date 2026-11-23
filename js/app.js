@@ -17,7 +17,7 @@ function joinUrl(id, meta){ return (meta && meta.joinUrl) || urlFor({set:id}); }
 
 /* ============ state ============ */
 /* meta: undefined = not loaded yet, null = this set does not exist */
-const S = { route:(RAW_SET!=null?"set":"home"), setId:SET_ID, booted:false, meta:undefined, metaErr:null, sets:null, setsErr:null, polls:{}, cfg:null, ses:null, votes:{}, parts:{all:{}, mine:null, shown:{}, names:{}}, actions:{}, auth:{ready:false,uid:null,isHost:false,anon:false,email:"",error:null}, me:{id:null,isHost:false,canWrite:true,ackReset:null}, ui:{view:null,configOpen:false,draft:null,readonly:false,qs:.75,dlg:null}, backend:null, be:null };
+const S = { route:(RAW_SET!=null?"set":"home"), setId:SET_ID, booted:false, meta:undefined, metaErr:null, sets:null, setsErr:null, polls:{}, cfg:null, ses:null, votes:{}, parts:{all:{}, mine:null, shown:{}, names:{}}, actions:{}, auth:{ready:false,uid:null,role:null,name:"",isUser:false,isAdmin:false,isHost:false,anon:false,email:"",error:null}, me:{id:null,isHost:false,canWrite:true,ackReset:null}, ui:{view:null,configOpen:false,draft:null,readonly:false,qs:.75,dlg:null}, backend:null, be:null };
 const app = document.getElementById("app");
 const QS_STEPS=[.5,.6,.7,.75,.8,.9,1,1.15,1.3,1.5,1.75,2];
 function getQS(){ try{ const v=parseFloat(localStorage.getItem("tr_qs")); if(QS_STEPS.includes(v)) return v; }catch(e){} return .75; }
@@ -600,9 +600,9 @@ function readDraftFromDOM(){
 }
 
 /* ============ presenter sign-in (backlog G1) ============ */
-const signOutBtn = () => (S.be && !S.be.demo && S.auth.uid && !S.auth.anon) ? `<button class="btn sm ghost" data-act="signOut" title="Signed in as ${esc(S.auth.email)}">Sign out</button>` : "";
-function notPresenterHTML(){ return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card big-wait"><h2 style="font-size:24px">This account is not a presenter</h2>
-  <p class="meta">${esc(S.auth.email)} is signed in, but it is not on the list of presenters. Ask the owner of this Tally Room to add it.</p><div class="controls"><button class="btn primary" data-act="signOut">Sign out</button></div></div></div>`; }
+const signOutBtn = () => (S.be && !S.be.demo && S.auth.uid && !S.auth.anon) ? `<button class="btn sm ghost" data-act="signOut" title="Signed in as ${esc(S.auth.email)}${S.auth.role?" ("+esc(C.roleName(S.auth.role))+")":""}">Sign out</button>` : "";
+function notPresenterHTML(){ return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card big-wait"><h2 style="font-size:24px">This account has no access</h2>
+  <p class="meta">${esc(S.auth.email)} is signed in, but it is not on the list of users. Ask an admin of this Tally Room to add it.</p><div class="controls"><button class="btn primary" data-act="signOut">Sign out</button></div></div></div>`; }
 function signInHTML(){
   if(S.auth.uid && !S.auth.anon) return notPresenterHTML();
   const busy=!!S.ui.siBusy;
