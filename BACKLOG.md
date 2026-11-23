@@ -983,7 +983,7 @@ Optional, and the largest item of this epic. Worth building when sets are named 
 
 Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps working without sign-in, as one made-up admin.
 
-> **Status: H1 to H4 built on 23 Nov 2026**, with tests and tried in demo mode. **Not live:** the rules are not published and nothing has run against the real database. **Not to be published before H5:** under the new rules a normal user cannot read the list of all sets, and the overview still asks for exactly that, so only an admin would get an overview. H5 to H9 are not built.
+> **Status: H1 to H5 built on 23 Nov 2026**, with tests and tried in demo mode (as admin and with `&role=user`). Together they are the release that can go live. **Not live:** the rules are not published, nothing has run against the real database, and `tests/rules-checklist.md` is still empty. H6 to H9 are not built; until H6 a set can only be shared by editing the database by hand, and until H8 users are added by hand.
 
 **Where it stands today** (before this epic)
 
@@ -1139,6 +1139,17 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 **Depends on:** H1, H2, H3; replaces the presenter rules of G3, G4 and G5.
 
 ### H5. Rights per set in the page — L
+
+> **Status: built on 23 Nov 2026**, with tests against the stand-in for Firebase and tried in demo mode: the overview of a user and of an admin, View, Duplicate, the private / public switch, and opening a shared set (presenter) and someone else's public set (participant). **Not tried:** the real database, and the "no longer have access" notice on screen (the backend test covers the right being taken away while the set is open).
+>
+> Differences from the specification below:
+> - **View is a dialog on the overview**, not the question editor in read-only mode: the settings in one line and the list of questions with their type and scale or options, with **Duplicate to my sets**. It needed no changes to the editor.
+> - **The admin's third section is called "All other sets"** and is left out when it is empty. "My sets" holds what the admin owns or was given.
+> - **A set shared with you says so on its row** ("Shared with you by Sam"). The mark for the owner and the share dialog are H6.
+> - **Private / Public** is a pill on the row that who controls the set can click (making public asks for confirmation), and a field in Settings. Others see it as a label.
+> - **A user on someone else's set** gets a link back to their own sets in the participant top bar; on a public set also **Duplicate this set**, which opens the copy in the editor.
+> - **Counts on the overview:** of a public set of someone else only the number of questions is shown; respondents and phase cannot be read.
+> - **Presenter rights wait for the set record**: answers and actions are only asked for once the record has arrived and says this user manages the set.
 
 **Story.** As a user I want an overview with my own sets and the public ones, so that I work in my own space and can still reuse what colleagues made public.
 

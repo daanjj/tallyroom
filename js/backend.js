@@ -3,13 +3,15 @@
      global   id, role, isUser, isAdmin, isHost, canWrite, demo, isConnected(), onConn(f), downFor(), nudge(), now()
      sign-in  onAuth(f(state)), signIn(email, password), signOut(), resetPassword(email)
               id and the role follow the sign-in and can change while the page is open (backlog G1, G2, H2)
-              isHost is the same as isUser until rights are decided per set (backlog H5)
+              isHost is the same as isUser: someone who may have sets. Who is presenter of a set is decided per set, see poll(id)
      users    onUsers(f(map|null, err)): everyone who may use this Tally Room, for users only
-     sets     onSets(f(map|null, err)), getSets(), setExists(id), createSet(id, meta, {config, session}), setMeta(id, meta),
+     sets     onSets(f(map|null, err)): the sets this user may see (own, shared with them, public; an admin all of them), getSets(), setExists(id), createSet(id, meta, {config, session}), setMeta(id, meta),
               patchMeta(id, patch), removeSet(id), moveSet(id, newId)
               creating, removing and moving a set are one write each: the rules decide on a poll by the owner of its set,
               so a set and its poll never exist without each other (backlog H4)
-     polls    readPoll(id), writePoll(id, {config, session}), poll(id) -> live access to one set
+     polls    readPoll(id), readConfig(id), writePoll(id, {config, session}), poll(id) -> live access to one set
+              poll(id).onRight(f(manages)): whether this device is presenter of that set (owner, shared with, or admin; backlog H5).
+              Answers and actions are only listened to by who manages the set
    Data layout: users/{uid} = who may sign in and in which role, sets/{id} = attributes of a set, polls/{id}/config|session|votes = its questions, state and answers,
    polls/{id}/actions = follow-up actions the presenter records for concerns and objections,
    userSets/{uid}/{id} = the sets that are shared with a user, kept next to sets/{id}/shared so they can be listed. */
@@ -33,20 +35,24 @@ function makeDemoBackend(isHost, role){
   let db=load();
   const save=()=>{ mem=db; try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){} };
   const L={sets:[], users:[], poll:{}}; // listeners
-  const pl=id=>(L.poll[id]=L.poll[id]||{meta:[],cfg:[],ses:[],votes:[],mine:[],shown:[],names:[],actions:[]});
+  const pl=id=>(L.poll[id]=L.poll[id]||{meta:[],right:[],cfg:[],ses:[],votes:[],mine:[],shown:[],names:[],actions:[]});
   /* a presenter is one of the demo people; a participant (?host=off) keeps the id of this browser */
   const uid = isHost ? (role==="user" ? DEMO_USER : DEMO_ADMIN) : null, myId = uid || demoId();
   const P=id=>(db.polls[id]=db.polls[id]||{});
   const copy=v=>v==null?null:JSON.parse(JSON.stringify(v));
   function emit(id, what){ const l=L.poll[id]; if(!l) return; const p=db.polls[id]||{};
-    if(!what||what==="meta") l.meta.forEach(f=>f(copy(db.sets[id])));
+    if(!what||what==="meta"){ l.right.forEach(f=>f(manages(id))); l.meta.forEach(f=>f(copy(db.sets[id]))); }
     if(!what||what==="cfg") l.cfg.forEach(f=>f(copy(p.config)));
     if(!what||what==="ses") l.ses.forEach(f=>f(copy(p.session)));
-    if(!what||what==="votes"){ l.votes.forEach(f=>f(isHost ? (copy(p.votes)||{}) : {})); l.mine.forEach(f=>f(copy((p.votes||{})[myId])||null)); } // as the rules: a participant sees its own record only
+    if(!what||what==="votes"){ l.votes.forEach(f=>f(manages(id) ? (copy(p.votes)||{}) : {})); l.mine.forEach(f=>f(copy((p.votes||{})[myId])||null)); } // as the rules: a participant sees its own record only
     if(!what||what==="shown") l.shown.forEach(f=>f(copy(p.shown)||{}));
     if(!what||what==="names") l.names.forEach(f=>f(copy(p.names)||{}));
-    if(!what||what==="actions") l.actions.forEach(f=>f(copy(p.actions)||{})); }
-  const emitSets=()=>L.sets.forEach(f=>f(copy(db.sets)||{}));
+    if(!what||what==="actions") l.actions.forEach(f=>f(manages(id) ? (copy(p.actions)||{}) : {})); }
+  /* the same rights as the database rules give: the sets this user may see, and whether it is presenter of a set */
+  const who=()=>({uid, role:me?me.role:null});
+  const manages=id=>C.canManage(db.sets[id], who());
+  const mySets=()=>{ const out={}; Object.keys(db.sets||{}).forEach(id=>{ if(C.canView(db.sets[id], who())) out[id]=copy(db.sets[id]); }); return out; };
+  const emitSets=()=>L.sets.forEach(f=>f(mySets()));
   const emitAll=()=>{ emitSets(); L.users.forEach(f=>f(copy(db.users)||{})); Object.keys(L.poll).forEach(id=>emit(id)); };
   try{ root.addEventListener("storage", e=>{ if(e.key===KEY){ db=load(); emitAll(); } }); }catch(e){}
   if(!Object.keys(db.sets).length){ const now=Date.now();
@@ -68,7 +74,7 @@ function makeDemoBackend(isHost, role){
     save(); }
   const me=uid ? C.normUser(db.users[uid]) : null;
   const names=["a","b","c","d","e","f","g","h"];
-  function simulate(id){ const p=db.polls[id]; if(!isHost || !p || !p.session || !p.config) return; const ses=p.session, cfg=C.normConfig(p.config); if(!cfg.questions.length) return;
+  function simulate(id){ const p=db.polls[id]; if(!manages(id) || !p || !p.session || !p.config) return; const ses=p.session, cfg=C.normConfig(p.config); if(!cfg.questions.length) return;
     const put=(n,v)=>{ const pp=P(id); pp.votes=pp.votes||{}; if(C.isNamed((db.sets[id]||{}).named)){ v.name=n+String(names.indexOf(n)+1); v.nameAt=1; pp.names=pp.names||{}; pp.names["demo_"+n]={n:v.name, at:1}; } else delete v.name; pp.votes["demo_"+n]=v; save(); emit(id,"votes"); };
     const get=n=>((db.polls[id]||{}).votes||{})["demo_"+n];
     if(ses.phase==="lobby"){ names.forEach((n,i)=>setTimeout(()=>{ const v=get(n); if(!v||v.round!==ses.round) put(n,{round:ses.round,answers:{},t:Date.now()}); }, 300*i)); return; }
@@ -86,7 +92,7 @@ function makeDemoBackend(isHost, role){
     onAuth:f=>f({ready:true, uid, role:me?me.role:null, name:me?me.name:"", isUser:!!me, isAdmin:!!me && me.role==="admin", isHost, anon:false, email:me?me.email:"", error:null}), // nothing to sign in to
     signIn:async()=>{}, signOut:async()=>{}, resetPassword:async()=>{},
     onUsers:f=>{ if(!me){ f({}); return; } L.users.push(f); f(copy(db.users)||{}); },
-    onSets:f=>{ L.sets.push(f); f(copy(db.sets)||{}); },
+    onSets:f=>{ L.sets.push(f); f(mySets()); },
     getSets:async()=>copy(db.sets)||{},
     setExists:async id=>!!db.sets[id],
     createSet:async(id,m,p)=>{ if(db.sets[id]) throw new Error("That link is already in use."); db.sets[id]=copy(m); db.polls[id]=copy(p)||{}; save(); emitSets(); emit(id); },
@@ -96,12 +102,14 @@ function makeDemoBackend(isHost, role){
     moveSet:async(id,nid)=>{ if(!db.sets[id]) throw new Error("This set does not exist any more."); if(db.sets[nid]) throw new Error("That link is already in use.");
       db.sets[nid]=db.sets[id]; if(db.polls[id]) db.polls[nid]=db.polls[id]; delete db.sets[id]; delete db.polls[id]; save(); emitSets(); emit(id); emit(nid); },
     readPoll:async id=>copy(db.polls[id])||{},
+    readConfig:async id=>copy((db.polls[id]||{}).config)||{},
     writePoll:async(id,p)=>{ db.polls[id]=copy(p)||{}; save(); emit(id); },
     poll:id=>{ const l=pl(id); return { pull:null,
+      onRight:f=>{ l.right.push(f); f(manages(id)); },
       onMeta:f=>{ l.meta.push(f); f(copy(db.sets[id])); },
       onConfig:f=>{ l.cfg.push(f); f(copy((db.polls[id]||{}).config)); },
       onSession:f=>{ l.ses.push(f); f(copy((db.polls[id]||{}).session)); },
-      onVotes:f=>{ l.votes.push(f); f(isHost ? (copy((db.polls[id]||{}).votes)||{}) : {}); },
+      onVotes:f=>{ l.votes.push(f); f(manages(id) ? (copy((db.polls[id]||{}).votes)||{}) : {}); },
       onMine:f=>{ l.mine.push(f); f(copy(((db.polls[id]||{}).votes||{})[myId])||null); },
       onShown:f=>{ l.shown.push(f); f(copy((db.polls[id]||{}).shown)||{}); },
       onNames:f=>{ l.names.push(f); f(copy((db.polls[id]||{}).names)||{}); },
@@ -113,7 +121,7 @@ function makeDemoBackend(isHost, role){
       setAllVotes:async v=>{ P(id).votes=copy(v)||{}; save(); emit(id,"votes"); },
       clearVotes:async()=>{ const p=P(id); p.votes={}; p.shown={}; p.names={}; save(); emit(id); },
       dropNames:async()=>{ const p=P(id); p.shown={}; p.names={}; save(); emit(id); },
-      onActions:f=>{ l.actions.push(f); f(copy((db.polls[id]||{}).actions)||{}); },
+      onActions:f=>{ l.actions.push(f); f(manages(id) ? (copy((db.polls[id]||{}).actions)||{}) : {}); },
       setAction:async(key,a)=>{ const p=P(id); p.actions=p.actions||{}; p.actions[key]=copy(a); save(); emit(id,"actions"); },
       clearActions:async()=>{ P(id).actions={}; save(); emit(id,"actions"); } }; } };
 }
@@ -160,18 +168,51 @@ function makeFirebaseBackend(config, opts){
   const st={ready:false, uid:null, ...NOBODY, anon:false, email:"", error:null}, authFns=[];
   let wantOut=!!opts.signOut, seq=0;
   /* live listeners are attached again whenever the identity changes: the server drops the ones the new identity may not
-     keep, and a presenter-only path (the list of sets, the actions) is only listened to by a presenter */
-  const subs=[];
-  function attach(sub){ detach(sub); const other=(sub.hostOnly && !st.isHost) || (sub.partOnly && st.isHost);
+     keep, and a presenter-only path (the answers, the actions) is only listened to by who is presenter of that set.
+     polls[id] = {meta, known, manage, fns}: what this device is in that set; known = its set record has arrived */
+  const subs=[], polls={};
+  const who=()=>({uid:st.uid, role:st.role});
+  function attach(sub){ detach(sub); const ps=sub.poll ? polls[sub.poll] : null, role=sub.hostOnly || sub.partOnly;
+    if(ps && role && !ps.known) return; // not yet known whether this device presents the set
+    const host=ps ? ps.manage : st.isHost, other=(sub.hostOnly && !host) || (sub.partOnly && host);
     if(!st.uid || other){ if(other && st.ready) sub.empty(); return; }
     const ref=db.ref(typeof sub.path==="function" ? sub.path(st.uid) : sub.path), uid=st.uid, cb=ref.on("value", s=>sub.f(s.val()), e=>{ if(sub.live && sub.live.cb===cb){ sub.live=null; if(sub.err && st.uid===uid) sub.err(e); } });
     sub.live={ref, cb}; }
   function detach(sub){ if(sub.live){ const l=sub.live; sub.live=null; try{ l.ref.off("value", l.cb); }catch(e){} } }
   /* path: a string, or a function of the uid (a participant's own record); hostOnly / partOnly: only for a presenter / a participant,
      the other gets empty() instead */
-  function listen(path, f, err, hostOnly, empty, partOnly){ const sub={path, f, err, hostOnly:!!hostOnly, partOnly:!!partOnly, empty:empty||(()=>{}), live:null}; subs.push(sub); if(st.ready) attach(sub); }
+  function listen(path, f, err, hostOnly, empty, partOnly, poll){ const sub={path, f, err, hostOnly:!!hostOnly, partOnly:!!partOnly, empty:empty||(()=>{}), live:null, poll:poll||null}; subs.push(sub); if(st.ready) attach(sub); return sub; }
+  /* whether this device presents set id, from its record and the sign-in; the listeners that depend on it follow */
+  function setRight(id, quiet){ const ps=polls[id], m=ps.known && C.canManage(ps.meta, who()), was=ps.manage, first=!ps.told && ps.known; ps.manage=m;
+    if(m===was && !first) return; ps.told=ps.told||ps.known;
+    if(!quiet) subs.forEach(sub=>{ if(sub.poll===id && (sub.hostOnly || sub.partOnly)) attach(sub); });
+    ps.fns.forEach(f=>f(m)); }
   function publish(next){ const changed = !st.ready || next.uid!==st.uid || next.isHost!==st.isHost || next.role!==st.role;
-    Object.assign(st, next, {ready:true}); if(changed) subs.forEach(attach); authFns.forEach(f=>f({...st})); }
+    Object.assign(st, next, {ready:true});
+    if(changed){ Object.keys(polls).forEach(id=>setRight(id, true)); subs.forEach(attach); startFeed(); }
+    authFns.forEach(f=>f({...st})); }
+
+  /* ---- the sets this user may see (backlog H5). The rules do not let a user read the list of all sets, so it is put together
+     from three sources: the sets it owns and the public sets (two queries), and the sets shared with it, which are listed
+     in userSets/{uid} and read one by one. An admin reads the whole list. Started again whenever the identity changes ---- */
+  const setsFns=[]; let feed=null;
+  function startFeed(){ if(feed){ feed(); feed=null; } if(!setsFns.length || !st.ready || !st.isUser) return;
+    const uid=st.uid, me=who(), offs=[], per={}, got={all:null, own:null, pub:null, idx:null, shared:{}}; let dead=false, failed=false;
+    feed=()=>{ dead=true; offs.forEach(f=>f()); Object.values(per).forEach(f=>f()); };
+    const fail=e=>{ if(dead || failed) return; failed=true; setsFns.forEach(f=>f(null, e)); };
+    const on=(ref, f, err)=>{ const cb=ref.on("value", s=>{ if(!dead) f(s.val()); }, e=>{ if(!dead) (err||fail)(e); }); return ()=>{ try{ ref.off("value", cb); }catch(e){} }; };
+    const out=()=>{ if(dead || failed) return;
+      if(me.role==="admin"){ if(got.all) setsFns.forEach(f=>f(got.all)); return; }
+      if(!got.own || !got.pub || !got.idx || Object.keys(got.idx).some(id=>got.shared[id]===undefined)) return; // wait until every source has answered
+      const shared={}; Object.keys(got.idx).forEach(id=>{ const m=got.shared[id]; if(m && C.canManage(m, me)) shared[id]=m; }); // an entry whose set is gone, or no longer shared, is skipped
+      const all={...got.pub, ...shared, ...got.own}; setsFns.forEach(f=>f(all)); };
+    if(me.role==="admin"){ offs.push(on(db.ref("sets"), v=>{ got.all=v||{}; out(); })); return; }
+    offs.push(on(db.ref("sets").orderByChild("owner").equalTo(uid), v=>{ got.own=v||{}; out(); }));
+    offs.push(on(db.ref("sets").orderByChild("visibility").equalTo("public"), v=>{ got.pub=v||{}; out(); }));
+    offs.push(on(db.ref("userSets/"+uid), v=>{ const idx={}; Object.keys(v||{}).forEach(id=>{ if(v[id]===true) idx[id]=true; }); got.idx=idx;
+      Object.keys(per).forEach(id=>{ if(!idx[id]){ per[id](); delete per[id]; delete got.shared[id]; } });
+      Object.keys(idx).forEach(id=>{ if(!per[id]) per[id]=on(db.ref("sets/"+id), m=>{ got.shared[id]=m||null; out(); }, ()=>{ got.shared[id]=null; out(); }); });
+      out(); })); }
   /* the record of the signed-in account is followed live: a role that is given, changed or taken away works at once */
   let userSub=null;
   function dropUser(){ if(userSub){ const u=userSub; userSub=null; try{ u.ref.off("value", u.cb); }catch(e){} } }
@@ -202,7 +243,7 @@ function makeFirebaseBackend(config, opts){
     signOut:()=>opts.anon ? auth.signInAnonymously() : auth.signOut(),
     resetPassword:email=>auth.sendPasswordResetEmail(email),
     onUsers:f=>listen("users", v=>f(v||{}), e=>f(null,e), true, ()=>f({})),
-    onSets:f=>listen("sets", v=>f(v||{}), e=>f(null,e), true),
+    onSets:f=>{ setsFns.push(f); if(st.ready) startFeed(); },
     getSets:async()=>(await db.ref("sets").once("value")).val()||{},
     /* one set record can be read by every signed-in device; the list as a whole only by an admin */
     setExists:async id=>(await db.ref("sets/"+id).once("value")).val()!=null,
@@ -221,22 +262,30 @@ function makeFirebaseBackend(config, opts){
       try{ await db.ref().update(up); }
       catch(e){ if(denied(e)) throw new Error("This set holds answers in an old format. Clear the answers or export them first"); throw e; } },
     readPoll:async id=>{ try{ return await rest("polls/"+id); }catch(e){ return (await db.ref("polls/"+id).once("value")).val()||{}; } },
+    /* the questions only: what a user may read of a public set that is not theirs */
+    readConfig:async id=>{ try{ return await rest("polls/"+id+"/config"); }catch(e){ return (await db.ref("polls/"+id+"/config").once("value")).val()||{}; } },
     /* the config carries the ids of its questions (qids), which the database rules check every answer against */
     writePoll:(id,p)=>db.ref("polls/"+id).set(p && p.config ? {...p, config:C.withQids(p.config)} : p),
-    poll:id=>{ const node=db.ref("polls/"+id), P="polls/"+id; return {
-      /* only a presenter may read polls/{id} as a whole; a participant reads the parts it is allowed to:
+    poll:id=>{ const node=db.ref("polls/"+id), P="polls/"+id;
+      /* the set record says who owns the set and who it is shared with; it is followed here, before anything else of the set */
+      if(!polls[id]){ const ps=polls[id]={meta:null, known:false, manage:false, told:false, fns:[]}, got=m=>{ ps.meta=m||null; ps.known=true; setRight(id); };
+        listen("sets/"+id, got, ()=>got(null)); }
+      const ps=polls[id];
+      return {
+      onRight:f=>{ ps.fns.push(f); if(ps.told) f(ps.manage); },
+      /* only who manages the set may read polls/{id} as a whole; a participant reads the parts it is allowed to:
          its own record, what the room is shown and the names in use (backlog G8) */
-      pull:async()=>{ if(st.isHost) return rest(P); const uid=st.uid;
+      pull:async()=>{ if(ps.manage) return rest(P); const uid=st.uid;
         const [config,session,shown,names,mine]=await Promise.all([rest(P+"/config"), rest(P+"/session"), rest(P+"/shown"), rest(P+"/names"), rest(P+"/votes/"+uid)]);
         return {config, session, shown, names, mine:(mine && Object.keys(mine).length) ? mine : null}; },
       onMeta:f=>listen("sets/"+id, f, e=>f(null,e)),
       onConfig:f=>listen(P+"/config", f),
       onSession:f=>listen(P+"/session", f),
       /* a presenter gets every answer; a participant its own record, what the room is shown, and the names in use */
-      onVotes:f=>listen(P+"/votes", v=>f(v||{}), null, true, ()=>f({})),
-      onMine:f=>listen(uid=>P+"/votes/"+uid, v=>f(v||null), null, false, ()=>f(null), true),
-      onShown:f=>listen(P+"/shown", v=>f(v||{}), null, false, ()=>f({}), true),
-      onNames:f=>listen(P+"/names", v=>f(v||{}), null, false, ()=>f({}), true),
+      onVotes:f=>listen(P+"/votes", v=>f(v||{}), null, true, ()=>f({}), false, id),
+      onMine:f=>listen(uid=>P+"/votes/"+uid, v=>f(v||null), null, false, ()=>f(null), true, id),
+      onShown:f=>listen(P+"/shown", v=>f(v||{}), null, false, ()=>f({}), true, id),
+      onNames:f=>listen(P+"/names", v=>f(v||{}), null, false, ()=>f({}), true, id),
       setShown:v=>node.child("shown").set(v||null),
       setName:(pid,x)=>node.child("names/"+pid).set(x),
       setConfig:c=>node.child("config").set(C.withQids(c)),
@@ -246,7 +295,7 @@ function makeFirebaseBackend(config, opts){
       setAllVotes:v=>node.child("votes").set(v||{}),
       clearVotes:()=>node.update({votes:null, shown:null, names:null}),
       dropNames:()=>node.update({shown:null, names:null}),
-      onActions:f=>listen(P+"/actions", v=>f(v||{}), null, true, ()=>f({})),
+      onActions:f=>listen(P+"/actions", v=>f(v||{}), null, true, ()=>f({}), false, id),
       setAction:(key,a)=>node.child("actions/"+key).set(a),
       clearActions:()=>node.child("actions").remove() }; } };
 }

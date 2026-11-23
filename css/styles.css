@@ -196,6 +196,11 @@ a{color:var(--accent-text)}
 .btn.danger-solid{background:#B4232C;border-color:#B4232C;color:#fff}
 .sets{display:grid;margin-top:10px}
 .set-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 0;border-top:1px solid var(--line)}
+.sets-h{font-size:18px;margin:26px 0 0}
+.sets-h .meta{font-weight:600;margin-left:4px}
+.pill-btn{border:0;cursor:pointer}
+.pill-btn:hover,.pill-btn:focus-visible{background:var(--accent-soft);color:var(--accent-text)}
+.view-qs{margin:14px 0 4px;padding-left:22px;display:grid;gap:10px;max-height:50vh;overflow:auto}
 .set-row.is-expired .set-main,.set-row.is-expired .swatch{opacity:.6}
 .swatch{width:14px;height:40px;border-radius:7px;flex:none}
 .set-main{flex:1;min-width:220px}

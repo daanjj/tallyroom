@@ -229,7 +229,7 @@ function render(bg){
   else if(S.route==="home"){ applyTheme(null); document.title="Tally Room"; html=homeHTML(); }
   else if(S.metaErr){ html=notice("Cannot open this question set", RULES_MSG); }
   else if(!S.setId || S.meta===null){ applyTheme(null); document.title="Tally Room";
-    html=notice("This question set does not exist (any more)", "Ask the presenter for a new link or QR code."+(S.me.isHost?` <a href="${esc(urlFor())}">Manage question sets</a>`:"")); }
+    html=notice("This question set does not exist (any more)", "Ask the presenter for a new link or QR code."+(S.be&&S.be.isHost?` <a href="${esc(urlFor())}">Manage question sets</a>`:"")); }
   else if(S.meta===undefined || !S.cfg || !S.ses){ html=notice("", "Connecting…", true); }
   else { applyTheme(S.meta.accent); document.title=header(); host = S.me.isHost && S.ui.view!=="participant"; }
   const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.classList.contains("act-in")||ae.id==="nameIn"||ae.id==="siEmail"||ae.id==="siPass")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
@@ -522,9 +522,13 @@ function stampDoc(doc){ if(C.isNamed(S.meta && S.meta.named) && S.me.name){ doc.
 function participantHTML(){
   const ses=S.ses, cfg=S.cfg, Q=cfg.questions, ph=Q.length?ses.phase:"lobby", mine=myVotes();
   if(ph!=="voting") S.ui.pq=null;
-  const back = S.me.isHost ? `<button class="btn sm ghost" data-act="asHost">Back to presenter view</button>` : "";
+  /* a user on a set of someone else takes part like anyone with the link; a public set can be duplicated from here */
+  const guest = !S.me.isHost && S.be && S.be.isHost;
+  const back = S.me.isHost ? `<button class="btn sm ghost" data-act="asHost">Back to presenter view</button>`
+    : guest ? `<a class="btn sm ghost" href="${esc(urlFor())}">My question sets</a>${S.meta.visibility==="public"?`<button class="btn sm ghost" data-act="setDup" data-id="${esc(S.setId)}">Duplicate this set</button>`:""}` : "";
   let body="";
-  const ro = S.ui.readonly ? `<div class="banner">This account can watch but not vote (view-only access).</div>` : "";
+  const ro = (S.ui.readonly ? `<div class="banner">This account can watch but not vote (view-only access).</div>` : "")
+    + (S.ui.lost && guest ? `<div class="banner" role="status">You no longer have access to this set as presenter. You can still take part.</div>` : "");
   if(isKicked()){
     body=`<div class="card big-wait"><div class="pulse"></div><h2 style="font-size:24px">Session was reset</h2><p class="meta">The presenter cleared the room and started over. Tap to join again.</p>
       <div class="controls" style="margin-top:16px;justify-content:center"><button class="btn primary" data-act="rejoin">Join again</button></div></div>`;
@@ -626,11 +630,16 @@ async function doForgot(){ const em=document.getElementById("siEmail"), email=em
   if(!email){ S.ui.siErr="Type your email address first."; render(); document.getElementById("siEmail")?.focus(); return; }
   try{ await S.be.resetPassword(email); }catch(e){ console.warn("reset mail", e&&e.code); } // the answer never tells whether the address has an account
   S.ui.siNote="If this address has an account, a mail is on its way"; render(); }
-/* the sign-in changed: who this device is, and whether it is the presenter (backlog G1, G2) */
-function applyAuth(a){ const wasHost=S.me.isHost, wasId=S.me.id; S.auth=a; S.me.id=S.be.id; S.me.isHost=S.be.isHost;
+/* the sign-in changed: who this device is (backlog G1, G2) */
+function applyAuth(a){ S.auth=a; applyRole(); }
+/* who this device is in what is on screen (backlog H5). On the overview and the sign-in screen "presenter" means: a user.
+   On a set page it means: this user manages that set (owner, shared with, or admin), which the backend follows live (S.right) */
+function applyRole(){ const wasHost=S.me.isHost, wasId=S.me.id; S.me.id=S.be.id; S.me.isHost = S.route==="set" ? !!S.right : S.be.isHost;
   if(!S.booted) return;
   if(S.route==="signin"){ if(S.me.isHost){ try{ location.replace(urlFor({set:SET_ID})); }catch(e){} return; } render(); return; }
-  if(wasHost===S.me.isHost && wasId===S.me.id) return;
+  if(wasHost===S.me.isHost && wasId===S.me.id){ if(S.route==="home") renderBg(); return; }
+  /* a user whose access to the open set is taken away keeps the page, as a participant */
+  S.ui.lost = S.route==="set" && wasHost && !S.me.isHost && wasId===S.me.id && S.be.isHost;
   /* a presenter who signs out on a set page is a participant of that set from here on, without reload */
   S.ui.view=null; S.ui.dlg=null; S.ui.configOpen=false; S.ui.draft=null; if(!S.me.isHost){ S.actions={}; S.ui.act={}; S.review=null; }
   syncVotes(); if(S.publishShown) S.publishShown(); // a presenter reads every answer, a participant only its own and what is shown
@@ -645,41 +654,61 @@ function homeHTML(){
   const top=`<div class="topbar">${brand("Tally Room")}<div class="controls">${connPill()}${S.be&&S.be.demo?`<span class="pill warn">Demo data, this browser only</span>`:""}${signOutBtn()}</div></div>`;
   if(S.setsErr) return `<div class="wrap">${top}<div class="banner">${RULES_MSG}</div></div>`;
   if(!S.sets) return `<div class="wrap">${top}<div class="card big-wait"><div class="pulse"></div><p class="meta">Loading question sets…</p></div></div>`;
-  const now=Date.now(), list=C.sortSets(S.sets, now);
+  /* own sets and the ones shared with this user; public sets of others, read-only; for an admin, everything else (backlog H5) */
+  const now=Date.now(), me=meNow(), admin=me.role==="admin", list=C.sortSets(S.sets, now).map(x=>({...x, right:C.setRight(x.meta, me)})).filter(x=>x.right);
+  const mine=list.filter(x=>x.right==="owner"||x.right==="shared"), pub=list.filter(x=>x.right==="viewer"), rest=list.filter(x=>x.right==="admin");
+  const section=(title, note, rows, empty)=>`<h2 class="sets-h">${title} <span class="meta">${rows.length}</span></h2>${note?`<p class="meta" style="margin:4px 0 0">${note}</p>`:""}
+    <div class="sets">${rows.map(x=>setRowHTML(x.id,x.meta,now,x.right)).join("")||`<div class="empty">${empty}</div>`}</div>`;
   return `<div class="wrap">${top}<div class="card" style="padding:26px">
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">Presenter</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Question sets</h1></div><button class="btn primary" data-act="setNew">New question set</button></div>
-    <p class="meta" style="margin:8px 0 6px">${list.length} ${list.length===1?"set":"sets"}. Each set has its own link, QR code, header, colour and expiry date.</p>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">${admin?"Admin":"Presenter"}</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Question sets</h1></div><button class="btn primary" data-act="setNew">New question set</button></div>
+    <p class="meta" style="margin:8px 0 6px">Each set has its own link, QR code, header, colour and expiry date. A new set is private: only you and the admins see it in this overview.</p>
     ${S.ui.homeNote?`<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}</div>`:""}
-    <div class="sets">${list.map(x=>setRowHTML(x.id,x.meta,now)).join("")||`<div class="empty">No question sets yet. Create the first one.</div>`}</div></div></div>`;
+    ${section("My sets", "", mine, "No question sets yet. Create the first one.")}
+    ${admin ? (rest.length?section("All other sets", "Sets of other users. As admin you can do everything their owner can.", rest, ""):"")
+            : section("Public sets", "Made public by other users. You can view their questions and duplicate them; the answers stay with their owner.", pub, "No public sets from other users.")}</div></div>`;
 }
-function setRowHTML(id, meta, now){
-  const ex=C.expiryInfo(meta, now), st=S.polls[id], open=esc(urlFor({set:id})), eid=esc(id), isExp=ex.state==="expired";
+/* who is looking, for the rights of core.js; and the name of a user, for "Owner: …" */
+function meNow(){ return {uid:S.me.id, role:S.auth.role}; }
+function userName(uid){ if(!uid) return "nobody"; const u=C.normUser(S.users && S.users[uid]); return u ? u.name : "a former user"; }
+function setRowHTML(id, meta, now, right){
+  const name=tx(meta.name), head=tx(meta.header), eid=esc(id), st=S.polls[id];
+  if(right==="viewer") return `<div class="set-row">
+    <span class="swatch" style="background:${esc(meta.accent)}" title="Accent colour ${esc(meta.accent)}"></span>
+    <div class="set-main"><span class="set-name">${esc(name)}</span>
+      <div class="meta">${head&&head!==name?`Header: ${esc(head)} · `:""}${esc(cap(meta.category))} · ${st?`${st.questions} ${st.questions===1?"question":"questions"}`:"counting…"} · Owner: ${esc(userName(meta.owner))}</div></div>
+    <span class="pill">Public</span>
+    <div class="controls"><button class="btn sm primary" data-act="setView" data-id="${eid}">View</button><button class="btn sm" data-act="setDup" data-id="${eid}">Duplicate</button></div></div>`;
+  const control = right==="owner" || right==="admin", isPub=meta.visibility==="public";
+  const whose = right==="shared" ? ` · Shared with you by ${esc(userName(meta.owner))}` : right==="admin" ? ` · Owner: ${esc(userName(meta.owner))}` : "";
+  const vis = control ? `<button class="pill pill-btn" data-act="setVis" data-id="${eid}" title="${isPub?"Public: every user can view the questions and duplicate this set. Click to make it private.":"Private: not listed for other users. Click to make it public."}">${isPub?"Public":"Private"}</button>`
+                      : `<span class="pill">${isPub?"Public":"Private"}</span>`;
+  const ex=C.expiryInfo(meta, now), open=esc(urlFor({set:id})), isExp=ex.state==="expired";
   const exp = isExp ? `<span class="pill warn"><span class="dot"></span>Expired</span>`
     : ex.state==="soon" ? `<span class="pill warn">Expires in ${ex.hours} h</span>`
     : ex.state==="ok" ? `<span class="pill">Until ${esc(fmtDate(ex.at))}</span>` : `<span class="pill">No expiry date</span>`;
   const facts = st ? `${st.questions} ${st.questions===1?"question":"questions"} · ${st.respondents} ${st.respondents===1?"respondent":"respondents"} · ${PHASE_LABEL[st.phase]}` : "counting…";
-  const name=tx(meta.name), head=tx(meta.header);
   return `<div class="set-row${isExp?" is-expired":""}">
     <span class="swatch" style="background:${esc(meta.accent)}" title="Accent colour ${esc(meta.accent)}"></span>
     <div class="set-main"><a class="set-name" href="${open}">${esc(name)}</a>
-      <div class="meta">${head&&head!==name?`Header: ${esc(head)} · `:""}${esc(cap(meta.category))} · ${facts}${isExp?` · expired ${esc(fmtDate(ex.at))}`:""}</div></div>
-    ${exp}
+      <div class="meta">${head&&head!==name?`Header: ${esc(head)} · `:""}${esc(cap(meta.category))} · ${facts}${isExp?` · expired ${esc(fmtDate(ex.at))}`:""}${whose}</div></div>
+    ${vis}${exp}
     <div class="controls">${isExp||ex.state==="soon"?`<button class="btn sm${isExp?" primary":""}" data-act="setExtend" data-id="${eid}" title="New expiry date: 3 days from now">Extend</button>`:""}
       <a class="btn sm${isExp?"":" primary"}" href="${open}">Open</a><button class="btn sm" data-act="setQR" data-id="${eid}">Show QR</button>
       <details class="menu"><summary class="btn sm" aria-label="More actions for ${esc(name)}">More</summary><div class="menu-list">
         <button data-act="setSettings" data-id="${eid}">Settings</button>
         <button data-act="setSettings" data-id="${eid}" data-focus="dlgExp">Other expiry date…</button>${isExp?"":`
         <button data-act="setExpire" data-id="${eid}">Expire now</button>`}
-        <button data-act="setLink" data-id="${eid}">Change link…</button>
+        ${control?`<button data-act="setLink" data-id="${eid}">Change link…</button>`:""}
         <button data-act="setDup" data-id="${eid}">Duplicate</button>
         <button data-act="setExpQ" data-id="${eid}">Export questions</button>
         <button data-act="setExpJSON" data-id="${eid}">Export responses (JSON)</button>
         <button data-act="setExpCSV" data-id="${eid}">Export responses (CSV)</button>
-        <button class="del" data-act="setDel" data-id="${eid}">Delete…</button></div></details></div></div>`;
+        ${control?`<button class="del" data-act="setDel" data-id="${eid}">Delete…</button>`:""}</div></details></div></div>`;
 }
 let statsBusy=false;
 async function loadStats(){ if(S.route!=="home" || !S.sets || statsBusy || document.visibilityState==="hidden") return; statsBusy=true;
-  try{ await Promise.all(Object.keys(S.sets).map(async id=>{ try{ S.polls[id]=C.pollStats(await S.be.readPoll(id)); }catch(e){} })); } finally { statsBusy=false; }
+  /* of a public set of someone else only the questions can be read, so only those are counted */
+  try{ await Promise.all(Object.keys(S.sets).map(async id=>{ try{ S.polls[id] = C.canManage(metaOf(id), meNow()) ? C.pollStats(await S.be.readPoll(id)) : {questions:C.normConfig(await S.be.readConfig(id)).questions.length}; }catch(e){} })); } finally { statsBusy=false; }
   renderBg(); }
 /* read fresh, so a set made on another device in the meantime is not overwritten */
 function rnd(){ try{ const a=new Uint32Array(1); crypto.getRandomValues(a); return a[0]/4294967296; }catch(e){ return Math.random(); } }
@@ -695,7 +724,7 @@ function openSetDlg(id, focus){ const m=id?metaOf(id):null; if(id && !m) return;
     f: m ? {...m} : {name:"", header:"", accent:C.DEFAULT_ACCENT, category:"generic", named:"no", expiresAt:C.extendedExpiry(Date.now()), joinUrl:""} };
   render(); }
 function dlgHTML(){ const d=S.ui.dlg; if(!d) return "";
-  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="link" ? linkDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : "";
+  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="link" ? linkDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : d.type==="view" ? viewDlgHTML(d) : "";
   return `<div class="modal" id="dlg"><div class="card dlg${d.type==="edit"?" wide":""}" role="dialog" aria-modal="true" aria-label="${esc(d.title)}">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:22px;flex:1">${esc(d.title)}</h2><button class="btn sm ghost" data-act="dlgClose">Close</button></div>${body}</div></div>`; }
 function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEFAULT_ACCENT;
@@ -708,6 +737,8 @@ function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEF
       <div class="meta">Decides which question types the set offers. Generic: scale, multiple choice, open. Consent adds the traffic light, Dilemma adds the dilemma question (a choice between two options, plus confidence).</div></div>
     <div class="field"><label for="dlgNamed">Named respondents</label><select id="dlgNamed">${[["no","No: participants answer anonymously"],["yes","Yes: participants type their name"],["random","Random: each participant gets a name such as k1"]].map(([val,l])=>`<option value="${val}" ${(f.named||"no")===val?"selected":""}>${l}</option>`).join("")}</select>
       <div class="meta">With Yes or Random the presenter sees the name with comments and open answers, and in the exports.</div></div>
+    ${!isNew && C.canControl(f, meNow()) ? `<div class="field"><label for="dlgVis">Visible to other users</label><select id="dlgVis"><option value="private" ${f.visibility!=="public"?"selected":""}>Private: not listed for other users</option><option value="public" ${f.visibility==="public"?"selected":""}>Public: every user can view the questions and duplicate the set</option></select>
+      <div class="meta">Answers and follow-up actions are never visible to other users. Whoever has the link can take part, also in a private set.</div></div>` : ""}
     <div class="field"><label for="dlgExp">Expires on</label><input type="datetime-local" id="dlgExp" value="${Number.isFinite(f.expiresAt)?toLocalInput(f.expiresAt):toLocalInput(C.extendedExpiry(Date.now()))}">
       <div class="controls"><span class="meta">From now:</span>${[[1,"1 day"],[3,"3 days"],[7,"1 week"],[30,"1 month"]].map(([n,l])=>`<button type="button" class="btn sm" data-act="dlgExpQuick" data-v="${n}">${l}</button>`).join("")}</div>
       <div class="meta">After this moment participants can no longer answer. Nothing is deleted and you can extend at any time.</div></div>
@@ -718,6 +749,7 @@ async function saveSetDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id)
   const name=g("dlgName").value.trim(); if(!name){ alert("Give the set a name."); g("dlgName").focus(); return; }
   const exp=g("dlgExp").value ? new Date(g("dlgExp").value).getTime() : NaN; if(!Number.isFinite(exp)){ alert("Choose a valid expiry date and time."); g("dlgExp").focus(); return; }
   const fields={ name, header:g("dlgHeader").value.trim().slice(0,80), accent:C.normHex(g("dlgColor").value)||C.DEFAULT_ACCENT, category:g("dlgCat").value, named:g("dlgNamed").value, expiresAt:exp };
+  const vis=g("dlgVis"); if(d.id && vis) fields.visibility = vis.value==="public" ? "public" : "private"; // only there for who controls the set
   try{
     if(d.id && fields.category!==d.f.category){ // a set can only move to a category that offers all its question types
       const qs=(S.route==="set" && S.cfg && !S.review) ? S.cfg.questions : C.normConfig((await S.be.readPoll(d.id)).config).questions;
@@ -783,10 +815,32 @@ async function saveLinkDlg(){ const d=S.ui.dlg, el=document.getElementById("dlgL
   try{ await S.be.moveSet(d.id, nid); if(S.polls[d.id]){ S.polls[nid]=S.polls[d.id]; delete S.polls[d.id]; }
     if(S.route==="set") location.href=urlFor({set:nid}); else closeDlg();
   }catch(e){ alert("Changing the link failed: "+(e&&e.message||e)); } }
-async function duplicateSet(id){ const meta=metaOf(id); if(!meta) return;
-  try{ const poll=await S.be.readPoll(id), d=C.duplicateSet(meta, poll.config, Date.now(), S.me.id), nid=await freshSetId(d.meta.name);
-    await S.be.createSet(nid, d.meta, {config:d.config, session:{...DEFAULT_SESSION}}); loadStats();
+/* the copy is private and belongs to who makes it; of a public set of someone else only the questions can be read, which is all a copy takes */
+async function duplicateSet(id){ const meta=metaOf(id); if(!meta || !C.canView(meta, meNow())) return;
+  try{ const config=await S.be.readConfig(id), d=C.duplicateSet(meta, config, Date.now(), S.me.id), nid=await freshSetId(d.meta.name);
+    await S.be.createSet(nid, d.meta, {config:d.config, session:{...DEFAULT_SESSION}});
+    if(S.route==="set"){ location.href=urlFor({set:nid, edit:true}); return; }
+    if(S.ui.dlg && S.ui.dlg.type==="view") S.ui.dlg=null;
+    S.ui.homeNote=`"${tx(d.meta.name)}" is added to your sets. It is private and yours.`; render(); loadStats();
   }catch(e){ alert("Duplicating failed: "+(e&&e.message||e)); } }
+/* a public set of someone else, read-only: its settings and questions, no answers (backlog H5) */
+function openViewDlg(id){ const m=metaOf(id); if(!m) return; S.ui.dlg={type:"view", id, title:tx(m.name), cfg:null, err:false}; render();
+  const mine=()=>{ const d=S.ui.dlg; return d && d.type==="view" && d.id===id ? d : null; };
+  S.be.readConfig(id).then(c=>{ const d=mine(); if(d){ d.cfg=C.normConfig(c); render(); } }).catch(()=>{ const d=mine(); if(d){ d.err=true; render(); } }); }
+function viewDlgHTML(d){ const m=metaOf(d.id); if(!m) return `<p class="meta">This set is no longer public.</p><div class="controls"><button class="btn ghost" data-act="dlgClose">Close</button></div>`;
+  const named={no:"anonymous answers", yes:"participants type their name", random:"participants get a random name"}[m.named], head=tx(m.header);
+  const detail=qu=>{ const k=C.kindOf(qu);
+    if(k==="open") return `up to ${qu.maxLen||C.OPEN_MAX} characters`;
+    if(k==="scale") return `${qu.min} to ${qu.max}${tx(qu.lo)||tx(qu.hi)?` (${tx(qu.lo)||qu.min} … ${tx(qu.hi)||qu.max})`:""}`;
+    const cf=k==="dilemma" ? C.normConf(qu.conf) : null;
+    return (qu.options||[]).map(o=>tx(o)).join(" / ")+(cf?`; confidence ${cf.min} to ${cf.max}`:""); };
+  const qs=d.cfg ? d.cfg.questions : null;
+  return `<p class="meta" style="margin:0">Read-only${head&&head!==tx(m.name)?` · Header: ${esc(head)}`:""} · ${esc(cap(m.category))} · ${named} · Owner: ${esc(userName(m.owner))}</p>
+    ${d.err ? `<div class="banner">The questions of this set could not be read.</div>`
+      : !qs ? `<p class="meta">Loading questions…</p>`
+      : qs.length ? `<ol class="view-qs">${qs.map(qu=>`<li><b>${esc(tx(qu.text))}</b><div class="meta">${esc(cap(C.KIND_NAME[C.kindOf(qu)]))}: ${esc(detail(qu))}</div></li>`).join("")}</ol>`
+      : `<p class="meta">This set has no questions yet.</p>`}
+    <div class="controls"><button class="btn primary" data-act="setDup" data-id="${esc(d.id)}">Duplicate to my sets</button><button class="btn ghost" data-act="dlgClose">Close</button></div>`; }
 function extendSet(id){ const now=Date.now(); return S.be.patchMeta(id, {expiresAt:C.extendedExpiry(now), updatedAt:now}).catch(e=>alert("Extending failed: "+(e&&e.message||e))); }
 /* ============ actions ============ */
 /* consent sets: fix the light of the given proposals as the votes stand now (backlog C2).
@@ -908,12 +962,16 @@ app.addEventListener("click", e=>{
     case "setExtend": extendSet(id); break;
     case "setExpire": { const now=Date.now(); S.be.patchMeta(id, {expiresAt:now-1000, updatedAt:now}).catch(e=>alert("Expiring failed: "+(e&&e.message||e))); break; } // undone with Extend
     case "setQR": S.ui.dlg={type:"qr", id, title:"QR code: "+tx((metaOf(id)||{}).name)}; render(); break;
-    case "setLink": openLinkDlg(id); break;
+    case "setLink": if(C.canControl(metaOf(id), meNow())) openLinkDlg(id); break;
+    case "setView": openViewDlg(id); break;
+    case "setVis": { const m=metaOf(id); if(!m || !C.canControl(m, meNow())) break; const pub=m.visibility!=="public";
+      if(pub && !confirm(`Make "${tx(m.name)}" public?\n\nEvery user of this Tally Room can then read its questions and settings, and duplicate it. Answers and follow-up actions stay with you.`)) break;
+      S.be.patchMeta(id, {visibility:pub?"public":"private", updatedAt:Date.now()}).catch(e=>alert("Changing this failed: "+(e&&e.message||e))); break; }
     case "setDup": duplicateSet(id); break;
     case "setExpQ": exportSet(id,"questions"); break;
     case "setExpJSON": exportSet(id,"json"); break;
     case "setExpCSV": exportSet(id,"csv"); break;
-    case "setDel": openDelDlg(id); break;
+    case "setDel": if(C.canControl(metaOf(id), meNow())) openDelDlg(id); break;
     case "delConfirm": { const d=S.ui.dlg; if(!d || d.type!=="del") break;
       S.be.removeSet(d.id).then(()=>{ delete S.polls[d.id]; if(S.route==="set") location.href=urlFor(); else closeDlg(); }).catch(e=>alert("Deleting failed: "+(e&&e.message||e))); break; }
     case "dlgClose": closeDlg(); break;
@@ -1017,12 +1075,14 @@ function takeOver(be){ if(tookOver || !be.isAdmin || !be.id || !S.sets) return; 
 function bootHome(be){
   render(); if(!be.isHost) return; // a participant without a set link only gets the "scan the QR code" page
   be.onSets((sets,err)=>{ S.setsErr=err||null; if(!err) S.sets=sets||{}; takeOver(be); renderBg(); loadStats(); });
+  if(be.onUsers) be.onUsers(u=>{ S.users=u||{}; renderBg(); }); // for the names of owners
   setInterval(loadStats, 30000);
   setInterval(renderBg, 60000); // expiry labels move with the clock
   document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") loadStats(); });
 }
 function bootSet(be){
   const p=be.poll(S.setId); S.backend=p;
+  if(p.onRight) p.onRight(r=>{ S.right=!!r; applyRole(); }); // before the other listeners: they ask whether this device presents the set
   const raw={cfg:undefined, ses:undefined}; let editDone=!params.has("edit"), votesIn=false;
   let claimed="", shownJSON=null, shownT=null; // the name this device last put in names/, the last published shown/ (below)
   function settle(){ if(S.review) return;
@@ -1034,11 +1094,11 @@ function bootSet(be){
   p.onMeta((m,err)=>{ const was=expired(); S.metaErr=err||null; S.meta=err?undefined:C.normMeta(m); settle(); ensureName(); renderBg(); if(was && !expired()) heartbeat(); });
   p.onConfig(c=>{ raw.cfg=c||null; if(S.review){ S.review.live.cfg=C.normConfig(c); return; } settle(); publishShown(); renderBg(); });
   p.onSession(s=>{ s=normSession(s); noteReset(s); raw.ses=s||null; if(S.review){ S.review.live.ses={...DEFAULT_SESSION,...(s||{})}; return; } settle(); publishShown(); renderBg(); });
-  p.onVotes(v=>{ S.parts.all=v||{}; if(be.isHost) votesIn=true; if(S.review){ S.review.live.votes=S.parts.all; return; } syncVotes(); ensureName(); publishShown(); renderBg(); });
+  p.onVotes(v=>{ S.parts.all=v||{}; if(S.me.isHost) votesIn=true; if(S.review){ S.review.live.votes=S.parts.all; return; } syncVotes(); ensureName(); publishShown(); renderBg(); });
   if(p.onMine) p.onMine(v=>{ S.parts.mine=v||null; if(S.review) return; syncVotes(); renderBg(); });
   if(p.onShown) p.onShown(v=>{ S.parts.shown=v||{}; if(S.review) return; syncVotes(); renderBg(); });
-  if(p.onNames) p.onNames(v=>{ S.parts.names=v||{}; if(!be.isHost) votesIn=true; if(S.review) return; ensureName(); renderBg(); });
-  p.onActions(a=>{ if(!be.isHost) a={}; if(S.review){ S.review.live.actions=a||{}; return; } S.actions=a||{}; renderBg(); }); // follow-up actions are for the presenter only
+  if(p.onNames) p.onNames(v=>{ S.parts.names=v||{}; if(!S.me.isHost) votesIn=true; if(S.review) return; ensureName(); renderBg(); });
+  p.onActions(a=>{ if(!S.me.isHost) a={}; if(S.review){ S.review.live.actions=a||{}; return; } S.actions=a||{}; renderBg(); }); // follow-up actions are for the presenter only
   try{ const o=JSON.parse(localStorage.getItem("tr_name_"+S.setId)||"null"); if(o && o.n){ S.me.name=String(o.n); S.me.nameAt=o.at||0; } }catch(e){}
   { const send=p.setVotes; p.setVotes=(pid,v)=>{ if(typingOff && v && v.typing){ v={...v}; delete v.typing; } if(pid===be.id){ v=stampDoc(v); claimName(); } return send(pid, v); }; } // this device's doc always carries (or drops) its name
   /* a named set keeps the names in use in polls/{id}/names, which every device may read, so names stay unique without anyone
@@ -1046,20 +1106,20 @@ function bootSet(be){
   function claimName(){ if(!p.setName || !be.id || !C.isNamed(S.meta && S.meta.named) || !S.me.name) return; const k=S.me.name+"|"+(S.me.nameAt||0);
     if(k===claimed) return; claimed=k; p.setName(be.id, {n:S.me.name, at:S.me.nameAt||0}).catch(e=>{ claimed=""; console.warn("name not saved", e); }); }
   /* the presenter's screen publishes what the room is shown: the answers of the revealed questions, unlinkable (core.shownVotes) */
-  function publishShown(){ if(!be.isHost || S.review || !S.cfg || !S.ses || !p.setShown || be.canWrite===false || expired()) return;
-    clearTimeout(shownT); shownT=setTimeout(()=>{ if(!be.isHost || S.review || !S.cfg || !S.ses) return; const v=C.shownVotes(S.cfg, S.ses, S.votes, namedMode()), j=JSON.stringify(v);
+  function publishShown(){ if(!S.me.isHost || S.review || !S.cfg || !S.ses || !p.setShown || be.canWrite===false || expired()) return;
+    clearTimeout(shownT); shownT=setTimeout(()=>{ if(!S.me.isHost || S.review || !S.cfg || !S.ses) return; const v=C.shownVotes(S.cfg, S.ses, S.votes, namedMode()), j=JSON.stringify(v);
       if(j===shownJSON) return; shownJSON=j; write(()=>p.setShown(v)); }, 600); }
   S.publishShown=publishShown;
   /* random names are handed out here; when two devices hold the same name the later one gives way */
   function ensureName(){ if(!be.id || !S.meta || !S.ses || !votesIn || S.review || expired()) return; const nm=S.meta.named; if(!C.isNamed(nm)) return;
-    const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
+    const isP = !S.me.isHost || S.ui.view==="participant"; if(!isP) return;
     const clash = S.me.name && C.mustYieldName(nameVotes(), be.id, S.me.name, S.me.nameAt);
     if(nm==="random" && (!S.me.name || clash)){ const n=C.randomName(new Set(C.otherNames(nameVotes(),be.id).map(x=>x.toLowerCase()))); if(!n) return;
       setName(n); const cur=S.votes[be.id], doc=C.presenceDoc(cur, S.ses.round, Date.now());
       putMine(doc); write(()=>p.setVotes(be.id,doc)); renderBg(); }
     else if(nm==="yes" && clash){ setName(null); S.ui.nameErr="This name is already in use. Choose another."; renderBg(); } }
   // announce presence so the host sees who joined (a vote doc with no answers)
-  function heartbeat(){ if(!be.id || !S.ses || !S.meta || expired() || be.canWrite===false || isKicked() || S.review) return; const isP = !be.isHost || S.ui.view==="participant"; if(!isP) return;
+  function heartbeat(){ if(!be.id || !S.ses || !S.meta || expired() || be.canWrite===false || isKicked() || S.review) return; const isP = !S.me.isHost || S.ui.view==="participant"; if(!isP) return;
     ensureName(); if(C.isNamed(S.meta.named) && !S.me.name) return; // in a named set you join once you have a name
     const cur=S.votes[be.id]; const doc = C.presenceDoc(cur, S.ses.round, Date.now());
     putMine(doc); write(()=>p.setVotes(be.id,doc)); }
@@ -1073,7 +1133,7 @@ function bootSet(be){
     if(d.config) raw.cfg=d.config;
     const ss=normSession(d.session); noteReset(ss); if(ss && ss.phase) raw.ses=ss;
     settle(); if(!S.ses) return;
-    if(be.isHost){ const mine=(S.parts.all||{})[S.me.id]; S.parts.all=d.votes||{}; if(mine && mine.round===S.ses.round) S.parts.all[S.me.id]=mine; S.actions=d.actions||{}; }
+    if(S.me.isHost){ const mine=(S.parts.all||{})[S.me.id]; S.parts.all=d.votes||{}; if(mine && mine.round===S.ses.round) S.parts.all[S.me.id]=mine; S.actions=d.actions||{}; }
     else { S.parts.shown=d.shown||{}; S.parts.names=d.names||{}; if(!(S.parts.mine && S.parts.mine.round===S.ses.round)) S.parts.mine=d.mine||null; }
     syncVotes();
     renderBg(); }

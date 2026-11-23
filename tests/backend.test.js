@@ -17,7 +17,11 @@ function fakeFirebase({ data = {}, user = null, anonFails = false, noAppCheck = 
     signInWithEmailAndPassword: async (email, pw) => { if (pw !== "good") throw Object.assign(new Error("bad"), { code: "auth/invalid-credential" }); setUser({ uid: "u_" + email.split("@")[0], isAnonymous: false, email }); },
     signOut: async () => { log.out++; setUser(null); }, sendPasswordResetEmail: async () => {} };
   /* the listener on users/{uid} is the sign-in itself, so it has its own log; log.on holds the listeners the page asked for */
-  const db = { ref: (path) => ({ on: (ev, cb) => { if (path && path[0] !== ".") { (path.startsWith("users/") ? (log.user = log.user || []) : log.on).push(path); live.push([path, cb]); setTimeout(() => cb({ val: () => get(path) ?? null }), 0); } return cb; },
+  /* a query on a list: the children whose field has that value; listed in the logs as sets?owner=u_ann */
+  const filtered = (path, k, v) => { const o = get(path) || {}, out = {}; Object.keys(o).forEach((id) => { if (o[id] && o[id][k] === v) out[id] = o[id]; }); return Object.keys(out).length ? out : null; };
+  const query = (path, k, v) => { const name = path + "?" + k + "=" + v; return { on: (ev, cb) => { log.on.push(name); live.push([path, cb, () => filtered(path, k, v)]); setTimeout(() => cb({ val: () => filtered(path, k, v) }), 0); return cb; },
+    off: (ev, cb) => { log.off.push(name); const i = live.findIndex((l) => l[1] === cb); if (i >= 0) live.splice(i, 1); } }; };
+  const db = { ref: (path) => ({ orderByChild: (k) => ({ equalTo: (v) => query(path, k, v) }), on: (ev, cb) => { if (path && path[0] !== ".") { (path.startsWith("users/") ? (log.user = log.user || []) : log.on).push(path); live.push([path, cb]); setTimeout(() => cb({ val: () => get(path) ?? null }), 0); } return cb; },
     off: (ev, cb) => { log.off.push(path); const i = live.findIndex((l) => l[1] === cb); if (i >= 0) live.splice(i, 1); }, once: async () => ({ val: () => get(path) ?? null }),
     set: async (v) => (log.set = log.set || []).push([path, v]), update: async (v) => (log.update = log.update || []).push([path || "", v]), child: (p) => db.ref(path + "/" + p) }) };
   const appCheck = () => ({ activate: (p, refresh) => log.appCheck.push([p instanceof appCheck.ReCaptchaEnterpriseProvider ? "enterprise:" + p.siteKey : p, refresh, global.FIREBASE_APPCHECK_DEBUG_TOKEN === true]), getToken: async () => ({ token: "ac-token" }) });
@@ -25,7 +29,7 @@ function fakeFirebase({ data = {}, user = null, anonFails = false, noAppCheck = 
   log.appCheck = [];
   /* a change in the database, as the server would push it to who listens */
   const change = (path, v) => { const ks = path.split("/"), last = ks.pop(); let o = data; ks.forEach((k) => (o = o[k] = o[k] || {})); if (v == null) delete o[last]; else o[last] = v;
-    live.filter((l) => l[0] === path).forEach((l) => l[1]({ val: () => get(path) ?? null })); };
+    live.filter((l) => l[0] === path || path.startsWith(l[0] + "/")).forEach((l) => l[1]({ val: () => (l[2] ? l[2]() : get(l[0]) ?? null) })); };
   return { log, change, firebase: { initializeApp() {}, database: () => db, auth: () => auth, ...(noAppCheck ? {} : { appCheck }) } };
 }
 function load(opts, storage, query, anon, appCheckKey) {
@@ -34,7 +38,7 @@ function load(opts, storage, query, anon, appCheckKey) {
   const be = require("../js/backend.js").make({ firebaseConfig: { apiKey: "k", databaseURL: "https://x.example" }, params: new URLSearchParams(query || ""), anon, appCheckKey });
   const states = []; be.onAuth((a) => states.push(a)); return { be, states, log: fb.log, change: fb.change };
 }
-const DATA = { users: { u_ann: { email: "ann@x.nl", name: "Ann", role: "user" }, u_adm: { email: "adm@x.nl", role: "admin" }, u_odd: { email: "odd@x.nl", role: "presenter" } }, presenters: { u_bob: true }, sets: { a: { name: "A" } }, polls: { a: { config: { mode: "live" }, actions: { k: { action: "x" } } } } };
+const DATA = { users: { u_ann: { email: "ann@x.nl", name: "Ann", role: "user" }, u_piet: { email: "piet@x.nl", role: "user" }, u_adm: { email: "adm@x.nl", role: "admin" }, u_odd: { email: "odd@x.nl", role: "presenter" } }, presenters: { u_bob: true }, sets: { a: { name: "A", owner: "u_ann" } }, polls: { a: { config: { mode: "live" }, actions: { k: { action: "x" } } } } };
 
 test("a participant on a set page is signed in anonymously and the uid is the device id", async () => {
   const { be, states, log } = load({ data: DATA }, null, "set=a", true); await tick();
@@ -63,8 +67,9 @@ test("a role that is given, changed or taken away works at once, without signing
   const sets = []; be.onSets((s) => sets.push(s && Object.keys(s))); await tick();
   assert.equal(be.isUser, false); assert.deepEqual(log.on, [], "no rights: the list of sets is not asked for");
   change("users/u_new", { email: "new@x.nl", role: "user" }); await tick();
-  assert.deepEqual([be.role, be.isAdmin], ["user", false]); assert.deepEqual(log.on, ["sets"]); assert.deepEqual(sets.at(-1), ["a"]);
+  assert.deepEqual([be.role, be.isAdmin], ["user", false]); assert.deepEqual(log.on, ["sets?owner=u_new", "sets?visibility=public", "userSets/u_new"]); assert.deepEqual(sets.at(-1), [], "a new user owns nothing yet");
   change("users/u_new", { email: "new@x.nl", role: "admin" }); await tick(); assert.deepEqual([be.role, be.isAdmin], ["admin", true]);
+  assert.equal(log.on.at(-1), "sets"); assert.deepEqual(sets.at(-1), ["a"], "an admin reads the whole list");
   change("users/u_new", null); await tick(); assert.deepEqual([be.role, be.isUser, be.isHost], [null, false, false]);
   assert.deepEqual(states.map((s) => s.role), [null, "user", "admin", null]);
 });
@@ -76,7 +81,7 @@ test("the user record is not followed any more after signing out; a participant 
 });
 test("the list of users is for users only", async () => {
   const u = load({ data: DATA, user: { uid: "u_ann", isAnonymous: false } }, null, "", false); await tick();
-  let got = null; u.be.onUsers((m) => (got = m)); await tick(); assert.deepEqual(Object.keys(got), ["u_ann", "u_adm", "u_odd"]);
+  let got = null; u.be.onUsers((m) => (got = m)); await tick(); assert.deepEqual(Object.keys(got), ["u_ann", "u_piet", "u_adm", "u_odd"]);
   const p = load({ data: DATA }, null, "set=a", true); await tick();
   let none = null; p.be.onUsers((m) => (none = m)); await tick(); assert.deepEqual(none, {}); assert.ok(!p.log.on.includes("users"));
 });
@@ -93,10 +98,10 @@ test("signing out on a set page makes the presenter an anonymous participant, an
   const { be, log } = load({ data: DATA, user: { uid: "u_ann", isAnonymous: false } }, null, "set=a", true); await tick();
   const p = be.poll("a"), seen = { cfg: 0, actions: [] };
   p.onConfig(() => seen.cfg++); p.onActions((a) => seen.actions.push(Object.keys(a).length)); await tick();
-  assert.deepEqual(log.on, ["polls/a/config", "polls/a/actions"]); assert.deepEqual(seen.actions, [1]);
+  assert.deepEqual(log.on, ["sets/a", "polls/a/config", "polls/a/actions"]); assert.deepEqual(seen.actions, [1]);
   await be.signOut(); await tick();
   assert.equal(be.isHost, false); assert.equal(be.id, "anon1");
-  assert.deepEqual(log.on, ["polls/a/config", "polls/a/actions", "polls/a/config"]); // the actions are not listened to any more
+  assert.deepEqual(log.on, ["sets/a", "polls/a/config", "polls/a/actions", "sets/a", "polls/a/config"]); // the actions are not listened to any more
   assert.deepEqual(seen.actions, [1, 0]); assert.equal(seen.cfg, 2);
 });
 test("a failed anonymous sign-in is reported, not hidden", async () => {
@@ -180,10 +185,74 @@ test("demo mode: a set is created with its poll, and not over an existing one", 
 test("a participant listens to its own record, what is shown and the names, never to all votes; a presenter to all votes", async () => {
   const part = load({ data: DATA }, null, "set=a", true); await tick();
   const p = part.be.poll("a"), got = {}; p.onVotes((v) => (got.all = v)); p.onMine((v) => (got.mine = v)); p.onShown((v) => (got.shown = v)); p.onNames((v) => (got.names = v)); await tick();
-  assert.deepEqual(part.log.on, ["polls/a/votes/anon1", "polls/a/shown", "polls/a/names"]); assert.deepEqual(got.all, {});
+  assert.deepEqual(part.log.on, ["sets/a", "polls/a/votes/anon1", "polls/a/shown", "polls/a/names"]); assert.deepEqual(got.all, {});
   const host = load({ data: DATA, user: { uid: "u_ann", isAnonymous: false } }, null, "set=a", true); await tick();
   const h = host.be.poll("a"); h.onVotes(() => {}); h.onMine(() => {}); h.onShown(() => {}); h.onNames(() => {}); await tick();
-  assert.deepEqual(host.log.on, ["polls/a/votes"]);
+  assert.deepEqual(host.log.on, ["sets/a", "polls/a/votes"]);
+});
+/* ---------- rights per set and the list of sets (backlog H5) ---------- */
+const WORLD = () => ({ users: DATA.users,
+  sets: { mine: { name: "Mine", owner: "u_ann" }, shared: { name: "Shared", owner: "u_piet", shared: { u_ann: true } }, pub: { name: "Public", owner: "u_piet", visibility: "public" }, priv: { name: "Private", owner: "u_piet" }, old: { name: "Old" } },
+  userSets: { u_ann: { shared: true, gone: true, priv: true } }, // gone: deleted since; priv: an entry that was left behind after the sharing ended
+  polls: { mine: { votes: { x: { round: 1 } } }, shared: { votes: { x: { round: 1 } } }, pub: { votes: { x: { round: 1 } } } } });
+const ann = { uid: "u_ann", isAnonymous: false, email: "ann@x.nl" };
+test("a user is presenter of the sets it owns or that are shared with it, and a participant of every other set", async () => {
+  for (const [id, manages] of [["mine", true], ["shared", true], ["pub", false], ["priv", false], ["old", false], ["nope", false]]) {
+    const { be, log } = load({ data: WORLD(), user: ann }, null, "set=" + id, true); await tick();
+    const p = be.poll(id), rights = []; let votes = null; p.onRight((r) => rights.push(r)); p.onVotes((v) => (votes = v)); p.onMine(() => {}); await tick();
+    assert.deepEqual(rights, [manages], id); assert.equal(be.isHost, true, "still a user");
+    assert.deepEqual(log.on, ["sets/" + id, manages ? `polls/${id}/votes` : `polls/${id}/votes/u_ann`], id);
+    assert.deepEqual(votes, manages ? { x: { round: 1 } } : {}, id);
+  }
+  const adm = load({ data: WORLD(), user: { uid: "u_adm", isAnonymous: false } }, null, "set=priv", true); await tick();
+  const rights = []; adm.be.poll("priv").onRight((r) => rights.push(r)); await tick(); assert.deepEqual(rights, [true], "an admin presents every set");
+});
+test("the right on an open set follows its record: shared, taken away, given to another owner", async () => {
+  const { be, log, change } = load({ data: WORLD(), user: ann }, null, "set=priv", true); await tick();
+  const p = be.poll("priv"), rights = [], votes = []; p.onRight((r) => rights.push(r)); p.onVotes((v) => votes.push(Object.keys(v).length)); p.onMine(() => {}); await tick();
+  change("polls/priv/votes", { x: { round: 1 }, y: { round: 1 } }); await tick(); assert.deepEqual(votes, [0], "a participant does not get the answers");
+  change("sets/priv/shared", { u_ann: true }); await tick(); assert.deepEqual(rights, [false, true]); assert.equal(log.on.at(-1), "polls/priv/votes"); assert.equal(votes.at(-1), 2);
+  change("sets/priv/name", "Renamed"); await tick(); assert.deepEqual(rights, [false, true], "another change of the record does not touch the right");
+  change("sets/priv/shared", null); await tick(); assert.deepEqual(rights, [false, true, false]); assert.equal(log.on.at(-1), "polls/priv/votes/u_ann"); assert.equal(votes.at(-1), 0);
+  change("sets/priv/owner", "u_ann"); await tick(); assert.deepEqual(rights, [false, true, false, true]);
+  change("sets/priv", null); await tick(); assert.equal(rights.at(-1), false, "a deleted set has no presenter");
+});
+test("the catch-up read of who manages a set takes the whole poll; of anyone else only the parts", async () => {
+  const calls = []; global.fetch = async (url) => { calls.push(url.split(".json")[0].replace("https://x.example/", "")); return { ok: true, json: async () => ({}) }; };
+  const u = { ...ann, getIdToken: async () => "t" };
+  const a = load({ data: WORLD(), user: u }, null, "set=mine", true); await tick(); const pa = a.be.poll("mine"); await tick(); await pa.pull(); assert.deepEqual(calls, ["polls/mine"]);
+  calls.length = 0; const b = load({ data: WORLD(), user: u }, null, "set=pub", true); await tick(); const pb = b.be.poll("pub"); await tick(); await pb.pull();
+  assert.deepEqual(calls.sort(), ["polls/pub/config", "polls/pub/names", "polls/pub/session", "polls/pub/shown", "polls/pub/votes/u_ann"]);
+  calls.length = 0; await b.be.readConfig("pub"); assert.deepEqual(calls, ["polls/pub/config"]);
+});
+test("the list of sets of a user: own, shared with it and public, from three sources; never the private sets of others", async () => {
+  const { be, log, change } = load({ data: WORLD(), user: ann }, null, "", false); await tick();
+  const seen = []; be.onSets((s, err) => seen.push(err ? "error" : Object.keys(s).sort())); await tick();
+  assert.deepEqual(log.on, ["sets?owner=u_ann", "sets?visibility=public", "userSets/u_ann", "sets/shared", "sets/gone", "sets/priv"]);
+  assert.deepEqual(seen, [["mine", "pub", "shared"]], "one answer, when every source has answered; the stale entries are skipped");
+  change("sets/new1", { name: "New", owner: "u_ann" }); await tick(); assert.deepEqual(seen.at(-1), ["mine", "new1", "pub", "shared"]);
+  change("sets/pub/visibility", "private"); await tick(); assert.deepEqual(seen.at(-1), ["mine", "new1", "shared"], "made private again: gone from the list");
+  change("sets/shared/shared", null); await tick(); assert.deepEqual(seen.at(-1), ["mine", "new1"], "no longer shared, although the index still lists it");
+  change("sets/priv/shared", { u_ann: true }); await tick(); assert.deepEqual(seen.at(-1), ["mine", "new1", "priv"]);
+  change("userSets/u_ann", { shared: true }); await tick(); assert.deepEqual(seen.at(-1), ["mine", "new1"]); assert.ok(log.off.includes("sets/priv") && log.off.includes("sets/gone"));
+});
+test("the list of sets of an admin is the whole list; signing out stops it", async () => {
+  const { be, log } = load({ data: WORLD(), user: { uid: "u_adm", isAnonymous: false } }, null, "", false); await tick();
+  const seen = []; be.onSets((s) => seen.push(Object.keys(s).sort())); await tick();
+  assert.deepEqual(log.on, ["sets"]); assert.deepEqual(seen, [["mine", "old", "priv", "pub", "shared"]]);
+  await be.signOut(); await tick(); assert.ok(log.off.includes("sets")); assert.equal(seen.length, 1);
+});
+test("demo mode follows the same rights: the user sees its shared and the public set, and presents only the shared one", async () => {
+  global.localStorage = fakeStorage(); global.addEventListener = () => {};
+  delete require.cache[require.resolve("../js/backend.js")]; const B = require("../js/backend.js"), mk = (q) => B.make({ firebaseConfig: {}, params: new URLSearchParams(q) });
+  const adm = mk("demo=1"), usr = mk("demo=1&role=user"), part = mk("demo=1&host=off"), list = (b) => { let s = null; b.onSets((x) => (s = Object.keys(x))); return s; };
+  assert.deepEqual(list(adm), ["demo0001", "demo0002", "demo0003"]); assert.deepEqual(list(usr), ["demo0002", "demo0003"]); assert.deepEqual(list(part), []);
+  const right = (b, id) => { let r = null; b.poll(id).onRight((x) => (r = x)); return r; };
+  assert.deepEqual(["demo0001", "demo0002", "demo0003"].map((id) => [right(adm, id), right(usr, id), right(part, id)]), [[true, false, false], [true, false, false], [true, true, false]]);
+  await usr.createSet("mine01", { name: "Mine", owner: usr.id }, { config: { questions: [] }, session: {} }); assert.deepEqual(list(usr), ["demo0002", "demo0003", "mine01"]); assert.equal(right(usr, "mine01"), true);
+  const rights = []; usr.poll("demo0002").onRight((r) => rights.push(r)); await usr.patchMeta("demo0002", { shared: { "demo-user": true } }); // in a browser the other tab does this, and the change arrives through the shared store
+  assert.deepEqual(rights.filter((r, i) => i === 0 || r !== rights[i - 1]), [false, true], "shared while open: presenter at once");
+  assert.deepEqual(await usr.readConfig("demo0002").then((c) => c.questions.length), 2);
 });
 test("a participant's catch-up read asks only for the parts it may read", async () => {
   const calls = []; global.fetch = async (url) => { calls.push(url.split(".json")[0].replace("https://x.example/", "")); return { ok: true, json: async () => ({}) }; };
