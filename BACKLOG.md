@@ -983,7 +983,7 @@ Optional, and the largest item of this epic. Worth building when sets are named 
 
 Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps working without sign-in, as one made-up admin.
 
-> **Status: H1 to H5 built on 23 Nov 2026**, with tests and tried in demo mode (as admin and with `&role=user`). Together they are the release that can go live. **Not live:** the rules are not published, nothing has run against the real database, and `tests/rules-checklist.md` is still empty. H6 to H9 are not built; until H6 a set can only be shared by editing the database by hand, and until H8 users are added by hand.
+> **Status: H1 to H7 built on 23 Nov 2026**, with tests and tried in demo mode (as admin and with `&role=user`). H1 to H5 are the release that can go live; H6 and H7 can go with it or follow. **Not live:** the rules are not published, nothing has run against the real database, and `tests/rules-checklist.md` is still empty. H8 and H9 are not built; until H8 users are added by hand.
 
 **Where it stands today** (before this epic)
 
@@ -1175,6 +1175,16 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 
 ### H6. Sharing a set with other users — M
 
+> **Status: built on 23 Nov 2026**, with tests (core, both backends) and tried in demo mode as owner, as receiver and as admin, on the overview and from Settings on a set page. **Not tried:** the real database.
+>
+> Differences from the specification below:
+> - **The field to add a user** is a text field with the list of users as suggestions ("Sam <sam@example.com>"). A name, a part of a name or an email address is enough when it points at one user; with more than one match the page asks for the full email address.
+> - **Who it is shared with is also written on the row** ("Shared with Piet, Sam"), next to the **Shared** mark with the full line as hover text. For who controls the set the mark is a button that opens the share dialog.
+> - **Settings** shows the line under "Who has access", with **Share…** or **Leave this set**. Share opens over Settings and comes back to it; what was typed in Settings is kept.
+> - **Leave** asks for confirmation. On a set page it goes back to the overview.
+> - **An admin can share a set with themself**; an admin who is on a shared list keeps the admin's actions, not Leave.
+> - No change to the database rules: H4 already allows the two writes.
+
 **Story.** As a user I want to give a colleague access to my set, so that I can prepare the questions and they can facilitate the session.
 
 **Specification**
@@ -1196,6 +1206,16 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 **Depends on:** H1, H2, H4, H5.
 
 ### H7. Admin: all sets and users — M
+
+> **Status: built on 23 Nov 2026**, with tests (core, both backends, rules) and tried in demo mode: Assign from the row and from Settings, the Users screen, and a user's open overview turning into "This account has no access" when the admin removes them in another tab. **Not tried:** the real database.
+>
+> Differences from the specification below:
+> - **The rules changed** (`database.rules.json` and the block in `tallyroom-setup.md`): the write rule of `users` moved from the list to the record, so that an admin cannot remove their own record or write a role other than `admin` into it. Another admin can. Publish the rules again.
+> - **Users is a second screen of the overview**, behind a switch "Question sets | Users" that only an admin sees. It has no link of its own: a reload shows the question sets again.
+> - **Change the name and switch role are one dialog** ("Change name or role"). On your own row the role is locked and Remove access is greyed out.
+> - **Remove access looks through the sets as well as `userSets/{uid}`** for shared lists, in case the index missed one. The record and every entry go in one write.
+> - **Assign to…** is also in Settings ("Who has access"). The dialog offers every user except the current owner.
+> - **Demo:** the demo people are followed like real records, so a renamed or removed demo person follows in its own tab at once. A removed demo person cannot be put back from the page (adding users is H8); clear the site data of the browser to start over.
 
 **Story.** As an admin I want to manage every set and the list of users, so that sets do not get stuck with someone who has left.
 

@@ -392,6 +392,39 @@ function sharedWith(meta){ const m=normMeta(meta); return m ? Object.keys(m.shar
 function withShare(meta, uid, on){ const m=normMeta(meta); if(!m) return null; const shared={...m.shared};
   if(on && normUid(uid) && uid!==m.owner) shared[uid]=true; else if(!on) delete shared[uid];
   return {...m, shared}; }
+/* ---- sharing a set (backlog H6) ---- */
+/* everyone who may use this Tally Room, by name: [{uid, name, email, role}] */
+function userList(users){ return Object.keys(users||{}).map(uid=>{ const u=normUser(users[uid]); return u && normUid(uid) ? {uid, name:u.name, email:u.email, role:u.role} : null; }).filter(Boolean)
+  .sort((a,b)=>a.name.localeCompare(b.name) || a.email.localeCompare(b.email) || a.uid.localeCompare(b.uid)); }
+const userLabel = u => u.email ? `${u.name} <${u.email}>` : u.name;
+/* the users a typed text points at, by name or email address, leaving out `exclude` (uids). An exact email address, name or
+   label ("Name <email>") wins; otherwise every user whose name or address holds the text */
+function matchUsers(users, text, exclude){ const t=String(text||"").trim().toLowerCase(); if(!t) return [];
+  const list=userList(users).filter(u=>!(exclude||[]).includes(u.uid)), ids=l=>l.map(u=>u.uid);
+  const exact=list.filter(u=>u.email.toLowerCase()===t || userLabel(u).toLowerCase()===t); if(exact.length) return ids(exact);
+  const named=list.filter(u=>u.name.toLowerCase()===t); if(named.length) return ids(named);
+  return ids(list.filter(u=>u.name.toLowerCase().includes(t) || u.email.toLowerCase().includes(t))); }
+/* "Owner: Anna. Shared with: Piet, Sam": the same line on the row, in the share dialog and in Settings */
+function shareLine(meta, users){ const m=normMeta(meta); if(!m) return "";
+  const name=uid=>{ const u=normUser(users && users[uid]); return u ? u.name : "a former user"; };
+  const names=Object.keys(m.shared).map(name).sort((a,b)=>a.localeCompare(b));
+  return `Owner: ${m.owner?name(m.owner):"nobody"}.${names.length?` Shared with: ${names.join(", ")}`:" Not shared"}`; }
+/* ---- the admin's side: users and the sets they own (backlog H7) ---- */
+function ownedIds(sets, uid){ return Object.keys(sets||{}).filter(id=>{ const m=normMeta(sets[id]); return !!m && !!uid && m.owner===uid; }).sort(); }
+/* what an admin may change of a user record: the name and the role, nothing else */
+function userPatch(p){ const out={}, name=String((p&&p.name)==null?"":p.name).replace(/\s+/g," ").trim().slice(0,60);
+  if(name) out.name=name; if(p && normRole(p.role)) out.role=p.role; return out; }
+/* an admin cannot remove or demote themself, so there is always one admin left; null when the change is fine */
+function selfChangeProblem(me, uid, change){ if(!me || me!==uid) return null;
+  if(change==="remove") return "You cannot remove your own access.";
+  return change && change.role && change.role!=="admin" ? "You cannot take away your own admin role." : null; }
+/* taking a user's access away: the record goes, and the user leaves every shared list. index = userSets/{uid}; the sets are
+   looked through as well, in case the index missed one. owned = the sets the user still owns: those are assigned first */
+function userRemoval(uid, sets, index){ const owned=ownedIds(sets, uid), ids=new Set(Object.keys(index||{}));
+  Object.keys(sets||{}).forEach(id=>{ const s=sets[id] && sets[id].shared; if(s && s[uid]===true) ids.add(id); });
+  const update={["users/"+uid]:null}; [...ids].sort().forEach(id=>{ update["userSets/"+uid+"/"+id]=null; if(sets && sets[id]) update["sets/"+id+"/shared/"+uid]=null; });
+  return {owned, update}; }
+const ownsMessage = (name, n) => `${name} still owns ${n} question ${n===1?"set":"sets"}. Assign ${n===1?"it":"them"} to another user first.`;
 /* a new owner leaves the shared list; the previous owner keeps no rights */
 function withOwner(meta, uid){ const m=normMeta(meta); if(!m || !normUid(uid)) return m; return normMeta({...m, owner:uid}); }
 
@@ -538,7 +571,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, visibleQids, shownVotes, namesAsVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
-  VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, PW_MIN, PW_MAX, passwordProblems,
+  VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, userList, userLabel, matchUsers, shareLine, ownedIds, userPatch, selfChangeProblem, userRemoval, ownsMessage, PW_MIN, PW_MAX, passwordProblems,
   sortSets, pollStats, duplicateSet, migrationMeta, ownerlessIds, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS, ICON_MARK, iconSVG,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,

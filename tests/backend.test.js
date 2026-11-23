@@ -175,6 +175,59 @@ test("creating, deleting and moving a set are one write each, and take the share
   await assert.rejects(be.moveSet("nope", "d"), /does not exist/); data.sets.taken = { name: "T" }; await assert.rejects(be.moveSet("a", "taken"), /already in use/);
   assert.equal(log.update.length, 3);
 });
+test("sharing a set and leaving it are one write each: the shared list and the index of that user (H6)", async () => {
+  const { be, log } = load({ data: JSON.parse(JSON.stringify(DATA)), user: { uid: "u_ann", isAnonymous: false } }, null, "", false); await tick();
+  await be.shareSet("a", "u_piet", true); await be.shareSet("a", "u_piet", false);
+  assert.deepEqual(log.update, [["", { "sets/a/shared/u_piet": true, "userSets/u_piet/a": true }], ["", { "sets/a/shared/u_piet": null, "userSets/u_piet/a": null }]]);
+});
+test("demo mode: the owner shares and unshares, the receiver sees the set at once and can leave; nobody else changes the list (H6)", async () => {
+  global.localStorage = fakeStorage(); global.addEventListener = () => {};
+  delete require.cache[require.resolve("../js/backend.js")]; const B = require("../js/backend.js"), mk = (q) => B.make({ firebaseConfig: {}, params: new URLSearchParams(q) });
+  const adm = mk("demo=1"), usr = mk("demo=1&role=user"), C = global.TRCore, lists = []; usr.onSets((x) => lists.push(Object.keys(x).sort().join()));
+  await usr.createSet("mine01", { name: "Mine", owner: usr.id }, { config: { questions: [] }, session: {} });
+  await usr.shareSet("mine01", "demo-sam", true); assert.deepEqual(C.sharedWith((await usr.getSets()).mine01), ["demo-sam"]);
+  await usr.shareSet("mine01", usr.id, true); assert.deepEqual(C.sharedWith((await usr.getSets()).mine01), ["demo-sam"], "the owner is never on the list");
+  await assert.rejects(usr.shareSet("mine01", "nobody", true), /does not exist/); await assert.rejects(usr.shareSet("nope", "demo-sam", true), /does not exist/);
+  await usr.shareSet("mine01", "demo-sam", false); assert.deepEqual(C.sharedWith((await usr.getSets()).mine01), []);
+  await assert.rejects(usr.shareSet("demo0003", "demo-admin", true), /cannot change/, "shared with the user: no control");
+  await assert.rejects(usr.shareSet("demo0002", "demo-user", true), /cannot change/, "a public set of someone else");
+  const rights = []; usr.poll("demo0003").onRight((r) => rights.push(r));
+  await usr.shareSet("demo0003", usr.id, false); assert.equal(rights.at(-1), false, "left: no longer presenter"); assert.equal(lists.at(-1), "demo0002,mine01");
+  await assert.rejects(usr.shareSet("demo0003", usr.id, false), /cannot change/);
+  await adm.shareSet("demo0003", "demo-user", true); assert.deepEqual(C.sharedWith((await adm.getSets()).demo0003), ["demo-user"], "an admin shares any set");
+});
+test("assign, change a user and remove a user are one write each; an admin cannot remove or demote themself (H7)", async () => {
+  const data = JSON.parse(JSON.stringify(DATA)); data.sets = { a: { name: "A", owner: "u_ann", shared: { u_piet: true } }, b: { name: "B", owner: "u_adm", shared: { u_piet: true } }, c: { name: "C", owner: "u_piet" } }; data.userSets = { u_piet: { a: true } };
+  const { be, log } = load({ data, user: { uid: "u_adm", isAnonymous: false } }, null, "", false); await tick();
+  await be.assignSet("a", "u_piet");
+  assert.deepEqual(log.update[0], ["", { "sets/a/owner": "u_piet", "sets/a/shared/u_piet": null, "userSets/u_piet/a": null }], "the new owner leaves the shared list");
+  await be.setUser("u_ann", { name: " Ann  B ", role: "admin", email: "other@x.nl" });
+  assert.deepEqual(log.update[1], ["users/u_ann", { name: "Ann B", role: "admin" }]);
+  await be.setUser("u_adm", { name: "Admin" }); assert.deepEqual(log.update[2], ["users/u_adm", { name: "Admin" }], "the own name");
+  await assert.rejects(be.setUser("u_adm", { role: "user" }), /own admin role/); await assert.rejects(be.removeUser("u_adm"), /own access/);
+  await assert.rejects(be.removeUser("u_piet"), /piet still owns 1 question set/, "its sets are assigned first");
+  delete data.sets.c; await be.removeUser("u_piet");
+  assert.deepEqual(log.update[3], ["", { "users/u_piet": null, "userSets/u_piet/a": null, "sets/a/shared/u_piet": null, "userSets/u_piet/b": null, "sets/b/shared/u_piet": null }]);
+  assert.equal(log.update.length, 4);
+});
+test("demo mode: an admin assigns a set, renames and removes a user; the page of that user follows at once (H7)", async () => {
+  const store = fakeStorage(); global.localStorage = store; const onStorage = []; global.addEventListener = (ev, f) => onStorage.push(f);
+  delete require.cache[require.resolve("../js/backend.js")]; const B = require("../js/backend.js"), mk = (q) => B.make({ firebaseConfig: {}, params: new URLSearchParams(q) });
+  const adm = mk("demo=1"), usr = mk("demo=1&role=user"), C = global.TRCore, tell = () => onStorage.forEach((f) => f({ key: "tr_demo_db" })); // what the browser does for the other tabs
+  const states = []; usr.onAuth((a) => states.push([a.name, a.role, a.isHost])); const lists = []; usr.onSets((x) => lists.push(Object.keys(x).sort().join()));
+  await assert.rejects(usr.assignSet("demo0003", "demo-user"), /Only an admin/); await assert.rejects(usr.setUser("demo-user", { role: "admin" }), /Only an admin/); await assert.rejects(usr.removeUser("demo-sam"), /Only an admin/);
+  await adm.assignSet("demo0003", "demo-user"); tell();
+  let m = (await adm.getSets()).demo0003; assert.equal(m.owner, "demo-user"); assert.deepEqual(C.sharedWith(m), [], "the new owner is off the shared list");
+  assert.equal(C.setRight(m, { uid: "demo-sam", role: "user" }), null, "the previous owner keeps no rights");
+  await assert.rejects(adm.assignSet("demo0003", "nobody"), /does not exist/);
+  await adm.setUser("demo-user", { name: "Renamed" }); tell(); assert.deepEqual(states.at(-1), ["Renamed", "user", true]);
+  await assert.rejects(adm.setUser("demo-admin", { role: "user" }), /own admin role/); await assert.rejects(adm.removeUser("demo-admin"), /own access/);
+  await assert.rejects(adm.removeUser("demo-user"), /Renamed still owns 1 question set/);
+  await adm.assignSet("demo0003", "demo-sam"); await adm.shareSet("demo0003", "demo-user", true); await adm.removeUser("demo-user"); tell();
+  assert.deepEqual(C.sharedWith((await adm.getSets()).demo0003), [], "taken off every shared list");
+  assert.deepEqual(states.at(-1), ["", null, false], "no record any more: no rights"); assert.equal(usr.isHost, false); assert.equal(usr.isUser, false); assert.equal(lists.at(-1), "");
+  let users = null; adm.onUsers((u) => (users = Object.keys(u).sort())); assert.deepEqual(users, ["demo-admin", "demo-sam"]);
+});
 test("demo mode: a set is created with its poll, and not over an existing one", async () => {
   global.localStorage = fakeStorage(); global.addEventListener = () => {};
   delete require.cache[require.resolve("../js/backend.js")]; const be = require("../js/backend.js").make({ firebaseConfig: {}, params: new URLSearchParams("demo=1") });

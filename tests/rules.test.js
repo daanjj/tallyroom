@@ -90,6 +90,19 @@ test("users: a record needs a role that exists and holds no other fields", () =>
   assert.equal(canWrite(DB(), ADM, { "users/new1": { role: "user" } }), true);
 });
 
+test("users: an admin cannot remove or demote themself, so one admin is always left; another admin can (H7)", () => {
+  assert.equal(canWrite(DB(), ADM, { "users/adm": null }), false); assert.equal(canWrite(DB(), ADM, { "users/adm/role": "user" }), false);
+  assert.equal(canWrite(DB(), ADM, { "users/adm": user("adm", "user") }), false);
+  assert.equal(canWrite(DB(), ADM, { "users/adm/name": "Admin" }), true, "the own name"); assert.equal(canWrite(DB(), ADM, { "users/adm": user("Admin", "admin") }), true);
+  const two = DB(); two.users.ann.role = "admin";
+  assert.equal(canWrite(two, ANN, { "users/adm/role": "user" }), true); assert.equal(canWrite(two, ANN, { "users/adm": null }), true);
+  assert.deepEqual(who((a) => canWrite(DB(), a, { "users/piet/name": "Piet de Vries" })), only("ADM"), "nobody else changes a name, also not their own");
+});
+test("users: removing access is one write by an admin: the record, and the user off every shared list (H7)", () => {
+  const up = { "users/piet": null, "sets/priv/shared/piet": null, "userSets/piet/priv": null };
+  assert.deepEqual(who((a) => canWrite(DB(), a, up)), only("ADM"));
+  assert.equal(canWrite(DB(), ADM, { "users/piet": null, "userSets/piet": null }), false, "the index is removed entry by entry, as the page does");
+});
 /* ---------- the list of sets ---------- */
 test("list of sets: an admin reads it whole; a user only through the two queries; nobody else", () => {
   assert.deepEqual(who((a) => canRead(DB(), a, "sets")), only("ADM"));
@@ -143,6 +156,7 @@ test("assign: only an admin gives a set another owner, and only to a user", () =
   assert.equal(canWrite(DB(), ANN, { "sets/priv": { ...DB().sets.priv, owner: "sam" } }), false, "nor by writing the whole record");
   assert.equal(canWrite(DB(), PIET, { "sets/priv/owner": "piet" }), false);
   assert.equal(canWrite(DB(), ADM, { "sets/priv/owner": "stray" }), false);
+  assert.deepEqual(who((a) => canWrite(DB(), a, { "sets/priv/owner": "piet", "sets/priv/shared/piet": null, "userSets/piet/priv": null })), only("ADM"), "to someone on the shared list, who leaves it (H7)");
   assert.equal(canWrite(DB(), ADM, { "sets/old/owner": "adm" }), true, "taking over a set from before owners (H3)");
   assert.equal(canWrite(DB(), ANN, { "sets/old/owner": "ann" }), false);
 });

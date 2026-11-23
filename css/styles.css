@@ -200,6 +200,9 @@ a{color:var(--accent-text)}
 .sets-h .meta{font-weight:600;margin-left:4px}
 .pill-btn{border:0;cursor:pointer}
 .pill-btn:hover,.pill-btn:focus-visible{background:var(--accent-soft);color:var(--accent-text)}
+.share-list{display:grid;margin-top:2px}
+.share-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.share-row:first-child{border-top:0}
 .view-qs{margin:14px 0 4px;padding-left:22px;display:grid;gap:10px;max-height:50vh;overflow:auto}
 .set-row.is-expired .set-main,.set-row.is-expired .swatch{opacity:.6}
 .swatch{width:14px;height:40px;border-radius:7px;flex:none}

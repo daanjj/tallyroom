@@ -20,6 +20,10 @@ Needed: an admin, two users (A and B), an account without a `users` record, and 
 | 12 | User A | write `sets/{own id}/owner` with B's uid; write `users/{own uid}/role` | refused |
 | 13 | Admin | all of 7, 8 and 12 on A's sets | allowed |
 | 14 | Three phones | a full session in a consent set | no refused write in the console |
+| 15 | User A | share the private set with a third user from **Share…**; B chooses **Leave** on it | allowed, and the set appears in and disappears from their My sets without reload |
+| 16 | Admin | **Assign to…** A's set to B; change B's name and role on **Users** | allowed; the set moves from A's My sets to B's |
+| 17 | Admin | **Remove access** of a user who owns no sets, while that user has the overview open | allowed; that user gets "This account has no access" within a few seconds |
+| 18 | Admin | write `users/{own uid}/role` with `user`; remove `users/{own uid}` | refused |
 
 ## Log
 

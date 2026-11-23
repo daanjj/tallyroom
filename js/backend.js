@@ -5,8 +5,13 @@
               id and the role follow the sign-in and can change while the page is open (backlog G1, G2, H2)
               isHost is the same as isUser: someone who may have sets. Who is presenter of a set is decided per set, see poll(id)
      users    onUsers(f(map|null, err)): everyone who may use this Tally Room, for users only
+              for an admin (backlog H7): setUser(uid, {name, role}), removeUser(uid): the record goes and the user leaves every shared
+              list, in one write; refused while the user still owns sets. An admin cannot remove or demote themself
      sets     onSets(f(map|null, err)): the sets this user may see (own, shared with them, public; an admin all of them), getSets(), setExists(id), createSet(id, meta, {config, session}), setMeta(id, meta),
-              patchMeta(id, patch), removeSet(id), moveSet(id, newId)
+              patchMeta(id, patch), removeSet(id), moveSet(id, newId), shareSet(id, uid, on)
+              shareSet gives a user access to a set or takes it away (backlog H6): the shared list of the set and the index
+              userSets go in one write. A shared user takes itself off with shareSet(id, own uid, false) (Leave)
+              assignSet(id, uid), for an admin (backlog H7): another owner, who leaves the shared list; the previous owner keeps nothing
               creating, removing and moving a set are one write each: the rules decide on a poll by the owner of its set,
               so a set and its poll never exist without each other (backlog H4)
      polls    readPoll(id), readConfig(id), writePoll(id, {config, session}), poll(id) -> live access to one set
@@ -53,7 +58,7 @@ function makeDemoBackend(isHost, role){
   const manages=id=>C.canManage(db.sets[id], who());
   const mySets=()=>{ const out={}; Object.keys(db.sets||{}).forEach(id=>{ if(C.canView(db.sets[id], who())) out[id]=copy(db.sets[id]); }); return out; };
   const emitSets=()=>L.sets.forEach(f=>f(mySets()));
-  const emitAll=()=>{ emitSets(); L.users.forEach(f=>f(copy(db.users)||{})); Object.keys(L.poll).forEach(id=>emit(id)); };
+  const emitAll=()=>{ refreshMe(); emitSets(); L.users.forEach(f=>f(copy(db.users)||{})); Object.keys(L.poll).forEach(id=>emit(id)); };
   try{ root.addEventListener("storage", e=>{ if(e.key===KEY){ db=load(); emitAll(); } }); }catch(e){}
   if(!Object.keys(db.sets).length){ const now=Date.now();
     db.sets.demo0001=C.newMeta({name:"Demo set", header:"Tally Room demo", category:"consent"}, now);
@@ -72,7 +77,14 @@ function makeDemoBackend(isHost, role){
     add("demo0002", {name:"Public demo set", header:"Team check-in", visibility:"public"}, [C.q("How is your week going?",1,5,"Badly","Very well"), C.qOpen("What do you need from the team?")]);
     add("demo0003", {name:"Shared demo set", header:"Retrospective", shared:{[DEMO_USER]:true}}, [C.q("How did this sprint go?",1,5,"Badly","Very well"), C.q("What should we keep?",1,3,"","",["Planning","Pairing","Demos"])]);
     save(); }
-  const me=uid ? C.normUser(db.users[uid]) : null;
+  /* the record of the demo person is followed like a real one: changed or removed (in this tab or another), the page follows */
+  let me=uid ? C.normUser(db.users[uid]) : null, lastEmail=me?me.email:""; const authFns=[];
+  const hostNow=()=>isHost && (!uid || !!me);
+  const authState=()=>({ready:true, uid, role:me?me.role:null, name:me?me.name:"", isUser:!!me, isAdmin:!!me && me.role==="admin", isHost:hostNow(), anon:false, email:me?me.email:lastEmail, error:null});
+  function refreshMe(){ if(!uid) return; const next=C.normUser((db.users||{})[uid]), same=JSON.stringify(next)===JSON.stringify(me); me=next; if(me) lastEmail=me.email;
+    if(!same) authFns.forEach(f=>f(authState())); }
+  const adminOnly=()=>{ if(!me || me.role!=="admin") throw new Error("Only an admin can do this."); };
+  const emitUsers=()=>{ refreshMe(); L.users.forEach(f=>f(copy(db.users)||{})); };
   const names=["a","b","c","d","e","f","g","h"];
   function simulate(id){ const p=db.polls[id]; if(!manages(id) || !p || !p.session || !p.config) return; const ses=p.session, cfg=C.normConfig(p.config); if(!cfg.questions.length) return;
     const put=(n,v)=>{ const pp=P(id); pp.votes=pp.votes||{}; if(C.isNamed((db.sets[id]||{}).named)){ v.name=n+String(names.indexOf(n)+1); v.nameAt=1; pp.names=pp.names||{}; pp.names["demo_"+n]={n:v.name, at:1}; } else delete v.name; pp.votes["demo_"+n]=v; save(); emit(id,"votes"); };
@@ -86,10 +98,10 @@ function makeDemoBackend(isHost, role){
         if(qu.kind==="open"){ v.answers[qu.id]=1; v.texts={...(v.texts||{})}; v.texts[qu.id]="Demo answer from "+n+(i%3===0?", with a second line\nto show how longer answers wrap":""); }
         if(qu.kind==="dilemma"){ const cf=qu.conf||C.DEFAULT_CONF; v.conf={...(v.conf||{})}; v.conf[qu.id]=cf.min+Math.round(Math.random()*(cf.max-cf.min)); }
         v.t=Date.now(); put(n,v); }, 500+400*i+150*j))); } }
-  return { id:myId, isHost, canWrite:true, demo:true,
+  return { id:myId, get isHost(){ return hostNow(); }, canWrite:true, demo:true,
     isConnected:()=>true, onConn:f=>f(true), downFor:()=>0, nudge:()=>{}, now:()=>Date.now(),
-    role:me?me.role:null, isUser:!!me, isAdmin:!!me && me.role==="admin",
-    onAuth:f=>f({ready:true, uid, role:me?me.role:null, name:me?me.name:"", isUser:!!me, isAdmin:!!me && me.role==="admin", isHost, anon:false, email:me?me.email:"", error:null}), // nothing to sign in to
+    get role(){ return me?me.role:null; }, get isUser(){ return !!me; }, get isAdmin(){ return !!me && me.role==="admin"; },
+    onAuth:f=>{ authFns.push(f); f(authState()); }, // nothing to sign in to
     signIn:async()=>{}, signOut:async()=>{}, resetPassword:async()=>{},
     onUsers:f=>{ if(!me){ f({}); return; } L.users.push(f); f(copy(db.users)||{}); },
     onSets:f=>{ L.sets.push(f); f(mySets()); },
@@ -101,6 +113,21 @@ function makeDemoBackend(isHost, role){
     removeSet:async id=>{ delete db.sets[id]; delete db.polls[id]; save(); emitSets(); emit(id); },
     moveSet:async(id,nid)=>{ if(!db.sets[id]) throw new Error("This set does not exist any more."); if(db.sets[nid]) throw new Error("That link is already in use.");
       db.sets[nid]=db.sets[id]; if(db.polls[id]) db.polls[nid]=db.polls[id]; delete db.sets[id]; delete db.polls[id]; save(); emitSets(); emit(id); emit(nid); },
+    /* as the rules: who controls the set shares it, with users only; a shared user takes only itself off */
+    shareSet:async(id,u,on)=>{ const m=db.sets[id]; if(!m) throw new Error("This set does not exist any more.");
+      if(!(C.canControl(m, who()) || (!on && u===uid && C.canManage(m, who())))) throw new Error("You cannot change who this set is shared with.");
+      if(on && !C.normUser((db.users||{})[u])) throw new Error("That user does not exist any more.");
+      db.sets[id]={...m, shared:C.withShare(m,u,!!on).shared}; save(); emitSets(); emit(id,"meta"); },
+    assignSet:async(id,u)=>{ const m=db.sets[id]; if(!m) throw new Error("This set does not exist any more.");
+      if(!C.canAssign(m, who())) throw new Error("Only an admin can assign a set."); if(!C.normUser((db.users||{})[u])) throw new Error("That user does not exist any more.");
+      const n=C.withOwner(m,u); db.sets[id]={...m, owner:n.owner, shared:n.shared}; save(); emitSets(); emit(id,"meta"); },
+    setUser:async(u,patch)=>{ adminOnly(); if(!C.normUser((db.users||{})[u])) throw new Error("That user does not exist any more.");
+      const p=C.userPatch(patch), no=C.selfChangeProblem(uid,u,p); if(no) throw new Error(no);
+      db.users[u]={...db.users[u], ...p}; save(); emitUsers(); },
+    removeUser:async u=>{ adminOnly(); const no=C.selfChangeProblem(uid,u,"remove"); if(no) throw new Error(no);
+      const rec=C.normUser((db.users||{})[u]), r=C.userRemoval(u, db.sets, null); if(r.owned.length) throw new Error(C.ownsMessage(rec?rec.name:"This user", r.owned.length));
+      delete db.users[u]; Object.keys(db.sets).forEach(id=>{ const m=db.sets[id]; if(m && m.shared && m.shared[u]){ const shared={...m.shared}; delete shared[u]; db.sets[id]={...m, shared}; } });
+      save(); emitUsers(); emitSets(); Object.keys(L.poll).forEach(id=>emit(id,"meta")); },
     readPoll:async id=>copy(db.polls[id])||{},
     readConfig:async id=>copy((db.polls[id]||{}).config)||{},
     writePoll:async(id,p)=>{ db.polls[id]=copy(p)||{}; save(); emit(id); },
@@ -261,6 +288,16 @@ function makeFirebaseBackend(config, opts){
       C.sharedWith(meta).forEach(u=>{ up["userSets/"+u+"/"+nid]=true; up["userSets/"+u+"/"+id]=null; });
       try{ await db.ref().update(up); }
       catch(e){ if(denied(e)) throw new Error("This set holds answers in an old format. Clear the answers or export them first"); throw e; } },
+    /* the shared list of the set and the index that lists it for that user, in one write */
+    shareSet:(id,u,on)=>db.ref().update({["sets/"+id+"/shared/"+u]:on?true:null, ["userSets/"+u+"/"+id]:on?true:null}),
+    /* another owner (admin only, the rules check it); a new owner who was on the shared list is taken off it */
+    assignSet:(id,u)=>db.ref().update({["sets/"+id+"/owner"]:u, ["sets/"+id+"/shared/"+u]:null, ["userSets/"+u+"/"+id]:null}),
+    setUser:async(u,patch)=>{ const p=C.userPatch(patch), no=C.selfChangeProblem(st.uid,u,p); if(no) throw new Error(no); if(!Object.keys(p).length) return; return db.ref("users/"+u).update(p); },
+    /* the record and every entry on a shared list go in one write; the account itself stays in Firebase Authentication */
+    removeUser:async u=>{ const no=C.selfChangeProblem(st.uid,u,"remove"); if(no) throw new Error(no);
+      const val=async p=>(await db.ref(p).once("value")).val(), [sets,index,rec]=await Promise.all([val("sets"), val("userSets/"+u), val("users/"+u)]);
+      const r=C.userRemoval(u, sets, index), nu=C.normUser(rec); if(r.owned.length) throw new Error(C.ownsMessage(nu?nu.name:"This user", r.owned.length));
+      return db.ref().update(r.update); },
     readPoll:async id=>{ try{ return await rest("polls/"+id); }catch(e){ return (await db.ref("polls/"+id).once("value")).val()||{}; } },
     /* the questions only: what a user may read of a public set that is not theirs */
     readConfig:async id=>{ try{ return await rest("polls/"+id+"/config"); }catch(e){ return (await db.ref("polls/"+id+"/config").once("value")).val()||{}; } },

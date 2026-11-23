@@ -13,9 +13,9 @@ A small static site (`index.html`, `config.js` and the folders `css`, `js` and `
   "rules": {
     "users": {
       ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'user')",
-      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin' && (auth.uid !== $uid || newData.child('role').val() === 'admin')",
         ".validate": "newData.hasChildren(['role'])",
         "role": {
           ".validate": "newData.val() === 'admin' || newData.val() === 'user'"

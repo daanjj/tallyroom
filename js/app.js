@@ -652,6 +652,7 @@ function homeHTML(){
   if(!S.me.isHost && S.auth.uid && !S.auth.anon) return notPresenterHTML();
   if(!S.me.isHost) return notice("Scan the QR code or open the link you received", "Each question set has its own link. Ask the presenter for the QR code."+(S.be&&S.be.demo?"":`<br><br><a href="${esc(urlFor({host:true}))}" style="font-size:13px">Presenter sign-in</a>`));
   const top=`<div class="topbar">${brand("Tally Room")}<div class="controls">${connPill()}${S.be&&S.be.demo?`<span class="pill warn">Demo data, this browser only</span>`:""}${signOutBtn()}</div></div>`;
+  if(S.auth.role==="admin" && S.ui.homeTab==="users") return `<div class="wrap">${top}${usersHTML()}</div>`;
   if(S.setsErr) return `<div class="wrap">${top}<div class="banner">${RULES_MSG}</div></div>`;
   if(!S.sets) return `<div class="wrap">${top}<div class="card big-wait"><div class="pulse"></div><p class="meta">Loading question sets…</p></div></div>`;
   /* own sets and the ones shared with this user; public sets of others, read-only; for an admin, everything else (backlog H5) */
@@ -660,16 +661,64 @@ function homeHTML(){
   const section=(title, note, rows, empty)=>`<h2 class="sets-h">${title} <span class="meta">${rows.length}</span></h2>${note?`<p class="meta" style="margin:4px 0 0">${note}</p>`:""}
     <div class="sets">${rows.map(x=>setRowHTML(x.id,x.meta,now,x.right)).join("")||`<div class="empty">${empty}</div>`}</div>`;
   return `<div class="wrap">${top}<div class="card" style="padding:26px">
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">${admin?"Admin":"Presenter"}</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Question sets</h1></div><button class="btn primary" data-act="setNew">New question set</button></div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">${admin?"Admin":"Presenter"}</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Question sets</h1></div>${admin?homeTabs("sets"):""}<button class="btn primary" data-act="setNew">New question set</button></div>
     <p class="meta" style="margin:8px 0 6px">Each set has its own link, QR code, header, colour and expiry date. A new set is private: only you and the admins see it in this overview.</p>
     ${S.ui.homeNote?`<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}</div>`:""}
     ${section("My sets", "", mine, "No question sets yet. Create the first one.")}
     ${admin ? (rest.length?section("All other sets", "Sets of other users. As admin you can do everything their owner can.", rest, ""):"")
             : section("Public sets", "Made public by other users. You can view their questions and duplicate them; the answers stay with their owner.", pub, "No public sets from other users.")}</div></div>`;
 }
+/* ---- the admin's screen Users (backlog H7): who may use this Tally Room, in which role, and how many sets they own ---- */
+function homeTabs(on){ return `<div class="seg" role="group" aria-label="Screen"><button data-act="homeTab" data-v="sets" class="${on==="sets"?"on":""}">Question sets</button><button data-act="homeTab" data-v="users" class="${on==="users"?"on":""}">Users</button></div>`; }
+function usersHTML(){ const list=S.users ? C.userList(S.users) : null, me=S.me.id;
+  const row=u=>{ const n=S.sets ? C.ownedIds(S.sets, u.uid).length : null, self=u.uid===me, eu=esc(u.uid);
+    return `<div class="set-row"><div class="set-main"><span class="set-name">${esc(u.name)}${self?` <span class="meta">(you)</span>`:""}</span>
+        <div class="meta">${esc(u.email||"no email address")} · ${n==null?"counting…":`${n} own ${n===1?"set":"sets"}`}</div></div>
+      <span class="pill">${esc(C.roleName(u.role))}</span>
+      <div class="controls"><button class="btn sm" data-act="userEdit" data-uid="${eu}">Change name or role</button>
+        <button class="btn sm" data-act="userRemove" data-uid="${eu}" ${self?`disabled title="You cannot remove your own access"`:""}>Remove access</button></div></div>`; };
+  return `<div class="card" style="padding:26px">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">Admin</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Users</h1></div>${homeTabs("users")}</div>
+    <p class="meta" style="margin:8px 0 6px">Everyone who may sign in to this Tally Room. An admin manages every set and this list; a user manages their own sets and the ones shared with them. A new user is added by hand for now: an account in the Firebase console plus a record under <b>users</b> (tallyroom-setup.md, step 1b).</p>
+    ${S.ui.homeNote?`<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}</div>`:""}
+    ${!list ? `<div class="big-wait"><div class="pulse"></div><p class="meta">Loading users…</p></div>` : `<h2 class="sets-h">Users <span class="meta">${list.length}</span></h2><div class="sets">${list.map(row).join("")}</div>`}</div>`; }
+function openUserDlg(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || S.auth.role!=="admin") return;
+  S.ui.dlg={type:"user", uid, title:"Change name or role", focus:"uName"}; render(); }
+function userDlgHTML(d){ const u=C.normUser(S.users && S.users[d.uid]); if(!u) return `<p class="meta">This user no longer has access.</p><div class="controls"><button class="btn ghost" data-act="dlgClose">Close</button></div>`;
+  const self=d.uid===S.me.id;
+  return `<p class="meta" style="margin:0">${esc(u.email||"no email address")}</p>
+    <div class="field"><label for="uName">Name (shown to other users as owner and in the share dialog)</label><input type="text" id="uName" maxlength="60" value="${esc(u.name)}"></div>
+    <div class="field"><label for="uRole">Role</label><select id="uRole" ${self?"disabled":""}>${C.ROLES.map(r=>`<option value="${r}" ${u.role===r?"selected":""}>${esc(C.roleName(r))}${r==="admin"?": manages every set and the users":": own sets and the ones shared with them"}</option>`).join("")}</select>
+      ${self?`<div class="meta">You cannot take away your own admin role, so there is always one admin left. Another admin can.</div>`:""}</div>
+    <div class="controls"><button class="btn primary" data-act="dlgSave">Save</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
+async function saveUserDlg(){ const d=S.ui.dlg, n=document.getElementById("uName"), r=document.getElementById("uRole"), name=n?n.value.trim():""; if(!d || d.type!=="user") return;
+  if(!name){ alert("Give the user a name."); if(n) n.focus(); return; }
+  try{ await S.be.setUser(d.uid, {name, ...(r && !r.disabled ? {role:r.value} : {})}); closeDlg(); }
+  catch(e){ alert(isDenied(e) ? "The database refused this change." : "Saving failed: "+(e&&e.message||e)); } }
+/* the record goes and the user leaves every shared list; the account stays in Firebase Authentication (open decision 23) */
+async function removeUser(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || S.auth.role!=="admin") return;
+  const no=C.selfChangeProblem(S.me.id, uid, "remove"); if(no){ alert(no); return; }
+  const own=S.sets ? C.ownedIds(S.sets, uid).length : 0; if(own){ alert(C.ownsMessage(u.name, own)); return; }
+  if(!confirm(`Remove the access of ${u.name}${u.email?` (${u.email})`:""}?\n\n${u.name} can no longer use this Tally Room and is taken off every set that is shared with them.${S.be.demo?"":" The account itself stays in Firebase Authentication; delete it in the Firebase console."}`)) return;
+  try{ await S.be.removeUser(uid); S.ui.homeNote=`${u.name} no longer has access.`; render(); }
+  catch(e){ alert(isDenied(e) ? "The database refused this change." : "Removing failed: "+(e&&e.message||e)); } }
+/* ---- an admin gives a set to another owner (backlog H7) ---- */
+function openAssignDlg(id){ const m=metaOf(id); if(!m || !C.canAssign(m, meNow())) return;
+  const back = S.ui.dlg && S.ui.dlg.type==="set" ? (keepSetDlg(), S.ui.dlg) : null;
+  S.ui.dlg={type:"assign", id, title:`Assign "${tx(m.name)}" to…`, focus:"asUser", back}; render(); }
+function assignDlgHTML(d){ const m=metaOf(d.id); if(!m) return `<p class="meta">This set does not exist any more.</p><div class="controls"><button class="btn ghost" data-act="dlgClose">Close</button></div>`;
+  const list=C.userList(S.users).filter(u=>u.uid!==m.owner);
+  return `<p class="meta" style="margin:0">${esc(C.shareLine(m, S.users))}</p>
+    <div class="field"><label for="asUser">New owner</label><select id="asUser" ${list.length?"":"disabled"}>${list.map(u=>`<option value="${esc(u.uid)}">${esc(C.userLabel(u))}</option>`).join("")||`<option value="">${S.users?"There is no other user":"Loading users…"}</option>`}</select>
+      <div class="meta">The new owner finds the set under My sets, with its questions, answers and link as they are. ${m.owner?`${esc(userName(m.owner))} keeps no rights on it; share the set with them afterwards if they should still work with it.`:""} A new owner who was on the shared list is taken off it.</div></div>
+    <div class="controls"><button class="btn primary" data-act="dlgSave" ${list.length?"":"disabled"}>Assign</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
+async function saveAssignDlg(){ const d=S.ui.dlg, el=document.getElementById("asUser"), uid=el?el.value:"", m=d&&metaOf(d.id); if(!d || d.type!=="assign" || !m || !uid) return;
+  try{ await S.be.assignSet(d.id, uid); if(!d.back) S.ui.homeNote=`"${tx(m.name)}" now belongs to ${userName(uid)}.`; closeDlg(); }
+  catch(e){ alert(isDenied(e) ? "The database refused this change." : "Assigning failed: "+(e&&e.message||e)); } }
 /* who is looking, for the rights of core.js; and the name of a user, for "Owner: …" */
 function meNow(){ return {uid:S.me.id, role:S.auth.role}; }
 function userName(uid){ if(!uid) return "nobody"; const u=C.normUser(S.users && S.users[uid]); return u ? u.name : "a former user"; }
+function sharedNames(meta){ return C.sharedWith(meta).map(userName).sort((a,b)=>a.localeCompare(b)); }
 function setRowHTML(id, meta, now, right){
   const name=tx(meta.name), head=tx(meta.header), eid=esc(id), st=S.polls[id];
   if(right==="viewer") return `<div class="set-row">
@@ -678,8 +727,10 @@ function setRowHTML(id, meta, now, right){
       <div class="meta">${head&&head!==name?`Header: ${esc(head)} · `:""}${esc(cap(meta.category))} · ${st?`${st.questions} ${st.questions===1?"question":"questions"}`:"counting…"} · Owner: ${esc(userName(meta.owner))}</div></div>
     <span class="pill">Public</span>
     <div class="controls"><button class="btn sm primary" data-act="setView" data-id="${eid}">View</button><button class="btn sm" data-act="setDup" data-id="${eid}">Duplicate</button></div></div>`;
-  const control = right==="owner" || right==="admin", isPub=meta.visibility==="public";
-  const whose = right==="shared" ? ` · Shared with you by ${esc(userName(meta.owner))}` : right==="admin" ? ` · Owner: ${esc(userName(meta.owner))}` : "";
+  const control = right==="owner" || right==="admin", isPub=meta.visibility==="public", shared=C.isShared(meta);
+  const whose = right==="shared" ? ` · Shared with you by ${esc(userName(meta.owner))}` : `${right==="admin" ? ` · Owner: ${esc(userName(meta.owner))}` : ""}${shared ? ` · Shared with ${esc(sharedNames(meta).join(", "))}` : ""}`;
+  /* the mark of a shared set, for its owner, the users it is shared with and admins (backlog H6); the line is also in Settings, for a tablet */
+  const mark = !shared ? "" : control ? `<button class="pill pill-btn" data-act="setShare" data-id="${eid}" title="${esc(C.shareLine(meta, S.users))}. Click to change.">Shared</button>` : `<span class="pill" title="${esc(C.shareLine(meta, S.users))}">Shared</span>`;
   const vis = control ? `<button class="pill pill-btn" data-act="setVis" data-id="${eid}" title="${isPub?"Public: every user can view the questions and duplicate this set. Click to make it private.":"Private: not listed for other users. Click to make it public."}">${isPub?"Public":"Private"}</button>`
                       : `<span class="pill">${isPub?"Public":"Private"}</span>`;
   const ex=C.expiryInfo(meta, now), open=esc(urlFor({set:id})), isExp=ex.state==="expired";
@@ -691,13 +742,14 @@ function setRowHTML(id, meta, now, right){
     <span class="swatch" style="background:${esc(meta.accent)}" title="Accent colour ${esc(meta.accent)}"></span>
     <div class="set-main"><a class="set-name" href="${open}">${esc(name)}</a>
       <div class="meta">${head&&head!==name?`Header: ${esc(head)} · `:""}${esc(cap(meta.category))} · ${facts}${isExp?` · expired ${esc(fmtDate(ex.at))}`:""}${whose}</div></div>
-    ${vis}${exp}
+    ${mark}${vis}${exp}
     <div class="controls">${isExp||ex.state==="soon"?`<button class="btn sm${isExp?" primary":""}" data-act="setExtend" data-id="${eid}" title="New expiry date: 3 days from now">Extend</button>`:""}
       <a class="btn sm${isExp?"":" primary"}" href="${open}">Open</a><button class="btn sm" data-act="setQR" data-id="${eid}">Show QR</button>
       <details class="menu"><summary class="btn sm" aria-label="More actions for ${esc(name)}">More</summary><div class="menu-list">
         <button data-act="setSettings" data-id="${eid}">Settings</button>
         <button data-act="setSettings" data-id="${eid}" data-focus="dlgExp">Other expiry date…</button>${isExp?"":`
         <button data-act="setExpire" data-id="${eid}">Expire now</button>`}
+        ${control?`<button data-act="setShare" data-id="${eid}">Share…</button>`:""}${C.canAssign(meta, meNow())?`<button data-act="setAssign" data-id="${eid}">Assign to…</button>`:""}${right==="shared"?`<button data-act="setLeave" data-id="${eid}">Leave…</button>`:""}
         ${control?`<button data-act="setLink" data-id="${eid}">Change link…</button>`:""}
         <button data-act="setDup" data-id="${eid}">Duplicate</button>
         <button data-act="setExpQ" data-id="${eid}">Export questions</button>
@@ -718,16 +770,25 @@ async function freshSetId(name){ for(let i=0;i<20;i++){ const id=C.newSetId(name
 
 /* ============ dialogs: set settings, QR code, delete ============ */
 function toLocalInput(ts){ const d=new Date(ts), p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
-function closeDlg(){ S.ui.dlg=null; render(); }
+function closeDlg(){ S.ui.dlg=(S.ui.dlg && S.ui.dlg.back)||null; render(); } // a dialog opened from Settings returns to it
 function openSetDlg(id, focus){ const m=id?metaOf(id):null; if(id && !m) return;
   S.ui.dlg={ type:"set", id:id||null, focus:focus||(id?null:"dlgName"), title:id?"Settings of this question set":"New question set", imported:null,
     f: m ? {...m} : {name:"", header:"", accent:C.DEFAULT_ACCENT, category:"generic", named:"no", expiresAt:C.extendedExpiry(Date.now()), joinUrl:""} };
   render(); }
 function dlgHTML(){ const d=S.ui.dlg; if(!d) return "";
-  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="link" ? linkDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : d.type==="view" ? viewDlgHTML(d) : "";
+  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="link" ? linkDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : d.type==="view" ? viewDlgHTML(d) : d.type==="share" ? shareDlgHTML(d) : d.type==="assign" ? assignDlgHTML(d) : d.type==="user" ? userDlgHTML(d) : "";
   return `<div class="modal" id="dlg"><div class="card dlg${d.type==="edit"?" wide":""}" role="dialog" aria-modal="true" aria-label="${esc(d.title)}">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:22px;flex:1">${esc(d.title)}</h2><button class="btn sm ghost" data-act="dlgClose">Close</button></div>${body}</div></div>`; }
-function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEFAULT_ACCENT;
+/* what is typed in Settings is kept while another dialog (Share) lies over it; d.f stays what was saved, to compare with */
+function keepSetDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id); if(!d || d.type!=="set" || !g("dlgName")) return;
+  const exp=g("dlgExp").value ? new Date(g("dlgExp").value).getTime() : NaN, name=g("dlgName").value;
+  d.draft={ name, header:g("dlgHeader").value.trim()||name, accent:C.normHex(g("dlgColor").value)||C.DEFAULT_ACCENT, category:g("dlgCat").value, named:g("dlgNamed").value,
+    ...(Number.isFinite(exp)?{expiresAt:exp}:{}), ...(g("dlgVis")?{visibility:g("dlgVis").value}:{}), ...(g("dlgJoin")?{joinUrl:g("dlgJoin").value}:{}) }; }
+/* who has access to an existing set, with Share for who controls it and Leave for who it is shared with (backlog H6) */
+function accessFieldHTML(id){ const m=metaOf(id), right=C.setRight(m, meNow()); if(!m || !right) return "";
+  return `<div class="field"><label>Who has access</label><div class="controls"><span class="meta" style="flex:1;min-width:200px">${esc(C.shareLine(m, S.users))}</span>
+    ${right==="owner"||right==="admin"?`<button type="button" class="btn sm" data-act="setShare" data-id="${esc(id)}">Share…</button>`:""}${C.canAssign(m, meNow())?`<button type="button" class="btn sm" data-act="setAssign" data-id="${esc(id)}">Assign to…</button>`:""}${right==="shared"?`<button type="button" class="btn sm" data-act="setLeave" data-id="${esc(id)}">Leave this set</button>`:""}</div></div>`; }
+function setDlgHTML(d){ const f={...d.f, ...(d.draft||{})}, isNew=!d.id, acc=C.normHex(f.accent)||C.DEFAULT_ACCENT;
   return `<div class="field"><label for="dlgName">Name (only you see this, in the overview)</label><input type="text" id="dlgName" maxlength="60" value="${esc(tx(f.name))}" placeholder="MT offsite, team B">
       ${isNew?`<div class="meta">The link of the set is this name plus four random characters (mt-offsite-team-b-x7k2). ${LINK_NOTE}</div>`:""}</div>
     <div class="field"><label for="dlgHeader">Header shown to the audience (leave empty to use the name)</label><input type="text" id="dlgHeader" maxlength="80" value="${esc(tx(f.header)===tx(f.name)?"":tx(f.header))}"></div>
@@ -739,6 +800,7 @@ function setDlgHTML(d){ const f=d.f, isNew=!d.id, acc=C.normHex(f.accent)||C.DEF
       <div class="meta">With Yes or Random the presenter sees the name with comments and open answers, and in the exports.</div></div>
     ${!isNew && C.canControl(f, meNow()) ? `<div class="field"><label for="dlgVis">Visible to other users</label><select id="dlgVis"><option value="private" ${f.visibility!=="public"?"selected":""}>Private: not listed for other users</option><option value="public" ${f.visibility==="public"?"selected":""}>Public: every user can view the questions and duplicate the set</option></select>
       <div class="meta">Answers and follow-up actions are never visible to other users. Whoever has the link can take part, also in a private set.</div></div>` : ""}
+    ${isNew ? "" : accessFieldHTML(d.id)}
     <div class="field"><label for="dlgExp">Expires on</label><input type="datetime-local" id="dlgExp" value="${Number.isFinite(f.expiresAt)?toLocalInput(f.expiresAt):toLocalInput(C.extendedExpiry(Date.now()))}">
       <div class="controls"><span class="meta">From now:</span>${[[1,"1 day"],[3,"3 days"],[7,"1 week"],[30,"1 month"]].map(([n,l])=>`<button type="button" class="btn sm" data-act="dlgExpQuick" data-v="${n}">${l}</button>`).join("")}</div>
       <div class="meta">After this moment participants can no longer answer. Nothing is deleted and you can extend at any time.</div></div>
@@ -823,6 +885,37 @@ async function duplicateSet(id){ const meta=metaOf(id); if(!meta || !C.canView(m
     if(S.ui.dlg && S.ui.dlg.type==="view") S.ui.dlg=null;
     S.ui.homeNote=`"${tx(d.meta.name)}" is added to your sets. It is private and yours.`; render(); loadStats();
   }catch(e){ alert("Duplicating failed: "+(e&&e.message||e)); } }
+/* ---- sharing a set with other users (backlog H6) ---- */
+function openShareDlg(id){ const m=metaOf(id); if(!m || !C.canControl(m, meNow())) return;
+  const back = S.ui.dlg && S.ui.dlg.type==="set" ? (keepSetDlg(), S.ui.dlg) : null;
+  S.ui.dlg={type:"share", id, title:`Share "${tx(m.name)}"`, focus:"shareIn", msg:"", back}; render(); }
+function shareDlgHTML(d){ const m=metaOf(d.id); if(!m) return `<p class="meta">This set does not exist any more.</p><div class="controls"><button class="btn ghost" data-act="dlgClose">Close</button></div>`;
+  const all=C.userList(S.users), ids=C.sharedWith(m), on=all.filter(u=>ids.includes(u.uid)), gone=ids.filter(uid=>!all.some(u=>u.uid===uid)), free=all.filter(u=>u.uid!==m.owner && !ids.includes(u.uid));
+  const row=(uid,name,email)=>`<div class="share-row"><div style="flex:1;min-width:0"><b>${esc(name)}</b>${email?`<div class="meta">${esc(email)}</div>`:""}</div><button class="btn sm" data-act="shareRemove" data-uid="${esc(uid)}" aria-label="Remove ${esc(name)}">Remove</button></div>`;
+  return `<p class="meta" style="margin:0">${esc(C.shareLine(m, S.users))}</p>
+    <div class="share-list">${on.map(u=>row(u.uid,u.name,u.email)).join("")}${gone.map(uid=>row(uid,"A former user","")).join("")||""}${ids.length?"":`<div class="empty">Not shared with anyone yet.</div>`}</div>
+    <div class="field"><label for="shareIn">Add a user, by name or email address</label><div class="controls"><input type="text" id="shareIn" list="shareUsers" autocomplete="off" autocapitalize="none" spellcheck="false" style="flex:1;min-width:200px" ${free.length?"":"disabled"} placeholder="${free.length?"":S.users?"Every user already has access":"Loading users…"}"><button class="btn primary" data-act="shareAdd" ${free.length?"":"disabled"}>Add</button></div>
+      <datalist id="shareUsers">${free.map(u=>`<option value="${esc(C.userLabel(u))}"></option>`).join("")}</datalist>
+      ${d.msg?`<small role="status" style="font-weight:700${d.bad?";color:var(--warn)":""}">${esc(d.msg)}</small>`:""}
+      <div class="meta">Someone you share with finds the set under My sets and can edit its questions and settings, run sessions, and read and export the answers. They cannot delete it, change its link, make it public or private, or share it. You stay the owner.</div></div>
+    <div class="controls"><button class="btn ghost" data-act="dlgClose">${d.back?"Back to settings":"Done"}</button></div>`; }
+function shareSay(msg, bad){ const d=S.ui.dlg; if(!d || d.type!=="share") return; d.msg=msg; d.bad=!!bad; d.focus="shareIn"; render(); }
+async function shareAdd(){ const d=S.ui.dlg, el=document.getElementById("shareIn"), text=el?el.value.trim():"", m=d&&metaOf(d.id); if(!d || d.type!=="share" || !m) return;
+  if(!text){ shareSay("Type a name or an email address.", true); return; }
+  const has=[m.owner, ...C.sharedWith(m)].filter(Boolean), ids=C.matchUsers(S.users, text, has);
+  if(!ids.length){ const dup=C.matchUsers(S.users, text, []); shareSay(dup.length ? `${userName(dup[0])} already has access.` : `No user found for "${text}".`, true); return; }
+  if(ids.length>1){ shareSay("More than one user matches. Type the full email address.", true); return; }
+  try{ await S.be.shareSet(d.id, ids[0], true); shareSay(`Shared with ${userName(ids[0])}.`); }
+  catch(e){ shareSay(isDenied(e) ? "The database refused this. Reload the page" : "Sharing failed: "+(e&&e.message||e), true); } }
+async function shareRemove(uid){ const d=S.ui.dlg; if(!d || d.type!=="share" || !uid) return;
+  try{ await S.be.shareSet(d.id, uid, false); shareSay(`${userName(uid)} no longer has access.`); }
+  catch(e){ shareSay(isDenied(e) ? "The database refused this. Reload the page" : "Removing failed: "+(e&&e.message||e), true); } }
+/* who a set is shared with can take itself off the list (open decision 20) */
+async function leaveSet(id){ const m=metaOf(id); if(!m || C.setRight(m, meNow())!=="shared") return;
+  if(!confirm(`Leave "${tx(m.name)}"?\n\nIt disappears from your sets and you can no longer present it. ${userName(m.owner)} can share it with you again.`)) return;
+  try{ await S.be.shareSet(id, S.me.id, false); if(S.route==="set"){ location.href=urlFor(); return; }
+    S.ui.dlg=null; S.ui.homeNote=`You left "${tx(m.name)}".`; render(); }
+  catch(e){ alert("Leaving failed: "+(e&&e.message||e)); } }
 /* a public set of someone else, read-only: its settings and questions, no answers (backlog H5) */
 function openViewDlg(id){ const m=metaOf(id); if(!m) return; S.ui.dlg={type:"view", id, title:tx(m.name), cfg:null, err:false}; render();
   const mine=()=>{ const d=S.ui.dlg; return d && d.type==="view" && d.id===id ? d : null; };
@@ -964,6 +1057,14 @@ app.addEventListener("click", e=>{
     case "setQR": S.ui.dlg={type:"qr", id, title:"QR code: "+tx((metaOf(id)||{}).name)}; render(); break;
     case "setLink": if(C.canControl(metaOf(id), meNow())) openLinkDlg(id); break;
     case "setView": openViewDlg(id); break;
+    case "setShare": openShareDlg(id); break;
+    case "setAssign": openAssignDlg(id); break;
+    case "homeTab": S.ui.homeTab = v==="users" ? "users" : "sets"; S.ui.homeNote=""; render(); break;
+    case "userEdit": openUserDlg(b.dataset.uid); break;
+    case "userRemove": removeUser(b.dataset.uid); break;
+    case "setLeave": leaveSet(id); break;
+    case "shareAdd": shareAdd(); break;
+    case "shareRemove": shareRemove(b.dataset.uid); break;
     case "setVis": { const m=metaOf(id); if(!m || !C.canControl(m, meNow())) break; const pub=m.visibility!=="public";
       if(pub && !confirm(`Make "${tx(m.name)}" public?\n\nEvery user of this Tally Room can then read its questions and settings, and duplicate it. Answers and follow-up actions stay with you.`)) break;
       S.be.patchMeta(id, {visibility:pub?"public":"private", updatedAt:Date.now()}).catch(e=>alert("Changing this failed: "+(e&&e.message||e))); break; }
@@ -975,7 +1076,8 @@ app.addEventListener("click", e=>{
     case "delConfirm": { const d=S.ui.dlg; if(!d || d.type!=="del") break;
       S.be.removeSet(d.id).then(()=>{ delete S.polls[d.id]; if(S.route==="set") location.href=urlFor(); else closeDlg(); }).catch(e=>alert("Deleting failed: "+(e&&e.message||e))); break; }
     case "dlgClose": closeDlg(); break;
-    case "dlgSave": if(S.ui.dlg && S.ui.dlg.type==="edit") saveEditDlg(); else if(S.ui.dlg && S.ui.dlg.type==="link") saveLinkDlg(); else saveSetDlg(); break;
+    case "dlgSave": { const t=S.ui.dlg && S.ui.dlg.type;
+      if(t==="edit") saveEditDlg(); else if(t==="link") saveLinkDlg(); else if(t==="assign") saveAssignDlg(); else if(t==="user") saveUserDlg(); else saveSetDlg(); break; }
     /* ---- consent workflow ---- */
     case "qEdit": { const i=Q.findIndex(x=>x.id===b.dataset.q); if(i<0) break; S.ui.dlg={type:"edit", qid:Q[i].id, title:`Edit proposal ${i+1}`, focus:"dlgText"}; render(); break; }
     case "closeTab": S.ui.closeTab=v; S.ui.tlPage=0; render(); break;
@@ -1033,6 +1135,8 @@ window.addEventListener("pagehide", flushFu);
 app.addEventListener("focusout", e=>{ const t=e.target; if(S.rendering || !t || !t.isConnected) return; if(t.classList && t.classList.contains("tl-fu-in")){ clearTimeout(fuTimer); saveText(t.dataset.q); } });
 app.addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target && e.target.id==="nameIn"){ e.preventDefault(); document.querySelector('[data-act="nameSave"]')?.click(); return; }
   if(e.key==="Enter" && e.target && (e.target.id==="siEmail" || e.target.id==="siPass")){ e.preventDefault(); doSignIn(); return; }
+  if(e.key==="Enter" && e.target && e.target.id==="shareIn"){ e.preventDefault(); shareAdd(); return; }
+  if(e.key==="Enter" && e.target && e.target.id==="uName"){ e.preventDefault(); saveUserDlg(); return; }
   if(e.key!=="Escape") return; if(S.ui.dlg){ closeDlg(); return; } if(S.ui.configOpen){ S.ui.configOpen=false; S.ui.jsonText=null; render(); } });
 app.addEventListener("toggle", e=>{ if(e.target && e.target.id==="cfgJsonBox") S.ui.jsonOpen=e.target.open; if(e.target && e.target.id==="waitBox" && !S.rendering) S.ui.waitOpen=e.target.open; }, true);
 document.addEventListener("keydown", e=>{ if(!S.me.isHost||S.route!=="set"||S.ui.configOpen||S.ui.dlg||S.ui.view==="participant") return; if(e.target.matches("input,textarea")) return;
@@ -1082,6 +1186,7 @@ function bootHome(be){
 }
 function bootSet(be){
   const p=be.poll(S.setId); S.backend=p;
+  if(be.onUsers) be.onUsers(u=>{ S.users=u||{}; renderBg(); }); // names for "Owner: …" and the share dialog in Settings; empty for a participant
   if(p.onRight) p.onRight(r=>{ S.right=!!r; applyRole(); }); // before the other listeners: they ask whether this device presents the set
   const raw={cfg:undefined, ses:undefined}; let editDone=!params.has("edit"), votesIn=false;
   let claimed="", shownJSON=null, shownT=null; // the name this device last put in names/, the last published shown/ (below)

@@ -804,3 +804,61 @@ test("icon: the round table takes the accent, and its drawing stays readable on 
   assert.equal(C.iconSVG(undefined), C.iconSVG(C.DEFAULT_ACCENT));
   assert.equal(require("node:fs").readFileSync(require("node:path").join(__dirname, "../icons/icon.svg"), "utf8").trim(), C.iconSVG(C.DEFAULT_ACCENT));
 });
+
+/* ---------- sharing a set (backlog H6) ---------- */
+const PEOPLE = { uidAnna: { email: "anna@example.com", name: "Anna", role: "admin" }, uidPiet: { email: "piet@example.com", name: "Piet", role: "user" }, uidSam: { email: "sam@example.com", name: "Sam", role: "user" },
+  uidSam2: { email: "sam.jansen@example.com", name: "Sam", role: "user" }, uidOdd: { email: "odd@example.com", role: "presenter" }, "a/b": { role: "user" } };
+test("the list of users is sorted by name and leaves out records without a valid role", () => {
+  assert.deepEqual(C.userList(PEOPLE).map((u) => u.uid), ["uidAnna", "uidPiet", "uidSam2", "uidSam"]);
+  assert.deepEqual(C.userList(PEOPLE)[0], { uid: "uidAnna", name: "Anna", email: "anna@example.com", role: "admin" });
+  assert.deepEqual(C.userList(null), []);
+  assert.equal(C.userLabel({ name: "Piet", email: "piet@example.com" }), "Piet <piet@example.com>"); assert.equal(C.userLabel({ name: "Piet", email: "" }), "Piet");
+});
+test("a user is found by name, by email address or by the label from the list; who already has access is left out", () => {
+  assert.deepEqual(C.matchUsers(PEOPLE, "piet"), ["uidPiet"]);
+  assert.deepEqual(C.matchUsers(PEOPLE, " PIET@example.com "), ["uidPiet"]);
+  assert.deepEqual(C.matchUsers(PEOPLE, "Piet <piet@example.com>"), ["uidPiet"]);
+  assert.deepEqual(C.matchUsers(PEOPLE, "sam"), ["uidSam2", "uidSam"], "two people with that name: the page asks for the address");
+  assert.deepEqual(C.matchUsers(PEOPLE, "sam@example.com"), ["uidSam"], "an exact address wins over a part of another");
+  assert.deepEqual(C.matchUsers(PEOPLE, "example.com").length, 4);
+  assert.deepEqual(C.matchUsers(PEOPLE, "an"), ["uidAnna", "uidSam2"], "a part of a name or an address");
+  assert.deepEqual(C.matchUsers(PEOPLE, "piet", ["uidPiet"]), []);
+  assert.deepEqual(C.matchUsers(PEOPLE, "sam", ["uidSam2"]), ["uidSam"]);
+  for (const none of ["", "   ", "nobody", "odd@example.com", null]) assert.deepEqual(C.matchUsers(PEOPLE, none), [], String(none));
+});
+test("the line that says who owns a set and who it is shared with", () => {
+  const m = C.newMeta({ name: "X", owner: "uidAnna" }, NOW);
+  assert.equal(C.shareLine(m, PEOPLE), "Owner: Anna. Not shared");
+  assert.equal(C.shareLine(C.withShare(C.withShare(m, "uidSam", true), "uidPiet", true), PEOPLE), "Owner: Anna. Shared with: Piet, Sam");
+  assert.equal(C.shareLine(C.withShare({ ...m, owner: "uidGone" }, "uidLeft", true), PEOPLE), "Owner: a former user. Shared with: a former user");
+  assert.equal(C.shareLine({ name: "Old" }, PEOPLE), "Owner: nobody. Not shared"); assert.equal(C.shareLine(null, PEOPLE), "");
+  assert.equal(C.shareLine(C.withShare(m, "uidPiet", true), null), "Owner: a former user. Shared with: a former user", "before the list of users has arrived");
+});
+
+/* ---------- the admin's side: users and their sets (backlog H7) ---------- */
+test("the sets a user owns; a set without owner belongs to nobody", () => {
+  const sets = { b: { name: "B", owner: "uidPiet" }, a: { name: "A", owner: "uidPiet", shared: { uidSam: true } }, c: { name: "C", owner: "uidSam" }, old: { name: "Old" }, bad: null };
+  assert.deepEqual(C.ownedIds(sets, "uidPiet"), ["a", "b"]); assert.deepEqual(C.ownedIds(sets, "uidAnna"), []);
+  assert.deepEqual(C.ownedIds(sets, null), []); assert.deepEqual(C.ownedIds(null, "uidPiet"), []);
+});
+test("an admin changes the name and the role of a user, nothing else", () => {
+  assert.deepEqual(C.userPatch({ name: "  Piet   de Vries ", role: "admin", email: "x@example.com", createdAt: 5 }), { name: "Piet de Vries", role: "admin" });
+  assert.deepEqual(C.userPatch({ name: "  ", role: "presenter" }), {}, "an empty name and a role that does not exist change nothing");
+  assert.equal(C.userPatch({ name: "n".repeat(100) }).name.length, 60); assert.deepEqual(C.userPatch(null), {});
+});
+test("an admin cannot remove or demote themself, so one admin is always left", () => {
+  assert.match(C.selfChangeProblem("uidAnna", "uidAnna", "remove"), /own access/);
+  assert.match(C.selfChangeProblem("uidAnna", "uidAnna", { role: "user" }), /own admin role/);
+  assert.equal(C.selfChangeProblem("uidAnna", "uidAnna", { name: "Anna B", role: "admin" }), null, "the own name is fine");
+  assert.equal(C.selfChangeProblem("uidAnna", "uidAnna", { name: "Anna B" }), null);
+  assert.equal(C.selfChangeProblem("uidAnna", "uidPiet", "remove"), null); assert.equal(C.selfChangeProblem("uidAnna", "uidPiet", { role: "user" }), null);
+});
+test("removing a user's access: the record goes and the user leaves every shared list; the sets it owns are listed", () => {
+  const sets = { a: { name: "A", owner: "uidAnna", shared: { uidPiet: true, uidSam: true } }, b: { name: "B", owner: "uidSam", shared: { uidPiet: true } }, c: { name: "C", owner: "uidAnna" } };
+  assert.deepEqual(C.userRemoval("uidPiet", sets, { a: true, gone: true }), { owned: [], update: { "users/uidPiet": null, "userSets/uidPiet/a": null, "sets/a/shared/uidPiet": null,
+    "userSets/uidPiet/b": null, "sets/b/shared/uidPiet": null, "userSets/uidPiet/gone": null } }, "b was not in the index; the set behind 'gone' no longer exists");
+  assert.deepEqual(C.userRemoval("uidSam", sets, { a: true }).owned, ["b"], "still owns a set: the page refuses");
+  assert.deepEqual(C.userRemoval("uidNew", null, null), { owned: [], update: { "users/uidNew": null } });
+  assert.equal(C.ownsMessage("Sam", 1), "Sam still owns 1 question set. Assign it to another user first.");
+  assert.equal(C.ownsMessage("Sam", 2), "Sam still owns 2 question sets. Assign them to another user first.");
+});
