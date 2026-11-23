@@ -14,6 +14,7 @@ function fakeFirebase({ data = {}, user = null, anonFails = false, noAppCheck = 
   const setUser = (u) => { cur = u; setTimeout(() => authCb && authCb(cur), 0); };
   /* a second connection (addUser): its own sign-in state, which never touches the one of the page */
   const second = (name) => { const a2 = { setPersistence: async (p) => log.second.push(["persistence", p]), createUserWithEmailAndPassword: async (email, pw) => { log.second.push(["create", email, pw]); if (email.startsWith("taken@")) throw Object.assign(new Error("in use"), { code: "auth/email-already-in-use" }); return { user: { uid: "u_" + email.split("@")[0] } }; },
+    signInWithEmailAndPassword: async (email, pw) => { log.second.push(["signIn", email]); if (pw !== "the-key") throw Object.assign(new Error("bad"), { code: "auth/invalid-credential" }); return { user: { uid: "u_new", email, updatePassword: async (p) => log.second.push(["update", p]) } }; },
     signOut: async () => log.second.push(["signOut"]) }; return { auth: () => a2, delete: async () => log.second.push(["delete", name.split("-")[0]]) }; };
   log.second = []; log.mail = [];
   const auth = { get currentUser() { return cur; }, verifyPasswordResetCode: async (c) => { if (c !== "good") throw Object.assign(new Error("old"), { code: "auth/expired-action-code" }); return "new@x.nl"; },
@@ -238,14 +239,15 @@ test("add user: the account is made through a second connection with a random pa
   global.crypto = global.crypto || require("node:crypto").webcrypto;
   const { be, log, states } = load({ data: JSON.parse(JSON.stringify(DATA)), user: { uid: "u_adm", isAnonymous: false, email: "adm@x.nl" } }, null, "", false); await tick();
   const out = await be.addUser({ name: " New  One ", email: "new@x.nl", role: "user", extra: 1 });
-  assert.deepEqual(out, { uid: "u_new", mailed: true });
+  assert.deepEqual({ ...out, key: "" }, { uid: "u_new", mailed: true, key: "" }); assert.equal(out.key, log.second[1][2], "the key of the invitation link is the random password, handed to the page once");
   assert.deepEqual(log.second.map((x) => x[0]), ["persistence", "create", "signOut", "delete"]); assert.deepEqual(log.second[0], ["persistence", "none"], "nothing of the new account is kept on the device");
   const pw = log.second[1][2]; assert.equal(pw.length, 32); assert.deepEqual(global.TRCore.passwordProblems(pw, "new@x.nl"), []);
   const [path, rec] = log.set.at(-1); assert.equal(path, "users/u_new"); assert.deepEqual({ ...rec, createdAt: 0 }, { email: "new@x.nl", name: "New One", role: "user", createdAt: 0 }); assert.ok(Math.abs(rec.createdAt - Date.now()) < 5000);
   assert.deepEqual(log.mail, ["new@x.nl"]); assert.ok(!JSON.stringify([log.set, log.mail]).includes(pw), "the password is not stored or sent");
   assert.equal(log.out, 0); assert.equal(be.id, "u_adm"); assert.equal(states.at(-1).uid, "u_adm");
-  assert.deepEqual(await be.addUser({ name: "No Mail", email: "nomail@x.nl", role: "admin" }), { uid: "u_nomail", mailed: false }, "the record is there; the invitation can be sent again");
-  assert.equal(log.set.at(-1)[1].role, "admin");
+  const nm = await be.addUser({ name: "No Mail", email: "nomail@x.nl", role: "admin" }); assert.deepEqual([nm.uid, nm.mailed, nm.key.length], ["u_nomail", false, 32], "the record is there; the invitation can be sent again");
+  const quiet = await be.addUser({ name: "Quiet", email: "quiet@x.nl" }, { mail: false }); assert.deepEqual([quiet.uid, quiet.mailed, quiet.key.length], ["u_quiet", false, 32]); assert.deepEqual(log.mail, ["new@x.nl", "nomail@x.nl"], "no mail when the admin sends the link themself");
+  assert.equal(log.set.at(-2)[1].role, "admin");
   const sets = log.set.length; await assert.rejects(be.addUser({ name: "Taken", email: "taken@x.nl" }), (e) => e.code === "auth/email-already-in-use"); assert.equal(log.set.length, sets, "no record without an account");
   assert.equal(log.second.at(-1)[0], "delete", "the second connection is always thrown away");
   await assert.rejects(be.addUser({ name: "", email: "x@x.nl" }), /name/); await assert.rejects(be.addUser({ name: "X", email: "not an address" }), /valid email/);
@@ -256,6 +258,15 @@ test("the password mail carries the address of the sign-in screen as continue ad
   assert.deepEqual(await at({ protocol: "https:", origin: "https://blocked.example", pathname: "/" }), [["ann@x.nl", "ann@x.nl"], [{ url: "https://blocked.example/?host=1" }, null]], "sent again without it");
   assert.deepEqual(await at({ protocol: "file:", origin: "null", pathname: "/C:/index.html" }), [["ann@x.nl"], [null]]);
   assert.deepEqual(await at(undefined), [["ann@x.nl"], [null]]);
+});
+test("the copied invitation link: checked and used on a second connection, so nobody is signed in on the page before a password is chosen (H8)", async () => {
+  const { be, log, states } = load({ data: DATA }, null, "", false); await tick(); const C = global.TRCore;
+  await assert.rejects(be.openInvite("new@x.nl", "used-key"), (e) => C.inviteIsDead(e)); assert.deepEqual(log.second.map((x) => x[0]), ["persistence", "signIn", "signOut", "delete"], "a dead link leaves nothing behind");
+  await assert.rejects(be.finishInvite("correct horse battery"), (e) => C.inviteIsDead(e), "nothing to finish");
+  log.second.length = 0; assert.equal(await be.openInvite("new@x.nl", "the-key"), "new@x.nl"); assert.deepEqual(log.second.map((x) => x[0]), ["persistence", "signIn"]);
+  assert.equal(be.id, null); assert.equal(states.at(-1).uid, null, "the page itself is not signed in");
+  await be.finishInvite("correct horse battery"); assert.deepEqual(log.second.slice(2), [["update", "correct horse battery"], ["signOut"], ["delete", "invite"]]);
+  await assert.rejects(be.finishInvite("again"), (e) => C.inviteIsDead(e));
 });
 test("set password with the code of the link, and change password after checking the current one (H8)", async () => {
   const calls = [], me = { uid: "u_ann", isAnonymous: false, email: "ann@x.nl", reauthenticateWithCredential: async (c) => { calls.push(["reauth", c.email, c.pw]); if (c.pw !== "current") throw Object.assign(new Error("bad"), { code: "auth/wrong-password" }); }, updatePassword: async (pw) => calls.push(["update", pw]) };

@@ -14,6 +14,8 @@ const RAW_SET=params.get("set"), SET_ID=(RAW_SET && C.SET_ID_RE.test(RAW_SET)) ?
 const SIGNIN = params.has("host") && params.get("host")!=="off";
 /* the link in a password mail (an invitation, or Forgot password) opens the page with a code (backlog H8) */
 const RESET_CODE = params.get("mode")==="resetPassword" ? (params.get("oobCode")||"") : "";
+/* the invitation link an admin copied and sent themself: ?mode=invite, with the address and a one-time key behind the # */
+const INVITE_MODE = params.get("mode")==="invite", INVITE = INVITE_MODE ? C.parseInvite(location.hash) : null;
 function resetUrl(code){ const p=new URLSearchParams(); p.set("mode","resetPassword"); p.set("oobCode",code); if(params.has("demo")) p.set("demo",params.get("demo")||"1"); return PAGE+"?"+p.toString(); }
 function urlFor(o){ o=o||{}; const p=new URLSearchParams(); if(o.set) p.set("set",o.set); if(o.edit) p.set("edit","1"); if(o.host) p.set("host","1"); if(params.has("demo")) p.set("demo",params.get("demo")||"1"); const s=p.toString(); return PAGE+(s?"?"+s:""); }
 function joinUrl(id, meta){ return (meta && meta.joinUrl) || urlFor({set:id}); }
@@ -659,21 +661,26 @@ function setPwHTML(){ const st=S.ui.spw||{}, card=inner=>`<div class="p-wrap"><d
     <input type="email" value="${esc(st.email)}" autocomplete="username" readonly hidden>${pwFieldsHTML()}
     <div class="controls" style="margin-top:14px"><button class="btn primary" data-act="spSave" ${st.busy?"disabled":""}>${st.busy?"Saving…":"Save and sign in"}</button></div>`);
   if(st.state==="invalid") return card(`<h2 style="font-size:22px">This link is no longer valid</h2>
-    <p class="meta" style="margin:8px 0 0">A link from a password mail works once and for a short time. Ask for a new one here.</p>
+    <p class="meta" style="margin:8px 0 0">${INVITE_MODE?"An invitation link works until a password is chosen with it, and must be copied whole. Ask for a mail with a new link here, or ask who invited you.":"A link from a password mail works once and for a short time. Ask for a new one here."}</p>
     <div class="field" style="margin-top:14px"><label for="spEmail">Email</label><input type="email" id="spEmail" autocomplete="username" autocapitalize="none" spellcheck="false" value="${esc(st.mail||"")}">
       ${st.err?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(st.err)}</small>`:""}${st.note?`<small class="meta" role="status">${esc(st.note)}</small>`:""}${st.link?`<small class="meta">Demo mode sends no mail. The link would be: <a href="${esc(st.link)}">${esc(st.link)}</a></small>`:""}</div>
     <div class="controls" style="margin-top:14px"><button class="btn primary" data-act="spResend">Send me a new link</button><a class="btn ghost" href="${esc(urlFor({host:true}))}">To the sign-in screen</a></div>`);
   if(st.state==="error") return card(`<h2 style="font-size:22px">Could not check this link</h2><p class="meta" style="margin:8px 0 0">Check your connection and try again.</p><div class="controls" style="margin-top:14px"><button class="btn primary" data-act="reload">Try again</button></div>`);
   return notice("", "Checking the link…", true); }
 async function bootSetPw(be){ S.ui.spw={state:"checking", code:RESET_CODE}; render();
+  if(INVITE_MODE){ // a copied invitation link
+    if(!INVITE || !be.openInvite){ S.ui.spw={state:"invalid", mail:INVITE?INVITE.email:""}; render(); return; }
+    try{ const email=await be.openInvite(INVITE.email, INVITE.key); S.ui.spw={state:"form", invite:true, email:String(email||INVITE.email)}; }
+    catch(e){ console.warn("invitation link", e&&e.code); S.ui.spw={state:C.inviteIsDead(e) ? "invalid" : "error", mail:INVITE.email}; }
+    render(); document.getElementById("pwNew")?.focus(); return; }
   try{ const email=await be.checkResetCode(RESET_CODE); S.ui.spw={state:"form", code:RESET_CODE, email:String(email||"")}; }
   catch(e){ console.warn("password link", e&&e.code); S.ui.spw={state:(C.linkIsDead(e) || !C.authProblem(e)) ? "invalid" : "error", code:RESET_CODE}; }
   render(); document.getElementById("pwNew")?.focus(); }
 async function doSetPw(){ const st=S.ui.spw; if(!st || st.state!=="form" || st.busy) return; const pw=pwRead(); if(pw==null) return;
   const btn=document.querySelector('[data-act="spSave"]'); st.busy=true; if(btn){ btn.disabled=true; btn.textContent="Saving…"; } // the fields stay as typed
   const back=()=>{ st.busy=false; if(btn){ btn.disabled=false; btn.textContent="Save and sign in"; } };
-  try{ await S.be.setPassword(st.code, pw); }
-  catch(e){ console.warn("set password", e&&e.code); if(C.linkIsDead(e)){ S.ui.spw={state:"invalid", code:st.code, mail:st.email}; render(); return; } back(); pwSay(C.authProblem(e)||"Saving failed. Try again"); return; }
+  try{ if(st.invite) await S.be.finishInvite(pw); else await S.be.setPassword(st.code, pw); }
+  catch(e){ console.warn("set password", e&&e.code); if(C.linkIsDead(e) || (st.invite && C.inviteIsDead(e))){ S.ui.spw={state:"invalid", code:st.code, mail:st.email}; render(); return; } back(); pwSay(C.authProblem(e)||"Saving failed. Try again"); return; }
   /* the password is set: sign in with it and go to the overview; the code leaves the address bar and the history */
   try{ await S.be.signIn(st.email, pw); location.replace(urlFor()); }
   catch(e){ console.warn("sign-in after set password", e&&e.code); location.replace(urlFor({host:true})); } }
@@ -746,22 +753,29 @@ function usersHTML(){ const list=S.users ? C.userList(S.users) : null, me=S.me.i
     ${homeNoteHTML()}
     ${!list ? `<div class="big-wait"><div class="pulse"></div><p class="meta">Loading users…</p></div>` : `<h2 class="sets-h">Users <span class="meta">${list.length}</span></h2><div class="sets">${list.map(row).join("")}</div>`}</div>`; }
 /* a note on the overview; in demo mode, where no mail is sent, with the link the mail would hold */
-function homeNoteHTML(){ return S.ui.homeNote ? `<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}${S.ui.homeLink && S.ui.homeLinkFor===S.ui.homeNote?` <a href="${esc(S.ui.homeLink)}" style="word-break:break-all">${esc(S.ui.homeLink)}</a>`:""}</div>` : ""; }
-function homeSay(note, code){ S.ui.homeNote=note+(code?" Demo mode sends no mail. The link would be:":""); S.ui.homeLink=code?resetUrl(code):""; S.ui.homeLinkFor=S.ui.homeNote; }
+function homeNoteHTML(){ if(!S.ui.homeNote) return ""; const mine=S.ui.homeLinkFor===S.ui.homeNote, copy=mine && S.ui.homeCopy;
+  return `<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}${S.ui.homeLink && mine?` <a href="${esc(S.ui.homeLink)}" style="word-break:break-all">${esc(S.ui.homeLink)}</a>`:""}
+    ${copy?`<div class="controls" style="margin-top:10px"><button class="btn sm primary" data-act="inviteCopy">Copy invitation link</button><span class="meta" id="inviteNote" role="status"></span></div>`:""}</div>`; }
+/* code: demo mode, the link a mail would hold, shown as text. copy: an invitation link behind a Copy button; it is kept in
+   memory only, for as long as this note is on screen */
+function homeSay(note, code, copy){ S.ui.homeNote=note+(code?" Demo mode sends no mail. The link would be:":""); S.ui.homeLink=code?resetUrl(code):""; S.ui.homeCopy=copy||""; S.ui.homeLinkFor=S.ui.homeNote; }
 /* a new user (backlog H8): the account, the record and the mail with the link to choose a password */
 function openAddUserDlg(){ if(S.auth.role!=="admin") return; S.ui.dlg={type:"userAdd", title:"Add user", focus:"uName"}; render(); }
 function addUserDlgHTML(d){ return `<div class="field"><label for="uName">Name (shown to other users as owner and in the share dialog)</label><input type="text" id="uName" maxlength="60" value="${esc(d.name||"")}"></div>
     <div class="field"><label for="uEmail">Email address</label><input type="email" id="uEmail" maxlength="200" autocapitalize="none" spellcheck="false" autocomplete="off" value="${esc(d.email||"")}"></div>
     <div class="field"><label for="uRole">Role</label><select id="uRole">${C.ROLES.slice().reverse().map(r=>`<option value="${r}" ${(d.role||"user")===r?"selected":""}>${esc(C.roleName(r))}${r==="admin"?": manages every set and the users":": own sets and the ones shared with them"}</option>`).join("")}</select>
       ${d.err?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(d.err)}</small>`:""}
-      <div class="meta">The new user gets a mail with a link to choose their own password. You do not set or see a password. You stay signed in as yourself.</div></div>
-    <div class="controls"><button class="btn primary" data-act="dlgSave" ${d.busy?"disabled":""}>${d.busy?"Adding…":"Add and send invitation"}</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
+      <label class="meta" style="display:flex;gap:8px;align-items:center;margin-top:4px"><input type="checkbox" id="uMail" ${d.mail===false?"":"checked"}> Send the invitation by mail</label>
+      <div class="meta">The new user chooses their own password through a link: in the mail, or the invitation link you can copy after adding and send yourself, for example in WhatsApp. You do not set or see a password. You stay signed in as yourself.</div></div>
+    <div class="controls"><button class="btn primary" data-act="dlgSave" ${d.busy?"disabled":""}>${d.busy?"Adding…":"Add user"}</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
 async function saveAddUserDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id); if(!d || d.type!=="userAdd" || d.busy || !g("uName")) return;
-  d.name=g("uName").value; d.email=g("uEmail").value.trim(); d.role=g("uRole").value;
+  d.name=g("uName").value; d.email=g("uEmail").value.trim(); d.role=g("uRole").value; d.mail=!g("uMail") || g("uMail").checked;
   const r=C.newUser(d, S.users, Date.now()); if(r.problem){ d.err=r.problem; d.focus=/name/.test(r.problem)?"uName":"uEmail"; render(); return; }
   d.err=""; d.busy=true; render();
-  try{ const out=await S.be.addUser(r.user);
-    homeSay(out.mailed===false && !out.code ? `${r.user.name} is added, but the mail could not be sent. Use Send invitation again.` : `${r.user.name} is added.${out.code?"":` A mail with a link to choose a password is on its way to ${r.user.email}.`}`, out.code);
+  try{ const out=await S.be.addUser(r.user, {mail:d.mail}), n=r.user.name;
+    const link = out.key ? C.inviteLink(PAGE, r.user.email, out.key) : out.code ? resetUrl(out.code) : "";
+    const mail = out.code ? "" : !d.mail ? " No mail is sent." : out.mailed ? ` A mail with a link to choose a password is on its way to ${r.user.email}.` : " The mail could not be sent.";
+    homeSay(`${n} is added.${mail}${link?` ${d.mail && out.mailed?"You can also":"You can"} copy the invitation link and send it yourself, for example in WhatsApp. It works until ${n} has chosen a password, and can only be copied now: it is gone when you leave this screen. Whoever has the link can take this account, so send it to ${n} only.`:(out.mailed?"":" Use Send invitation again.")}`, out.code, link);
     S.ui.dlg=null; render(); }
   catch(e){ console.warn("add user", e&&e.code); d.busy=false; d.err=C.authProblem(e) || (isDenied(e) ? "The account is made, but the database refused the user record. Publish the rules of tallyroom-setup.md, step 1.3" : "Adding failed: "+(e&&e.message||e)); if(S.ui.dlg===d) render(); } }
 async function inviteAgain(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || !u.email || S.auth.role!=="admin") return;
@@ -1148,6 +1162,8 @@ app.addEventListener("click", e=>{
     case "userEdit": openUserDlg(b.dataset.uid); break;
     case "userAdd": openAddUserDlg(); break;
     case "userInvite": inviteAgain(b.dataset.uid); break;
+    case "inviteCopy": { const note=document.getElementById("inviteNote"), url=S.ui.homeCopy||"", done=ok=>{ if(note) note.textContent=ok?"Invitation link copied.":"Copying is blocked in this browser."; };
+      try{ navigator.clipboard.writeText(url).then(()=>done(true),()=>done(false)); }catch(e){ done(false); } break; }
     case "pwChange": openPwDlg(); break;
     case "spSave": doSetPw(); break;
     case "spResend": doResend(); break;
@@ -1256,7 +1272,7 @@ async function boot(){
   if(be.onConn) be.onConn(ok=>{ clearTimeout(offTimer); if(ok) setOffline(false); else offTimer=setTimeout(()=>setOffline(true), 6000); });
   /* wait for the first sign-in state before deciding between presenter and participant */
   await new Promise(done=>be.onAuth(a=>{ applyAuth(a); done(); }));
-  if(RESET_CODE && be.checkResetCode){ S.route="setpw"; S.booted=true; bootSetPw(be); return; }
+  if((RESET_CODE && be.checkResetCode) || INVITE_MODE){ S.route="setpw"; S.booted=true; bootSetPw(be); return; }
   if(SIGNIN && !be.demo){ if(be.isHost){ location.replace(urlFor({set:SET_ID})); return; } S.route="signin"; S.booted=true; render(); return; }
   if(be.isAdmin && !be.demo) await migrate(be); // only an admin can read the list of all sets
   S.booted=true;

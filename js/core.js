@@ -440,6 +440,14 @@ function newUser(fields, users, now){ const f=fields||{}, name=String(f.name||""
   if(!emailOk(email)) return {problem:"Type a valid email address."};
   if(Object.values(users||{}).some(u=>u && String(u.email||"").trim().toLowerCase()===email.toLowerCase())) return {problem:"This email address is already a user."};
   return {user:{email, name, role:normRole(f.role)||"user", createdAt:now}}; }
+/* the invitation link an admin copies and sends themself (backlog H8): it holds the address and the random password of the
+   new account behind the #, a part of a link that is never sent to a server, so also not to whoever makes a link preview.
+   The page signs in with it once, to set the password the user chooses; after that the link is dead */
+function inviteLink(page, email, key, demo){ const enc=s=>encodeURIComponent(s).replace(/[!'()*._~-]/g, c=>"%"+c.charCodeAt(0).toString(16).toUpperCase()); // also the marks a chat app may cut a link at
+  return String(page||"").split(/[?#]/)[0]+"?mode=invite"+(demo?"&demo=1":"")+"#e="+enc(email)+"&k="+enc(key); }
+function parseInvite(hash){ try{ const p=new URLSearchParams(String(hash||"").replace(/^#/,"")), email=(p.get("e")||"").trim(), key=p.get("k")||""; return emailOk(email) && key ? {email, key} : null; }catch(e){ return null; } }
+/* the link was used already (the password it holds is no longer the password), or the account is gone */
+const inviteIsDead = e => /wrong-password|invalid-credential|invalid-login-credentials|user-not-found|user-disabled|invalid-email/.test(String((e&&e.code)||""));
 /* what went wrong in Firebase Authentication, as a sentence; null when the code is not one of these */
 function authProblem(e){ const c=String((e&&e.code)||"");
   if(/network/.test(c)) return "Could not connect. Check your connection and try again.";
@@ -596,7 +604,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, visibleQids, shownVotes, namesAsVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
-  VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, userList, userLabel, matchUsers, shareLine, ownedIds, userPatch, selfChangeProblem, userRemoval, ownsMessage, PW_MIN, PW_MAX, passwordProblems, randomPassword, emailOk, newUser, authProblem, linkIsDead,
+  VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, userList, userLabel, matchUsers, shareLine, ownedIds, userPatch, selfChangeProblem, userRemoval, ownsMessage, PW_MIN, PW_MAX, passwordProblems, randomPassword, emailOk, newUser, authProblem, linkIsDead, inviteLink, parseInvite, inviteIsDead,
   sortSets, pollStats, duplicateSet, migrationMeta, ownerlessIds, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS, ICON_MARK, iconSVG,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,

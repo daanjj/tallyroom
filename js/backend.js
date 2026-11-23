@@ -7,6 +7,10 @@
               addUser({name, email, role}), for an admin -> {uid, mailed}: an account with a random password that nobody sees,
               its users record, and the mail. The account is made through a second connection, so the admin stays signed in.
               The demo store sends no mail: resetPassword and addUser give {code}, the last part of the link the mail would hold
+              addUser(fields, {mail:false}) sends no mail. Its answer also holds {key}: the random password, for the invitation
+              link the admin copies and sends themself (core.inviteLink). It is in memory only, and only at that moment.
+              openInvite(email, key) -> the address, when the link still works; finishInvite(password) sets the chosen password.
+              Both run on a second connection, so nobody is signed in on this page before a password is chosen
               id and the role follow the sign-in and can change while the page is open (backlog G1, G2, H2)
               isHost is the same as isUser: someone who may have sets. Who is presenter of a set is decided per set, see poll(id)
      users    onUsers(f(map|null, err)): everyone who may use this Tally Room, for users only
@@ -116,7 +120,7 @@ function makeDemoBackend(isHost, role){
       c.used=true; db.pw=db.pw||{}; db.pw[c.uid]=String(pw); save(); },
     changePassword:async(cur,next)=>{ if(!me) throw new Error("Not signed in"); if(String(cur)!==((db.pw||{})[uid]||"demo")) throw Object.assign(new Error("wrong password"), {code:"auth/wrong-password"});
       db.pw=db.pw||{}; db.pw[uid]=String(next); save(); },
-    addUser:async fields=>{ adminOnly(); const r=C.newUser(fields, db.users, Date.now()); if(r.problem) throw new Error(r.problem);
+    addUser:async(fields)=>{ adminOnly(); const r=C.newUser(fields, db.users, Date.now()); if(r.problem) throw new Error(r.problem);
       const nu="demo-"+Math.random().toString(36).slice(2,10); db.users[nu]=r.user; const code=demoCode(nu); emitUsers(); return {uid:nu, mailed:false, code}; },
     onUsers:f=>{ if(!me){ f({}); return; } L.users.push(f); f(copy(db.users)||{}); },
     onSets:f=>{ L.sets.push(f); f(mySets()); },
@@ -279,6 +283,12 @@ function makeFirebaseBackend(config, opts){
   const sendPwMail=async email=>{ const url=signInUrl(); if(!url) return auth.sendPasswordResetEmail(email);
     try{ return await auth.sendPasswordResetEmail(email, {url}); }
     catch(e){ if(/continue-uri|unauthorized-domain/.test(String((e&&e.code)||""))){ console.warn("password mail without continue address", e.code); return auth.sendPasswordResetEmail(email); } throw e; } };
+  /* a second connection to Firebase, with its own sign-in that is not kept on this device and never touches the one of the page */
+  const second=async()=>{ const app2=root.firebase.initializeApp(config, "invite-"+Date.now()+"-"+Math.random().toString(36).slice(2,8));
+    if(opts.appCheckKey && root.firebase.appCheck){ try{ const P=root.firebase.appCheck.ReCaptchaEnterpriseProvider; if(P) root.firebase.appCheck(app2).activate(new P(opts.appCheckKey), true); }catch(e){ console.warn("App Check for the second connection", e); } }
+    const a2=app2.auth(); try{ await a2.setPersistence(root.firebase.auth.Auth.Persistence.NONE); }catch(e){}
+    return {auth:a2, close:async()=>{ try{ await a2.signOut(); }catch(e){} try{ await app2.delete(); }catch(e){} }}; };
+  let invite=null; const dropInvite=async()=>{ if(invite){ const i=invite; invite=null; await i.s.close(); } };
   const denied=e=>!!e && /permission.denied/i.test(String(e.code||"")+" "+String(e.message||""));
   return { get id(){ return st.uid; }, get role(){ return st.role; }, get isUser(){ return st.isUser; }, get isAdmin(){ return st.isAdmin; }, get isHost(){ return st.isHost; }, canWrite:true, demo:false,
     isConnected:()=>connected,
@@ -300,17 +310,17 @@ function makeFirebaseBackend(config, opts){
     /* a new user (admin only; the rules check the record). The account is made through a second connection to Firebase, which
        signs in as the new account and is thrown away, so this page stays signed in as the admin. Its password is random and
        never shown, stored or sent: the mail holds a link to choose one (open decision 26) */
-    addUser:async fields=>{ const r=C.newUser(fields, null, Math.round(now())); if(r.problem) throw new Error(r.problem);
+    addUser:async(fields, o)=>{ const r=C.newUser(fields, null, Math.round(now())); if(r.problem) throw new Error(r.problem);
       const rnd=()=>{ const a=new Uint32Array(1); root.crypto.getRandomValues(a); return a[0]/4294967296; };
-      const app2=root.firebase.initializeApp(config, "invite-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)); let nu=null;
-      try{ if(opts.appCheckKey && root.firebase.appCheck){ try{ const P=root.firebase.appCheck.ReCaptchaEnterpriseProvider; if(P) root.firebase.appCheck(app2).activate(new P(opts.appCheckKey), true); }catch(e){ console.warn("App Check for the second connection", e); } }
-        const a2=app2.auth(); try{ await a2.setPersistence(root.firebase.auth.Auth.Persistence.NONE); }catch(e){} // nothing of the new account is kept on this device
-        nu=(await a2.createUserWithEmailAndPassword(r.user.email, C.randomPassword(rnd))).user.uid;
-        try{ await a2.signOut(); }catch(e){} }
-      finally{ try{ await app2.delete(); }catch(e){} }
+      const s=await second(), key=C.randomPassword(rnd); let nu=null;
+      try{ nu=(await s.auth.createUserWithEmailAndPassword(r.user.email, key)).user.uid; } finally{ await s.close(); }
       await db.ref("users/"+nu).set(r.user);
-      let mailed=true; try{ await sendPwMail(r.user.email); }catch(e){ console.warn("invitation mail", e&&e.code); mailed=false; }
-      return {uid:nu, mailed}; },
+      let mailed=false; if(!(o && o.mail===false)){ try{ await sendPwMail(r.user.email); mailed=true; }catch(e){ console.warn("invitation mail", e&&e.code); } }
+      return {uid:nu, mailed, key}; },
+    /* the invitation link (core.inviteLink): signed in with it on a second connection, only to set the chosen password */
+    openInvite:async(email,key)=>{ await dropInvite(); const s=await second();
+      try{ const u=(await s.auth.signInWithEmailAndPassword(email, key)).user; invite={s, user:u}; return u.email||email; }catch(e){ await s.close(); throw e; } },
+    finishInvite:async pw=>{ if(!invite) throw Object.assign(new Error("This link is no longer valid"), {code:"auth/invalid-credential"}); await invite.user.updatePassword(pw); await dropInvite(); },
     onUsers:f=>listen("users", v=>f(v||{}), e=>f(null,e), true, ()=>f({})),
     onSets:f=>{ setsFns.push(f); if(st.ready) startFeed(); },
     getSets:async()=>(await db.ref("sets").once("value")).val()||{},

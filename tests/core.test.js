@@ -889,3 +889,13 @@ test("what Firebase Authentication refused, as a sentence; and which errors mean
   for (const dead of ["auth/expired-action-code", "auth/invalid-action-code", "auth/user-disabled", "auth/user-not-found"]) assert.equal(C.linkIsDead(e(dead)), true, dead);
   assert.equal(C.linkIsDead(e("auth/network-request-failed")), false); assert.equal(C.linkIsDead(null), false);
 });
+test("the invitation link holds the address and the key behind the #, and reads back; a link that was cut off does not", () => {
+  const key = "Ab3!#%+-=?@_ x", link = C.inviteLink("https://x.github.io/tallyroom/?set=a#old", "sam+test@example.com", key);
+  assert.ok(link.startsWith("https://x.github.io/tallyroom/?mode=invite#e=")); const [front, hash] = link.split("#");
+  assert.ok(!front.includes("sam") && !front.includes("Ab3"), "nothing of it is in the part a server sees"); assert.ok(!/[\s!?@]/.test(hash), "no characters a chat app would cut the link at");
+  assert.deepEqual(C.parseInvite("#" + hash), { email: "sam+test@example.com", key }); assert.deepEqual(C.parseInvite(hash), { email: "sam+test@example.com", key });
+  assert.ok(C.inviteLink("http://localhost:8765/index.html", "a@b.nl", "k", true).startsWith("http://localhost:8765/index.html?mode=invite&demo=1#e="));
+  for (const bad of ["", "#", "#e=sam%40example.com", "#k=abc", "#e=not-an-address&k=abc", null, "#e=%E0%A4%A&k=x"]) assert.equal(C.parseInvite(bad), null, String(bad));
+  for (const dead of ["auth/wrong-password", "auth/invalid-credential", "auth/user-not-found", "auth/user-disabled"]) assert.equal(C.inviteIsDead({ code: dead }), true, dead);
+  assert.equal(C.inviteIsDead({ code: "auth/network-request-failed" }), false); assert.equal(C.inviteIsDead(null), false);
+});
