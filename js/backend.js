@@ -2,6 +2,11 @@
    Both backends offer the same interface:
      global   id, role, isUser, isAdmin, isHost, canWrite, demo, isConnected(), onConn(f), downFor(), nudge(), now()
      sign-in  onAuth(f(state)), signIn(email, password), signOut(), resetPassword(email)
+              passwords (backlog H8): resetPassword sends the mail with a link, which is also the invitation of a new user;
+              checkResetCode(code) -> the email address the link is for, setPassword(code, password), changePassword(current, next)
+              addUser({name, email, role}), for an admin -> {uid, mailed}: an account with a random password that nobody sees,
+              its users record, and the mail. The account is made through a second connection, so the admin stays signed in.
+              The demo store sends no mail: resetPassword and addUser give {code}, the last part of the link the mail would hold
               id and the role follow the sign-in and can change while the page is open (backlog G1, G2, H2)
               isHost is the same as isUser: someone who may have sets. Who is presenter of a set is decided per set, see poll(id)
      users    onUsers(f(map|null, err)): everyone who may use this Tally Room, for users only
@@ -83,6 +88,7 @@ function makeDemoBackend(isHost, role){
   const authState=()=>({ready:true, uid, role:me?me.role:null, name:me?me.name:"", isUser:!!me, isAdmin:!!me && me.role==="admin", isHost:hostNow(), anon:false, email:me?me.email:lastEmail, error:null});
   function refreshMe(){ if(!uid) return; const next=C.normUser((db.users||{})[uid]), same=JSON.stringify(next)===JSON.stringify(me); me=next; if(me) lastEmail=me.email;
     if(!same) authFns.forEach(f=>f(authState())); }
+  const demoCode=u=>{ const code="demo"+Math.random().toString(36).slice(2,12); db.codes=db.codes||{}; db.codes[code]={uid:u, used:false}; save(); return code; };
   const adminOnly=()=>{ if(!me || me.role!=="admin") throw new Error("Only an admin can do this."); };
   const emitUsers=()=>{ refreshMe(); L.users.forEach(f=>f(copy(db.users)||{})); };
   const names=["a","b","c","d","e","f","g","h"];
@@ -102,7 +108,16 @@ function makeDemoBackend(isHost, role){
     isConnected:()=>true, onConn:f=>f(true), downFor:()=>0, nudge:()=>{}, now:()=>Date.now(),
     get role(){ return me?me.role:null; }, get isUser(){ return !!me; }, get isAdmin(){ return !!me && me.role==="admin"; },
     onAuth:f=>{ authFns.push(f); f(authState()); }, // nothing to sign in to
-    signIn:async()=>{}, signOut:async()=>{}, resetPassword:async()=>{},
+    signIn:async()=>{}, signOut:async()=>{},
+    /* no mail in the demo: the code of the link is handed back, and passwords are kept in the store (the first one is "demo") */
+    resetPassword:async email=>{ const u=Object.keys(db.users||{}).find(k=>String((db.users[k]||{}).email||"").toLowerCase()===String(email||"").trim().toLowerCase()); return u ? {code:demoCode(u)} : {}; },
+    checkResetCode:async code=>{ const c=(db.codes||{})[code], u=c && C.normUser((db.users||{})[c.uid]); if(!u || c.used) throw Object.assign(new Error("This link is no longer valid"), {code:"auth/invalid-action-code"}); return u.email; },
+    setPassword:async(code,pw)=>{ const c=(db.codes||{})[code]; if(!c || c.used || !C.normUser((db.users||{})[c.uid])) throw Object.assign(new Error("This link is no longer valid"), {code:"auth/invalid-action-code"});
+      c.used=true; db.pw=db.pw||{}; db.pw[c.uid]=String(pw); save(); },
+    changePassword:async(cur,next)=>{ if(!me) throw new Error("Not signed in"); if(String(cur)!==((db.pw||{})[uid]||"demo")) throw Object.assign(new Error("wrong password"), {code:"auth/wrong-password"});
+      db.pw=db.pw||{}; db.pw[uid]=String(next); save(); },
+    addUser:async fields=>{ adminOnly(); const r=C.newUser(fields, db.users, Date.now()); if(r.problem) throw new Error(r.problem);
+      const nu="demo-"+Math.random().toString(36).slice(2,10); db.users[nu]=r.user; const code=demoCode(nu); emitUsers(); return {uid:nu, mailed:false, code}; },
     onUsers:f=>{ if(!me){ f({}); return; } L.users.push(f); f(copy(db.users)||{}); },
     onSets:f=>{ L.sets.push(f); f(mySets()); },
     getSets:async()=>copy(db.sets)||{},
@@ -257,6 +272,13 @@ function makeFirebaseBackend(config, opts){
     userSub={ref, cb}; }
   auth.onAuthStateChanged(resolve, e=>{ console.warn("auth", e); publish({uid:null, ...NOBODY, anon:false, email:"", error:"anon"}); });
 
+  /* the mail with the link to choose a password: an invitation, or Forgot password. It carries the address of the sign-in
+     screen, so Firebase's own page (where the link lands when the mail template has no action URL of this page) ends with a
+     Continue button back to here. A domain Firebase does not accept for that is left out rather than losing the mail */
+  const signInUrl=()=>{ try{ const l=root.location; return l && /^https?:$/.test(l.protocol) ? l.origin+l.pathname+"?host=1" : ""; }catch(e){ return ""; } };
+  const sendPwMail=async email=>{ const url=signInUrl(); if(!url) return auth.sendPasswordResetEmail(email);
+    try{ return await auth.sendPasswordResetEmail(email, {url}); }
+    catch(e){ if(/continue-uri|unauthorized-domain/.test(String((e&&e.code)||""))){ console.warn("password mail without continue address", e.code); return auth.sendPasswordResetEmail(email); } throw e; } };
   const denied=e=>!!e && /permission.denied/i.test(String(e.code||"")+" "+String(e.message||""));
   return { get id(){ return st.uid; }, get role(){ return st.role; }, get isUser(){ return st.isUser; }, get isAdmin(){ return st.isAdmin; }, get isHost(){ return st.isHost; }, canWrite:true, demo:false,
     isConnected:()=>connected,
@@ -268,7 +290,27 @@ function makeFirebaseBackend(config, opts){
     signIn:(email,password)=>auth.signInWithEmailAndPassword(email,password),
     /* on a set page the presenter turns straight into an anonymous participant, without a moment as nobody */
     signOut:()=>opts.anon ? auth.signInAnonymously() : auth.signOut(),
-    resetPassword:email=>auth.sendPasswordResetEmail(email),
+    resetPassword:email=>sendPwMail(email),
+    /* the link in the password mail carries a code: who it is for, and choosing the password with it */
+    checkResetCode:code=>auth.verifyPasswordResetCode(code),
+    setPassword:(code,pw)=>auth.confirmPasswordReset(code,pw),
+    /* Firebase wants a recent sign-in before a password changes, so the current password is checked first */
+    changePassword:async(cur,next)=>{ const u=auth.currentUser; if(!u || u.isAnonymous || !u.email) throw new Error("Not signed in");
+      await u.reauthenticateWithCredential(root.firebase.auth.EmailAuthProvider.credential(u.email, cur)); await u.updatePassword(next); },
+    /* a new user (admin only; the rules check the record). The account is made through a second connection to Firebase, which
+       signs in as the new account and is thrown away, so this page stays signed in as the admin. Its password is random and
+       never shown, stored or sent: the mail holds a link to choose one (open decision 26) */
+    addUser:async fields=>{ const r=C.newUser(fields, null, Math.round(now())); if(r.problem) throw new Error(r.problem);
+      const rnd=()=>{ const a=new Uint32Array(1); root.crypto.getRandomValues(a); return a[0]/4294967296; };
+      const app2=root.firebase.initializeApp(config, "invite-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)); let nu=null;
+      try{ if(opts.appCheckKey && root.firebase.appCheck){ try{ const P=root.firebase.appCheck.ReCaptchaEnterpriseProvider; if(P) root.firebase.appCheck(app2).activate(new P(opts.appCheckKey), true); }catch(e){ console.warn("App Check for the second connection", e); } }
+        const a2=app2.auth(); try{ await a2.setPersistence(root.firebase.auth.Auth.Persistence.NONE); }catch(e){} // nothing of the new account is kept on this device
+        nu=(await a2.createUserWithEmailAndPassword(r.user.email, C.randomPassword(rnd))).user.uid;
+        try{ await a2.signOut(); }catch(e){} }
+      finally{ try{ await app2.delete(); }catch(e){} }
+      await db.ref("users/"+nu).set(r.user);
+      let mailed=true; try{ await sendPwMail(r.user.email); }catch(e){ console.warn("invitation mail", e&&e.code); mailed=false; }
+      return {uid:nu, mailed}; },
     onUsers:f=>listen("users", v=>f(v||{}), e=>f(null,e), true, ()=>f({})),
     onSets:f=>{ setsFns.push(f); if(st.ready) startFeed(); },
     getSets:async()=>(await db.ref("sets").once("value")).val()||{},

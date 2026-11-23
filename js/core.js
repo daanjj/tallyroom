@@ -428,6 +428,31 @@ const ownsMessage = (name, n) => `${name} still owns ${n} question ${n===1?"set"
 /* a new owner leaves the shared list; the previous owner keeps no rights */
 function withOwner(meta, uid){ const m=normMeta(meta); if(!m || !normUid(uid)) return m; return normMeta({...m, owner:uid}); }
 
+/* ---- onboarding (backlog H8) ---- */
+/* the password of a new account: 32 random characters that nobody sees; the user chooses their own through the link in the mail */
+const PW_CHARS="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!#%+-=?@_";
+function randomPassword(rnd){ rnd=rnd||Math.random; const pick=s=>s[Math.floor(rnd()*s.length)%s.length]; let p=pick(PW_CHARS.slice(0,49))+pick(PW_CHARS.slice(49,57)); // a letter and a digit, so it passes the own rule
+  while(p.length<32) p+=pick(PW_CHARS); return p; }
+const emailOk = s => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(String(s||"").trim()) && String(s).trim().length<=200;
+/* what an admin types for a new user -> {user} to store, or {problem}. users = the list as it is, to refuse an address twice */
+function newUser(fields, users, now){ const f=fields||{}, name=String(f.name||"").replace(/\s+/g," ").trim().slice(0,60), email=String(f.email||"").trim();
+  if(!name) return {problem:"Give the user a name."};
+  if(!emailOk(email)) return {problem:"Type a valid email address."};
+  if(Object.values(users||{}).some(u=>u && String(u.email||"").trim().toLowerCase()===email.toLowerCase())) return {problem:"This email address is already a user."};
+  return {user:{email, name, role:normRole(f.role)||"user", createdAt:now}}; }
+/* what went wrong in Firebase Authentication, as a sentence; null when the code is not one of these */
+function authProblem(e){ const c=String((e&&e.code)||"");
+  if(/network/.test(c)) return "Could not connect. Check your connection and try again.";
+  if(/too-many-requests/.test(c)) return "Too many attempts. Wait a few minutes and try again.";
+  if(/wrong-password|invalid-credential|invalid-login-credentials/.test(c)) return "The current password is not right";
+  if(/weak-password|password-does-not-meet-requirements/.test(c)) return "Firebase refused this password. Choose a longer one";
+  if(/email-already-in-use/.test(c)) return "This email address already has an account in Firebase Authentication, without access here. Delete that account in the Firebase console, or add its record by hand (tallyroom-setup.md, step 1b)";
+  if(/invalid-email/.test(c)) return "Type a valid email address.";
+  if(/operation-not-allowed/.test(c)) return "Email and password sign-in is switched off in the Firebase project (tallyroom-setup.md, step 1b).";
+  return null; }
+/* a link from a password mail that was used already, is too old, or was cut off */
+const linkIsDead = e => /expired-action-code|invalid-action-code|user-disabled|user-not-found/.test(String((e&&e.code)||""));
+
 /* ---- password rule (backlog H1, H8): what is wrong with a password, as sentences; an empty list means it is fine ---- */
 const PW_MIN=12, PW_MAX=128;
 const PW_COMMON=["password","passwords","wachtwoord","welkom","welcome","qwerty","azerty","letmein","iloveyou","admin","administrator","tallyroom","changeme","secret","geheim","monkey","dragon","football","abc","abcdef","qwertyuiop","asdfghjkl","zxcvbnm","123456789012","1234567890"];
@@ -571,7 +596,7 @@ const api={ clamp, num, fmt, tx, slug, stamp,
   DEFAULT_SESSION, emptyConfig, normConfig, normSession,
   PRESENCE_MS, hasAnswers, presenceDoc, TYPING_MS, isWriting, withoutTyping, trafficWriting, typingExpiry, qidMap, withQids, validAns, roundVotes, visibleQids, shownVotes, namesAsVotes, stats, parseCSV, csvToQuestions,
   DAY, DEFAULT_EXPIRY_DAYS, DEFAULT_ACCENT, CATEGORIES, NAMED, csvCell, tidyQuestion, SET_ID_RE, setIdFor, randomTail, newSetId, normHex, normMeta, newMeta, isExpired, expiryInfo, extendedExpiry,
-  VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, userList, userLabel, matchUsers, shareLine, ownedIds, userPatch, selfChangeProblem, userRemoval, ownsMessage, PW_MIN, PW_MAX, passwordProblems,
+  VISIBILITY, ROLES, UID_RE, normUid, normUser, roleName, setRight, canManage, canControl, canAssign, canView, isShared, sharedWith, withShare, withOwner, userList, userLabel, matchUsers, shareLine, ownedIds, userPatch, selfChangeProblem, userRemoval, ownsMessage, PW_MIN, PW_MAX, passwordProblems, randomPassword, emailOk, newUser, authProblem, linkIsDead,
   sortSets, pollStats, duplicateSet, migrationMeta, ownerlessIds, questionsExport, parseQuestionsFile, resultsPayload, resultsCSV,
   ACCENT_PRESETS, REF, hexToRgb, rgbToHex, relLum, contrast, hexToOklch, oklchToHex, themeVars, themeCSS, ICON_MARK, iconSVG,
   isNamed, cleanName, nameProblem, otherNames, mustYieldName, randomName,

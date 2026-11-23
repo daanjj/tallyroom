@@ -200,6 +200,9 @@ a{color:var(--accent-text)}
 .sets-h .meta{font-weight:600;margin-left:4px}
 .pill-btn{border:0;cursor:pointer}
 .pill-btn:hover,.pill-btn:focus-visible{background:var(--accent-soft);color:var(--accent-text)}
+.pw-list{margin:2px 0 0;padding-left:18px;font-size:13px;font-weight:600;color:var(--warn)}
+.pw-list:empty{display:none}
+.pw-list li.ok{color:var(--good)}
 .share-list{display:grid;margin-top:2px}
 .share-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
 .share-row:first-child{border-top:0}

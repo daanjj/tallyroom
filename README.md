@@ -12,20 +12,20 @@ There is no build step: the browser loads these files as they are.
 | `config.js` | Your settings: the Firebase project and, optionally, the App Check site key. No secret in it |
 | `database.rules.json` | The database rules: who may read and write what. Published by hand in the Firebase console |
 | `css/styles.css` | All styling. The purple values are the default accent |
-| `js/core.js` | Pure logic: questions, statistics, exports, expiry, colour palette. No screen, no network |
+| `js/core.js` | Pure logic: questions, statistics, exports, expiry, colour palette, rights on a set, the password rule. No screen, no network |
 | `js/backend.js` | Where the data lives: Firebase, or a demo store inside the browser |
 | `js/app.js` | Screens and actions |
 | `tests/core.test.js` | Tests for `js/core.js` |
 | `vendor/` | Third-party scripts, kept here so the page loads no script from another host (see below) |
 | `tests/hardening.test.js` | Tests for the script sources, the security policy and the escaping in exports |
 | `tests/fixtures/hostile-set.json` | A question set whose every text tries to inject HTML (see below) |
-| `tests/backend.test.js` | Tests for the sign-in logic of `js/backend.js`, against a stand-in for Firebase |
+| `tests/backend.test.js` | Tests for `js/backend.js` (sign-in, roles, lists of sets, sharing, users, passwords), against a stand-in for Firebase |
 | `tests/rules.test.js` | Tests for `database.rules.json`, against a stand-in for the way Firebase evaluates rules |
 | `tests/rules-checklist.md` | What to try on the real database after publishing the rules |
 
 ## Trying it without touching the database
 
-Add `?demo=1` to the address. The page then keeps its data in this browser only (shared between its tabs), you are the presenter without signing in, and eight simulated participants answer. `&host=off` shows what a participant sees.
+Add `?demo=1` to the address. The page then keeps its data in this browser only (shared between its tabs), you are the presenter without signing in (a made-up admin), and eight simulated participants answer. `&host=off` shows what a participant sees, and `&role=user` the page of a normal user. Demo mode sends no mail: where a mail would go out, the page shows the link it would hold.
 
 ```bash
 python3 -m http.server 8765
@@ -65,7 +65,8 @@ In the exports, a CSV cell that starts with `=`, `+`, `-` or `@` gets an apostro
 
 ## Who may do what
 
-- **Users** sign in at `?host` with an email and password account made in the Firebase console, and have a record `users/{uid}` with the role `admin` or `user`, made by hand for now. An admin manages every set. A user manages their own sets and the ones shared with them, and can read the questions of public sets. The overview shows My sets and Public sets (for an admin: all other sets). A user who opens the link of a set they do not manage takes part like any participant. The owner of a set, or an admin, shares it with other users from **Share…** (on the row and in Settings); who it is shared with can **Leave**. An admin can also give a set to another owner (**Assign to…**) and has the screen **Users**: change a name or a role, and **Remove access**, which is refused while the user still owns sets. An admin cannot remove or demote themself. Adding users from the page is not built yet (backlog H8).
+- **Users** sign in at `?host` with email and password, and have a record `users/{uid}` with the role `admin` or `user`. The first admin is made by hand in the Firebase console; everyone else is added by an admin from the **Users** screen. An admin manages every set. A user manages their own sets and the ones shared with them, and can read the questions of public sets. The overview shows My sets and Public sets (for an admin: all other sets). A user who opens the link of a set they do not manage takes part like any participant. The owner of a set, or an admin, shares it with other users from **Share…** (on the row and in Settings); who it is shared with can **Leave**. An admin can also give a set to another owner (**Assign to…**) and has the screen **Users**: change a name or a role, and **Remove access**, which is refused while the user still owns sets. An admin cannot remove or demote themself.
+- **Passwords**: **Add user** makes the account with a random password that nobody sees, and Firebase mails the new user a link. The link opens the page's **Choose your password** screen (`?mode=resetPassword&oobCode=…`); Forgot password uses the same mail and screen. That needs the action URL of the mail template set to the page; where the Firebase console does not allow that, the link opens Firebase's own page, which ends with a Continue button to the sign-in screen. **Change password** asks for the current password first. A password has at least 12 characters, a letter and a non-letter, and is not the email address or a well-known password (`passwordProblems` in `js/core.js`); passwords do not expire. The page checks this; Firebase's own password policy holds the length for someone who goes around the page (`tallyroom-setup.md`, step 1b).
 - **Participants** sign in anonymously, without noticing. The uid of that sign-in is the device id and the key of the vote record.
 - `database.rules.json` enforces it: who manages a set (its owner, the users it is shared with, admins) reads and writes its questions, answers and actions, and only the owner or an admin deletes it, changes its link, its visibility or its sharing; a participant reads `sets/{id}`, `config`, `session`, `shown` and `names` of the set whose link it has, and of `votes` only its own record. It writes only `votes/{own uid}` and `names/{own uid}`, in a set that exists and has not expired. Answers are checked for shape: numbers from 0 to 11, only for the questions of the set (`config.qids`).
 - **App Check** (optional, `tallyroom-setup.md` step 1c): with a site key in `config.js` and enforcement switched on in the console, the database accepts requests from this page only.
@@ -74,10 +75,9 @@ In the exports, a CSV cell that starts with `=`, `+`, `-` or `@` gets an apostro
 
 ## Data layout
 
-- `users/{uid}`: who may sign in (`role`: `admin` or `user`, `email`, `name`, `createdAt`). Written by admins only.
+- `users/{uid}`: who may use this Tally Room (`role`: `admin` or `user`, `email`, `name`, `createdAt`). Read by every user, written by admins only; an admin cannot remove their own record or lower their own role. The accounts themselves, with their passwords, are in Firebase Authentication, not in the database.
 - `userSets/{uid}/{setId}`: `true` for each set that is shared with that user, kept in step with `sets/{setId}/shared` so those sets can be listed.
-
-- `sets/{setId}`: the attributes of a set (`name`, `header`, `accent`, `category`, `named`, `owner`, `visibility`, `shared`, `expiresAt`, `joinUrl`, `createdAt`, `updatedAt`). This is the list the presenter's overview shows.
+- `sets/{setId}`: the attributes of a set (`name`, `header`, `accent`, `category`, `named`, `expiresAt`, `joinUrl`, `createdAt`, `updatedAt`) and who it belongs to: `owner` (a uid), `visibility` (`private` or `public`) and `shared` (`{uid: true}` for the users it is shared with). A user's overview is put together from the sets they own, the ones listed in `userSets` and the public ones; an admin reads the whole list.
 - `polls/{setId}/config`: mode, follow-up prompts and the questions.
 - `polls/{setId}/session`: where the session stands (phase, current question, round).
 - `polls/{setId}/votes/{deviceId}`: one record per device (the device id is the uid of its sign-in), so a phone counts once per set. It holds `answers`, `texts` (comments and open answers), `conf` (dilemma confidence), `revs` (which version of an edited proposal an answer is for) and, in a named set, `name`.

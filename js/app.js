@@ -12,6 +12,9 @@ const PAGE=location.href.split("#")[0].split("?")[0];
 const RAW_SET=params.get("set"), SET_ID=(RAW_SET && C.SET_ID_RE.test(RAW_SET)) ? RAW_SET : null;
 /* no arguments = the overview of all sets; host = the presenter sign-in screen (it comes back here without it) */
 const SIGNIN = params.has("host") && params.get("host")!=="off";
+/* the link in a password mail (an invitation, or Forgot password) opens the page with a code (backlog H8) */
+const RESET_CODE = params.get("mode")==="resetPassword" ? (params.get("oobCode")||"") : "";
+function resetUrl(code){ const p=new URLSearchParams(); p.set("mode","resetPassword"); p.set("oobCode",code); if(params.has("demo")) p.set("demo",params.get("demo")||"1"); return PAGE+"?"+p.toString(); }
 function urlFor(o){ o=o||{}; const p=new URLSearchParams(); if(o.set) p.set("set",o.set); if(o.edit) p.set("edit","1"); if(o.host) p.set("host","1"); if(params.has("demo")) p.set("demo",params.get("demo")||"1"); const s=p.toString(); return PAGE+(s?"?"+s:""); }
 function joinUrl(id, meta){ return (meta && meta.joinUrl) || urlFor({set:id}); }
 
@@ -225,6 +228,7 @@ function render(bg){
   let html, host=false;
   if(!S.booted){ html=notice("", "Connecting…", true); }
   else if(S.route==="signin"){ applyTheme(null); document.title="Tally Room"; html=signInHTML(); }
+  else if(S.route==="setpw"){ applyTheme(null); document.title="Tally Room"; html=setPwHTML(); }
   else if(S.route==="set" && S.auth.error){ html=notice("Could not connect", "Check your connection and reload."); }
   else if(S.route==="home"){ applyTheme(null); document.title="Tally Room"; html=homeHTML(); }
   else if(S.metaErr){ html=notice("Cannot open this question set", RULES_MSG); }
@@ -232,7 +236,7 @@ function render(bg){
     html=notice("This question set does not exist (any more)", "Ask the presenter for a new link or QR code."+(S.be&&S.be.isHost?` <a href="${esc(urlFor())}">Manage question sets</a>`:"")); }
   else if(S.meta===undefined || !S.cfg || !S.ses){ html=notice("", "Connecting…", true); }
   else { applyTheme(S.meta.accent); document.title=header(); host = S.me.isHost && S.ui.view!=="participant"; }
-  const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.classList.contains("act-in")||ae.id==="nameIn"||ae.id==="siEmail"||ae.id==="siPass")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
+  const ae=document.activeElement, keep = (ae && ae.classList && (ae.classList.contains("tl-fu-in")||ae.classList.contains("open-in")||ae.classList.contains("act-in")||ae.id==="nameIn"||ae.id==="siEmail"||ae.id==="siPass"||ae.id==="spEmail")) ? {id:ae.id, a:ae.selectionStart, b:ae.selectionEnd} : null;
   const mc=document.querySelector("#modal .card"), mTop=mc?mc.scrollTop:0, wTop=window.scrollY;
   if(html==null) html = host ? hostHTML() : (expired() ? expiredHTML() : participantHTML());
   /* a background update that changes nothing on screen (a heartbeat, the clock) leaves the page alone: rebuilding it replays the chart animations, which shows as a flash */
@@ -604,7 +608,8 @@ function readDraftFromDOM(){
 }
 
 /* ============ presenter sign-in (backlog G1) ============ */
-const signOutBtn = () => (S.be && !S.be.demo && S.auth.uid && !S.auth.anon) ? `<button class="btn sm ghost" data-act="signOut" title="Signed in as ${esc(S.auth.email)}${S.auth.role?" ("+esc(C.roleName(S.auth.role))+")":""}">Sign out</button>` : "";
+const pwBtn = () => (S.be && S.auth.uid && !S.auth.anon && S.be.changePassword) ? `<button class="btn sm ghost" data-act="pwChange">Change password</button>` : "";
+const signOutBtn = () => pwBtn() + ((S.be && !S.be.demo && S.auth.uid && !S.auth.anon) ? `<button class="btn sm ghost" data-act="signOut" title="Signed in as ${esc(S.auth.email)}${S.auth.role?" ("+esc(C.roleName(S.auth.role))+")":""}">Sign out</button>` : "");
 function notPresenterHTML(){ return `<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card big-wait"><h2 style="font-size:24px">This account has no access</h2>
   <p class="meta">${esc(S.auth.email)} is signed in, but it is not on the list of users. Ask an admin of this Tally Room to add it.</p><div class="controls"><button class="btn primary" data-act="signOut">Sign out</button></div></div></div>`; }
 function signInHTML(){
@@ -630,12 +635,70 @@ async function doForgot(){ const em=document.getElementById("siEmail"), email=em
   if(!email){ S.ui.siErr="Type your email address first."; render(); document.getElementById("siEmail")?.focus(); return; }
   try{ await S.be.resetPassword(email); }catch(e){ console.warn("reset mail", e&&e.code); } // the answer never tells whether the address has an account
   S.ui.siNote="If this address has an account, a mail is on its way"; render(); }
+/* ============ passwords (backlog H8): the Set password screen behind the link of a mail, and Change password ============ */
+const PW_RULE=`At least ${C.PW_MIN} characters, with at least one letter and one digit or symbol. A few words in a row work well.`;
+/* the two fields for a new password, with what is still missing as you type; used by the screen and by the dialog */
+function pwFieldsHTML(){ return `<div class="field" style="margin-top:12px"><label for="pwNew">New password</label><input type="password" id="pwNew" class="pw-in" autocomplete="new-password" maxlength="${C.PW_MAX}">
+      <div class="meta">${PW_RULE}</div><ul class="pw-list" id="pwList" aria-live="polite"></ul></div>
+    <div class="field" style="margin-top:12px"><label for="pwNew2">New password, once more</label><input type="password" id="pwNew2" class="pw-in" autocomplete="new-password" maxlength="${C.PW_MAX}">
+      <small id="pwErr" role="alert" style="color:var(--warn);font-weight:700"></small></div>`; }
+function pwEmail(){ return S.route==="setpw" ? ((S.ui.spw||{}).email||"") : (S.auth.email||""); }
+function pwProblemsNow(){ const a=document.getElementById("pwNew"), b=document.getElementById("pwNew2"), pw=a?a.value:"", list=C.passwordProblems(pw, pwEmail());
+  if(b && b.value && b.value!==pw) list.push("The two passwords are not the same"); return {pw, again:b?b.value:"", list}; }
+function pwHints(){ const el=document.getElementById("pwList"); if(!el) return; const {pw, again, list}=pwProblemsNow(), err=document.getElementById("pwErr"); if(err) err.textContent="";
+  el.innerHTML = !pw ? "" : list.length ? list.map(m=>`<li>${esc(m)}</li>`).join("") : `<li class="ok">${again?"This password is fine":"This password is fine. Type it once more below"}</li>`; }
+function pwSay(msg){ const el=document.getElementById("pwErr"); if(el) el.textContent=msg||""; }
+/* the new password, or null with the reason on screen */
+function pwRead(){ const {pw, again, list}=pwProblemsNow(); pwHints();
+  if(list.length){ pwSay(list[0]); document.getElementById("pwNew")?.focus(); return null; }
+  if(!again){ pwSay("Type the password once more"); document.getElementById("pwNew2")?.focus(); return null; }
+  return pw; }
+function setPwHTML(){ const st=S.ui.spw||{}, card=inner=>`<div class="p-wrap"><div class="topbar">${brand("Tally Room")}</div><div class="card p-q">${inner}</div></div>`;
+  if(st.state==="form") return card(`<div class="eyebrow">Tally Room</div><h2 style="font-size:22px;margin-top:6px">Choose your password</h2>
+    <p class="meta" style="margin:8px 0 0">For <b>${esc(st.email)}</b>. You sign in with this email address and the password you choose here.</p>
+    <input type="email" value="${esc(st.email)}" autocomplete="username" readonly hidden>${pwFieldsHTML()}
+    <div class="controls" style="margin-top:14px"><button class="btn primary" data-act="spSave" ${st.busy?"disabled":""}>${st.busy?"Saving…":"Save and sign in"}</button></div>`);
+  if(st.state==="invalid") return card(`<h2 style="font-size:22px">This link is no longer valid</h2>
+    <p class="meta" style="margin:8px 0 0">A link from a password mail works once and for a short time. Ask for a new one here.</p>
+    <div class="field" style="margin-top:14px"><label for="spEmail">Email</label><input type="email" id="spEmail" autocomplete="username" autocapitalize="none" spellcheck="false" value="${esc(st.mail||"")}">
+      ${st.err?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(st.err)}</small>`:""}${st.note?`<small class="meta" role="status">${esc(st.note)}</small>`:""}${st.link?`<small class="meta">Demo mode sends no mail. The link would be: <a href="${esc(st.link)}">${esc(st.link)}</a></small>`:""}</div>
+    <div class="controls" style="margin-top:14px"><button class="btn primary" data-act="spResend">Send me a new link</button><a class="btn ghost" href="${esc(urlFor({host:true}))}">To the sign-in screen</a></div>`);
+  if(st.state==="error") return card(`<h2 style="font-size:22px">Could not check this link</h2><p class="meta" style="margin:8px 0 0">Check your connection and try again.</p><div class="controls" style="margin-top:14px"><button class="btn primary" data-act="reload">Try again</button></div>`);
+  return notice("", "Checking the link…", true); }
+async function bootSetPw(be){ S.ui.spw={state:"checking", code:RESET_CODE}; render();
+  try{ const email=await be.checkResetCode(RESET_CODE); S.ui.spw={state:"form", code:RESET_CODE, email:String(email||"")}; }
+  catch(e){ console.warn("password link", e&&e.code); S.ui.spw={state:(C.linkIsDead(e) || !C.authProblem(e)) ? "invalid" : "error", code:RESET_CODE}; }
+  render(); document.getElementById("pwNew")?.focus(); }
+async function doSetPw(){ const st=S.ui.spw; if(!st || st.state!=="form" || st.busy) return; const pw=pwRead(); if(pw==null) return;
+  const btn=document.querySelector('[data-act="spSave"]'); st.busy=true; if(btn){ btn.disabled=true; btn.textContent="Saving…"; } // the fields stay as typed
+  const back=()=>{ st.busy=false; if(btn){ btn.disabled=false; btn.textContent="Save and sign in"; } };
+  try{ await S.be.setPassword(st.code, pw); }
+  catch(e){ console.warn("set password", e&&e.code); if(C.linkIsDead(e)){ S.ui.spw={state:"invalid", code:st.code, mail:st.email}; render(); return; } back(); pwSay(C.authProblem(e)||"Saving failed. Try again"); return; }
+  /* the password is set: sign in with it and go to the overview; the code leaves the address bar and the history */
+  try{ await S.be.signIn(st.email, pw); location.replace(urlFor()); }
+  catch(e){ console.warn("sign-in after set password", e&&e.code); location.replace(urlFor({host:true})); } }
+async function doResend(){ const st=S.ui.spw, el=document.getElementById("spEmail"), email=el?el.value.trim():""; if(!st) return; st.mail=email; st.err=""; st.note=""; st.link="";
+  if(!C.emailOk(email)){ st.err="Type your email address."; render(); document.getElementById("spEmail")?.focus(); return; }
+  try{ const r=await S.be.resetPassword(email); if(r && r.code) st.link=resetUrl(r.code); }catch(e){ console.warn("reset mail", e&&e.code); } // the answer never tells whether the address has an account
+  st.note="If this address has an account, a mail is on its way"; render(); }
+function openPwDlg(){ if(!S.auth.uid || S.auth.anon) return; S.ui.dlg={type:"pw", title:"Change password", focus:"pwCur"}; render(); }
+function pwDlgHTML(){ return `<p class="meta" style="margin:0">For <b>${esc(S.auth.email)}</b>.${S.be.demo?` Demo mode: the first current password is <b>demo</b>.`:""}</p>
+    <input type="email" value="${esc(S.auth.email)}" autocomplete="username" readonly hidden>
+    <div class="field"><label for="pwCur">Current password</label><input type="password" id="pwCur" autocomplete="current-password"></div>${pwFieldsHTML()}
+    <div class="controls"><button class="btn primary" data-act="dlgSave">Change password</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
+async function savePwDlg(){ const d=S.ui.dlg, cur=document.getElementById("pwCur"); if(!d || d.type!=="pw" || d.busy) return;
+  if(!cur || !cur.value){ pwSay("Type your current password"); if(cur) cur.focus(); return; }
+  const pw=pwRead(); if(pw==null) return; if(pw===cur.value){ pwSay("The new password is the same as the current one"); return; }
+  d.busy=true;
+  try{ await S.be.changePassword(cur.value, pw); S.ui.dlg=null; if(S.route==="home") S.ui.homeNote="Your password is changed."; render(); if(S.route!=="home") alert("Your password is changed."); }
+  catch(e){ console.warn("change password", e&&e.code); d.busy=false; pwSay(C.authProblem(e)||"Changing the password failed. Try again"); if(/wrong-password|invalid-credential|invalid-login/.test(String(e&&e.code||""))) cur.focus(); } }
 /* the sign-in changed: who this device is (backlog G1, G2) */
 function applyAuth(a){ S.auth=a; applyRole(); }
 /* who this device is in what is on screen (backlog H5). On the overview and the sign-in screen "presenter" means: a user.
    On a set page it means: this user manages that set (owner, shared with, or admin), which the backend follows live (S.right) */
 function applyRole(){ const wasHost=S.me.isHost, wasId=S.me.id; S.me.id=S.be.id; S.me.isHost = S.route==="set" ? !!S.right : S.be.isHost;
   if(!S.booted) return;
+  if(S.route==="setpw") return; // the Set password screen moves on by itself
   if(S.route==="signin"){ if(S.me.isHost){ try{ location.replace(urlFor({set:SET_ID})); }catch(e){} return; } render(); return; }
   if(wasHost===S.me.isHost && wasId===S.me.id){ if(S.route==="home") renderBg(); return; }
   /* a user whose access to the open set is taken away keeps the page, as a participant */
@@ -663,7 +726,7 @@ function homeHTML(){
   return `<div class="wrap">${top}<div class="card" style="padding:26px">
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">${admin?"Admin":"Presenter"}</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Question sets</h1></div>${admin?homeTabs("sets"):""}<button class="btn primary" data-act="setNew">New question set</button></div>
     <p class="meta" style="margin:8px 0 6px">Each set has its own link, QR code, header, colour and expiry date. A new set is private: only you and the admins see it in this overview.</p>
-    ${S.ui.homeNote?`<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}</div>`:""}
+    ${homeNoteHTML()}
     ${section("My sets", "", mine, "No question sets yet. Create the first one.")}
     ${admin ? (rest.length?section("All other sets", "Sets of other users. As admin you can do everything their owner can.", rest, ""):"")
             : section("Public sets", "Made public by other users. You can view their questions and duplicate them; the answers stay with their owner.", pub, "No public sets from other users.")}</div></div>`;
@@ -675,13 +738,35 @@ function usersHTML(){ const list=S.users ? C.userList(S.users) : null, me=S.me.i
     return `<div class="set-row"><div class="set-main"><span class="set-name">${esc(u.name)}${self?` <span class="meta">(you)</span>`:""}</span>
         <div class="meta">${esc(u.email||"no email address")} · ${n==null?"counting…":`${n} own ${n===1?"set":"sets"}`}</div></div>
       <span class="pill">${esc(C.roleName(u.role))}</span>
-      <div class="controls"><button class="btn sm" data-act="userEdit" data-uid="${eu}">Change name or role</button>
+      <div class="controls">${self||!u.email?"":`<button class="btn sm" data-act="userInvite" data-uid="${eu}" title="Sends the mail with a link to choose a password to ${esc(u.email)}">Send invitation again</button>`}<button class="btn sm" data-act="userEdit" data-uid="${eu}">Change name or role</button>
         <button class="btn sm" data-act="userRemove" data-uid="${eu}" ${self?`disabled title="You cannot remove your own access"`:""}>Remove access</button></div></div>`; };
   return `<div class="card" style="padding:26px">
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">Admin</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Users</h1></div>${homeTabs("users")}</div>
-    <p class="meta" style="margin:8px 0 6px">Everyone who may sign in to this Tally Room. An admin manages every set and this list; a user manages their own sets and the ones shared with them. A new user is added by hand for now: an account in the Firebase console plus a record under <b>users</b> (tallyroom-setup.md, step 1b).</p>
-    ${S.ui.homeNote?`<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}</div>`:""}
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div class="eyebrow">Admin</div><h1 style="font-size:clamp(24px,3.4vw,34px);margin-top:6px">Users</h1></div>${homeTabs("users")}<button class="btn primary" data-act="userAdd">Add user</button></div>
+    <p class="meta" style="margin:8px 0 6px">Everyone who may sign in to this Tally Room. An admin manages every set and this list; a user manages their own sets and the ones shared with them. A new user gets a mail with a link to choose a password; the link works once and for a short time.</p>
+    ${homeNoteHTML()}
     ${!list ? `<div class="big-wait"><div class="pulse"></div><p class="meta">Loading users…</p></div>` : `<h2 class="sets-h">Users <span class="meta">${list.length}</span></h2><div class="sets">${list.map(row).join("")}</div>`}</div>`; }
+/* a note on the overview; in demo mode, where no mail is sent, with the link the mail would hold */
+function homeNoteHTML(){ return S.ui.homeNote ? `<div class="banner" role="status" style="margin-top:14px">${esc(S.ui.homeNote)}${S.ui.homeLink && S.ui.homeLinkFor===S.ui.homeNote?` <a href="${esc(S.ui.homeLink)}" style="word-break:break-all">${esc(S.ui.homeLink)}</a>`:""}</div>` : ""; }
+function homeSay(note, code){ S.ui.homeNote=note+(code?" Demo mode sends no mail. The link would be:":""); S.ui.homeLink=code?resetUrl(code):""; S.ui.homeLinkFor=S.ui.homeNote; }
+/* a new user (backlog H8): the account, the record and the mail with the link to choose a password */
+function openAddUserDlg(){ if(S.auth.role!=="admin") return; S.ui.dlg={type:"userAdd", title:"Add user", focus:"uName"}; render(); }
+function addUserDlgHTML(d){ return `<div class="field"><label for="uName">Name (shown to other users as owner and in the share dialog)</label><input type="text" id="uName" maxlength="60" value="${esc(d.name||"")}"></div>
+    <div class="field"><label for="uEmail">Email address</label><input type="email" id="uEmail" maxlength="200" autocapitalize="none" spellcheck="false" autocomplete="off" value="${esc(d.email||"")}"></div>
+    <div class="field"><label for="uRole">Role</label><select id="uRole">${C.ROLES.slice().reverse().map(r=>`<option value="${r}" ${(d.role||"user")===r?"selected":""}>${esc(C.roleName(r))}${r==="admin"?": manages every set and the users":": own sets and the ones shared with them"}</option>`).join("")}</select>
+      ${d.err?`<small style="color:var(--warn);font-weight:700" role="alert">${esc(d.err)}</small>`:""}
+      <div class="meta">The new user gets a mail with a link to choose their own password. You do not set or see a password. You stay signed in as yourself.</div></div>
+    <div class="controls"><button class="btn primary" data-act="dlgSave" ${d.busy?"disabled":""}>${d.busy?"Adding…":"Add and send invitation"}</button><button class="btn ghost" data-act="dlgClose">Cancel</button></div>`; }
+async function saveAddUserDlg(){ const d=S.ui.dlg, g=id=>document.getElementById(id); if(!d || d.type!=="userAdd" || d.busy || !g("uName")) return;
+  d.name=g("uName").value; d.email=g("uEmail").value.trim(); d.role=g("uRole").value;
+  const r=C.newUser(d, S.users, Date.now()); if(r.problem){ d.err=r.problem; d.focus=/name/.test(r.problem)?"uName":"uEmail"; render(); return; }
+  d.err=""; d.busy=true; render();
+  try{ const out=await S.be.addUser(r.user);
+    homeSay(out.mailed===false && !out.code ? `${r.user.name} is added, but the mail could not be sent. Use Send invitation again.` : `${r.user.name} is added.${out.code?"":` A mail with a link to choose a password is on its way to ${r.user.email}.`}`, out.code);
+    S.ui.dlg=null; render(); }
+  catch(e){ console.warn("add user", e&&e.code); d.busy=false; d.err=C.authProblem(e) || (isDenied(e) ? "The account is made, but the database refused the user record. Publish the rules of tallyroom-setup.md, step 1.3" : "Adding failed: "+(e&&e.message||e)); if(S.ui.dlg===d) render(); } }
+async function inviteAgain(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || !u.email || S.auth.role!=="admin") return;
+  try{ const r=await S.be.resetPassword(u.email); homeSay(r && r.code ? `A new link for ${u.name}.` : `A mail with a link to choose a password is on its way to ${u.email}.`, r && r.code); render(); }
+  catch(e){ alert(C.authProblem(e) || "Sending failed: "+(e&&e.message||e)); } }
 function openUserDlg(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || S.auth.role!=="admin") return;
   S.ui.dlg={type:"user", uid, title:"Change name or role", focus:"uName"}; render(); }
 function userDlgHTML(d){ const u=C.normUser(S.users && S.users[d.uid]); if(!u) return `<p class="meta">This user no longer has access.</p><div class="controls"><button class="btn ghost" data-act="dlgClose">Close</button></div>`;
@@ -776,7 +861,7 @@ function openSetDlg(id, focus){ const m=id?metaOf(id):null; if(id && !m) return;
     f: m ? {...m} : {name:"", header:"", accent:C.DEFAULT_ACCENT, category:"generic", named:"no", expiresAt:C.extendedExpiry(Date.now()), joinUrl:""} };
   render(); }
 function dlgHTML(){ const d=S.ui.dlg; if(!d) return "";
-  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="link" ? linkDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : d.type==="view" ? viewDlgHTML(d) : d.type==="share" ? shareDlgHTML(d) : d.type==="assign" ? assignDlgHTML(d) : d.type==="user" ? userDlgHTML(d) : "";
+  const body = d.type==="set" ? setDlgHTML(d) : d.type==="qr" ? qrDlgHTML(d) : d.type==="del" ? delDlgHTML(d) : d.type==="link" ? linkDlgHTML(d) : d.type==="edit" ? editDlgHTML(d) : d.type==="view" ? viewDlgHTML(d) : d.type==="share" ? shareDlgHTML(d) : d.type==="assign" ? assignDlgHTML(d) : d.type==="user" ? userDlgHTML(d) : d.type==="userAdd" ? addUserDlgHTML(d) : d.type==="pw" ? pwDlgHTML(d) : "";
   return `<div class="modal" id="dlg"><div class="card dlg${d.type==="edit"?" wide":""}" role="dialog" aria-modal="true" aria-label="${esc(d.title)}">
     <div style="display:flex;align-items:center;gap:10px"><h2 style="font-size:22px;flex:1">${esc(d.title)}</h2><button class="btn sm ghost" data-act="dlgClose">Close</button></div>${body}</div></div>`; }
 /* what is typed in Settings is kept while another dialog (Share) lies over it; d.f stays what was saved, to compare with */
@@ -1061,6 +1146,11 @@ app.addEventListener("click", e=>{
     case "setAssign": openAssignDlg(id); break;
     case "homeTab": S.ui.homeTab = v==="users" ? "users" : "sets"; S.ui.homeNote=""; render(); break;
     case "userEdit": openUserDlg(b.dataset.uid); break;
+    case "userAdd": openAddUserDlg(); break;
+    case "userInvite": inviteAgain(b.dataset.uid); break;
+    case "pwChange": openPwDlg(); break;
+    case "spSave": doSetPw(); break;
+    case "spResend": doResend(); break;
     case "userRemove": removeUser(b.dataset.uid); break;
     case "setLeave": leaveSet(id); break;
     case "shareAdd": shareAdd(); break;
@@ -1077,7 +1167,7 @@ app.addEventListener("click", e=>{
       S.be.removeSet(d.id).then(()=>{ delete S.polls[d.id]; if(S.route==="set") location.href=urlFor(); else closeDlg(); }).catch(e=>alert("Deleting failed: "+(e&&e.message||e))); break; }
     case "dlgClose": closeDlg(); break;
     case "dlgSave": { const t=S.ui.dlg && S.ui.dlg.type;
-      if(t==="edit") saveEditDlg(); else if(t==="link") saveLinkDlg(); else if(t==="assign") saveAssignDlg(); else if(t==="user") saveUserDlg(); else saveSetDlg(); break; }
+      if(t==="edit") saveEditDlg(); else if(t==="link") saveLinkDlg(); else if(t==="assign") saveAssignDlg(); else if(t==="user") saveUserDlg(); else if(t==="userAdd") saveAddUserDlg(); else if(t==="pw") savePwDlg(); else saveSetDlg(); break; }
     /* ---- consent workflow ---- */
     case "qEdit": { const i=Q.findIndex(x=>x.id===b.dataset.q); if(i<0) break; S.ui.dlg={type:"edit", qid:Q[i].id, title:`Edit proposal ${i+1}`, focus:"dlgText"}; render(); break; }
     case "closeTab": S.ui.closeTab=v; S.ui.tlPage=0; render(); break;
@@ -1122,6 +1212,7 @@ app.addEventListener("focusout", e=>{ const t=e.target; if(S.rendering || !t || 
   const key=t.dataset.key; if(!(S.ui.act||{})[key]) return; actSave(key); setTimeout(renderBg,0); });
 let fuTimer=null;
 app.addEventListener("input", e=>{ const t=e.target; if(t && t.id==="dlgColor"){ markSwatch(); return; }
+  if(t && t.classList && t.classList.contains("pw-in")){ pwHints(); return; }
   if(t && t.id==="nameIn"){ S.ui.nameDraft=t.value; return; }
   if(t && t.classList && t.classList.contains("act-in")){ const key=t.dataset.key, f=t.dataset.f; if(f==="none") return;
     actSet(key,f,t.value); const m=document.getElementById("as_"+key); if(m) m.textContent="";
@@ -1136,7 +1227,9 @@ app.addEventListener("focusout", e=>{ const t=e.target; if(S.rendering || !t || 
 app.addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target && e.target.id==="nameIn"){ e.preventDefault(); document.querySelector('[data-act="nameSave"]')?.click(); return; }
   if(e.key==="Enter" && e.target && (e.target.id==="siEmail" || e.target.id==="siPass")){ e.preventDefault(); doSignIn(); return; }
   if(e.key==="Enter" && e.target && e.target.id==="shareIn"){ e.preventDefault(); shareAdd(); return; }
-  if(e.key==="Enter" && e.target && e.target.id==="uName"){ e.preventDefault(); saveUserDlg(); return; }
+  if(e.key==="Enter" && e.target && (e.target.id==="uName" || e.target.id==="uEmail")){ e.preventDefault(); if(S.ui.dlg && S.ui.dlg.type==="userAdd") saveAddUserDlg(); else saveUserDlg(); return; }
+  if(e.key==="Enter" && e.target && (e.target.id==="pwNew" || e.target.id==="pwNew2" || e.target.id==="pwCur")){ e.preventDefault(); if(S.route==="setpw") doSetPw(); else savePwDlg(); return; }
+  if(e.key==="Enter" && e.target && e.target.id==="spEmail"){ e.preventDefault(); doResend(); return; }
   if(e.key!=="Escape") return; if(S.ui.dlg){ closeDlg(); return; } if(S.ui.configOpen){ S.ui.configOpen=false; S.ui.jsonText=null; render(); } });
 app.addEventListener("toggle", e=>{ if(e.target && e.target.id==="cfgJsonBox") S.ui.jsonOpen=e.target.open; if(e.target && e.target.id==="waitBox" && !S.rendering) S.ui.waitOpen=e.target.open; }, true);
 document.addEventListener("keydown", e=>{ if(!S.me.isHost||S.route!=="set"||S.ui.configOpen||S.ui.dlg||S.ui.view==="participant") return; if(e.target.matches("input,textarea")) return;
@@ -1163,6 +1256,7 @@ async function boot(){
   if(be.onConn) be.onConn(ok=>{ clearTimeout(offTimer); if(ok) setOffline(false); else offTimer=setTimeout(()=>setOffline(true), 6000); });
   /* wait for the first sign-in state before deciding between presenter and participant */
   await new Promise(done=>be.onAuth(a=>{ applyAuth(a); done(); }));
+  if(RESET_CODE && be.checkResetCode){ S.route="setpw"; S.booted=true; bootSetPw(be); return; }
   if(SIGNIN && !be.demo){ if(be.isHost){ location.replace(urlFor({set:SET_ID})); return; } S.route="signin"; S.booted=true; render(); return; }
   if(be.isAdmin && !be.demo) await migrate(be); // only an admin can read the list of all sets
   S.booted=true;

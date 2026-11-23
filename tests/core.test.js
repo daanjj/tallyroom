@@ -862,3 +862,30 @@ test("removing a user's access: the record goes and the user leaves every shared
   assert.equal(C.ownsMessage("Sam", 1), "Sam still owns 1 question set. Assign it to another user first.");
   assert.equal(C.ownsMessage("Sam", 2), "Sam still owns 2 question sets. Assign them to another user first.");
 });
+
+/* ---------- onboarding (backlog H8) ---------- */
+test("the password of a new account is 32 random characters and passes the own rule", () => {
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) { const p = C.randomPassword(); assert.equal(p.length, 32); assert.deepEqual(C.passwordProblems(p, "anna@example.com"), [], p); assert.match(p, /^[A-Za-z]\d/); seen.add(p); }
+  assert.equal(seen.size, 200);
+  for (const edge of [() => 0, () => 0.999999999, () => 1]) assert.equal(C.randomPassword(edge).length, 32);
+});
+test("a new user needs a name and a valid email address that is not in the list yet; the role is user unless it is admin", () => {
+  const list = { u1: { email: "Piet@Example.com", name: "Piet", role: "user" } };
+  assert.deepEqual(C.newUser({ name: "  Sam   de Vries ", email: " sam@example.com ", role: "admin", uid: "x" }, list, NOW), { user: { email: "sam@example.com", name: "Sam de Vries", role: "admin", createdAt: NOW } });
+  assert.equal(C.newUser({ name: "Sam", email: "sam@example.com", role: "presenter" }, list, NOW).user.role, "user"); assert.equal(C.newUser({ name: "Sam", email: "sam@example.com" }, null, NOW).user.role, "user");
+  assert.match(C.newUser({ name: " ", email: "sam@example.com" }, list, NOW).problem, /name/);
+  for (const bad of ["", "sam", "sam@", "@example.com", "sam@example", "sam smit@example.com", "Sam <sam@example.com>", "a@b.c" + "d".repeat(200)]) assert.match(C.newUser({ name: "Sam", email: bad }, list, NOW).problem, /valid email/, bad);
+  assert.match(C.newUser({ name: "Piet 2", email: "piet@example.COM" }, list, NOW).problem, /already a user/);
+  assert.equal(C.emailOk("sam@example.com"), true); assert.equal(C.emailOk(null), false);
+});
+test("what Firebase Authentication refused, as a sentence; and which errors mean the link of a mail is dead", () => {
+  const e = (code) => ({ code });
+  assert.match(C.authProblem(e("auth/wrong-password")), /current password is not right/); assert.match(C.authProblem(e("auth/invalid-credential")), /current password is not right/);
+  assert.match(C.authProblem(e("auth/too-many-requests")), /Too many attempts/); assert.match(C.authProblem(e("auth/network-request-failed")), /connect/);
+  assert.match(C.authProblem(e("auth/weak-password")), /refused this password/); assert.match(C.authProblem(e("auth/password-does-not-meet-requirements")), /refused this password/);
+  assert.match(C.authProblem(e("auth/email-already-in-use")), /already has an account/);
+  assert.equal(C.authProblem(e("auth/expired-action-code")), null); assert.equal(C.authProblem(new Error("x")), null); assert.equal(C.authProblem(null), null);
+  for (const dead of ["auth/expired-action-code", "auth/invalid-action-code", "auth/user-disabled", "auth/user-not-found"]) assert.equal(C.linkIsDead(e(dead)), true, dead);
+  assert.equal(C.linkIsDead(e("auth/network-request-failed")), false); assert.equal(C.linkIsDead(null), false);
+});

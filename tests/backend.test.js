@@ -12,10 +12,16 @@ function fakeFirebase({ data = {}, user = null, anonFails = false, noAppCheck = 
   const log = { on: [], off: [], anon: 0, out: 0 }; let authCb = null, cur = user, n = 0; const live = [];
   const get = (path) => path.split("/").reduce((o, k) => (o == null ? o : o[k]), data);
   const setUser = (u) => { cur = u; setTimeout(() => authCb && authCb(cur), 0); };
-  const auth = { get currentUser() { return cur; }, onAuthStateChanged: (f) => { authCb = f; setTimeout(() => f(cur), 0); },
+  /* a second connection (addUser): its own sign-in state, which never touches the one of the page */
+  const second = (name) => { const a2 = { setPersistence: async (p) => log.second.push(["persistence", p]), createUserWithEmailAndPassword: async (email, pw) => { log.second.push(["create", email, pw]); if (email.startsWith("taken@")) throw Object.assign(new Error("in use"), { code: "auth/email-already-in-use" }); return { user: { uid: "u_" + email.split("@")[0] } }; },
+    signOut: async () => log.second.push(["signOut"]) }; return { auth: () => a2, delete: async () => log.second.push(["delete", name.split("-")[0]]) }; };
+  log.second = []; log.mail = [];
+  const auth = { get currentUser() { return cur; }, verifyPasswordResetCode: async (c) => { if (c !== "good") throw Object.assign(new Error("old"), { code: "auth/expired-action-code" }); return "new@x.nl"; },
+    confirmPasswordReset: async (c, pw) => { if (c !== "good") throw Object.assign(new Error("old"), { code: "auth/invalid-action-code" }); log.confirmed = [c, pw]; }, onAuthStateChanged: (f) => { authCb = f; setTimeout(() => f(cur), 0); },
     signInAnonymously: async () => { log.anon++; if (anonFails) throw Object.assign(new Error("off"), { code: "auth/operation-not-allowed" }); setUser({ uid: "anon" + ++n, isAnonymous: true }); },
     signInWithEmailAndPassword: async (email, pw) => { if (pw !== "good") throw Object.assign(new Error("bad"), { code: "auth/invalid-credential" }); setUser({ uid: "u_" + email.split("@")[0], isAnonymous: false, email }); },
-    signOut: async () => { log.out++; setUser(null); }, sendPasswordResetEmail: async () => {} };
+    signOut: async () => { log.out++; setUser(null); }, sendPasswordResetEmail: async (email, settings) => { log.mail.push(email); (log.mailWith = log.mailWith || []).push(settings || null); if (settings && /blocked/.test(settings.url)) throw Object.assign(new Error("domain"), { code: "auth/unauthorized-continue-uri" }); if (email.startsWith("nomail@")) throw Object.assign(new Error("quota"), { code: "auth/quota-exceeded" }); } };
+  const authNs = Object.assign(() => auth, { Auth: { Persistence: { NONE: "none" } }, EmailAuthProvider: { credential: (email, pw) => ({ email, pw }) } });
   /* the listener on users/{uid} is the sign-in itself, so it has its own log; log.on holds the listeners the page asked for */
   /* a query on a list: the children whose field has that value; listed in the logs as sets?owner=u_ann */
   const filtered = (path, k, v) => { const o = get(path) || {}, out = {}; Object.keys(o).forEach((id) => { if (o[id] && o[id][k] === v) out[id] = o[id]; }); return Object.keys(out).length ? out : null; };
@@ -30,7 +36,7 @@ function fakeFirebase({ data = {}, user = null, anonFails = false, noAppCheck = 
   /* a change in the database, as the server would push it to who listens */
   const change = (path, v) => { const ks = path.split("/"), last = ks.pop(); let o = data; ks.forEach((k) => (o = o[k] = o[k] || {})); if (v == null) delete o[last]; else o[last] = v;
     live.filter((l) => l[0] === path || path.startsWith(l[0] + "/")).forEach((l) => l[1]({ val: () => (l[2] ? l[2]() : get(l[0]) ?? null) })); };
-  return { log, change, firebase: { initializeApp() {}, database: () => db, auth: () => auth, ...(noAppCheck ? {} : { appCheck }) } };
+  return { log, change, firebase: { initializeApp: (cfg, name) => (name ? second(name) : undefined), database: () => db, auth: authNs, ...(noAppCheck ? {} : { appCheck }) } };
 }
 function load(opts, storage, query, anon, appCheckKey) {
   const fb = fakeFirebase(opts); global.firebase = fb.firebase; global.localStorage = storage || fakeStorage(); global.TRCore = require("../js/core.js");
@@ -227,6 +233,53 @@ test("demo mode: an admin assigns a set, renames and removes a user; the page of
   assert.deepEqual(C.sharedWith((await adm.getSets()).demo0003), [], "taken off every shared list");
   assert.deepEqual(states.at(-1), ["", null, false], "no record any more: no rights"); assert.equal(usr.isHost, false); assert.equal(usr.isUser, false); assert.equal(lists.at(-1), "");
   let users = null; adm.onUsers((u) => (users = Object.keys(u).sort())); assert.deepEqual(users, ["demo-admin", "demo-sam"]);
+});
+test("add user: the account is made through a second connection with a random password, then the record and the mail; the admin stays signed in (H8)", async () => {
+  global.crypto = global.crypto || require("node:crypto").webcrypto;
+  const { be, log, states } = load({ data: JSON.parse(JSON.stringify(DATA)), user: { uid: "u_adm", isAnonymous: false, email: "adm@x.nl" } }, null, "", false); await tick();
+  const out = await be.addUser({ name: " New  One ", email: "new@x.nl", role: "user", extra: 1 });
+  assert.deepEqual(out, { uid: "u_new", mailed: true });
+  assert.deepEqual(log.second.map((x) => x[0]), ["persistence", "create", "signOut", "delete"]); assert.deepEqual(log.second[0], ["persistence", "none"], "nothing of the new account is kept on the device");
+  const pw = log.second[1][2]; assert.equal(pw.length, 32); assert.deepEqual(global.TRCore.passwordProblems(pw, "new@x.nl"), []);
+  const [path, rec] = log.set.at(-1); assert.equal(path, "users/u_new"); assert.deepEqual({ ...rec, createdAt: 0 }, { email: "new@x.nl", name: "New One", role: "user", createdAt: 0 }); assert.ok(Math.abs(rec.createdAt - Date.now()) < 5000);
+  assert.deepEqual(log.mail, ["new@x.nl"]); assert.ok(!JSON.stringify([log.set, log.mail]).includes(pw), "the password is not stored or sent");
+  assert.equal(log.out, 0); assert.equal(be.id, "u_adm"); assert.equal(states.at(-1).uid, "u_adm");
+  assert.deepEqual(await be.addUser({ name: "No Mail", email: "nomail@x.nl", role: "admin" }), { uid: "u_nomail", mailed: false }, "the record is there; the invitation can be sent again");
+  assert.equal(log.set.at(-1)[1].role, "admin");
+  const sets = log.set.length; await assert.rejects(be.addUser({ name: "Taken", email: "taken@x.nl" }), (e) => e.code === "auth/email-already-in-use"); assert.equal(log.set.length, sets, "no record without an account");
+  assert.equal(log.second.at(-1)[0], "delete", "the second connection is always thrown away");
+  await assert.rejects(be.addUser({ name: "", email: "x@x.nl" }), /name/); await assert.rejects(be.addUser({ name: "X", email: "not an address" }), /valid email/);
+});
+test("the password mail carries the address of the sign-in screen as continue address, and goes without it when Firebase refuses that address (H8)", async () => {
+  const at = async (location) => { global.location = location; try { const { be, log } = load({ data: DATA }, null, "", false); await tick(); await be.resetPassword("ann@x.nl"); return [log.mail, log.mailWith]; } finally { delete global.location; } };
+  assert.deepEqual(await at({ protocol: "https:", origin: "https://x.github.io", pathname: "/tallyroom/", search: "?set=a&mode=resetPassword" }), [["ann@x.nl"], [{ url: "https://x.github.io/tallyroom/?host=1" }]]);
+  assert.deepEqual(await at({ protocol: "https:", origin: "https://blocked.example", pathname: "/" }), [["ann@x.nl", "ann@x.nl"], [{ url: "https://blocked.example/?host=1" }, null]], "sent again without it");
+  assert.deepEqual(await at({ protocol: "file:", origin: "null", pathname: "/C:/index.html" }), [["ann@x.nl"], [null]]);
+  assert.deepEqual(await at(undefined), [["ann@x.nl"], [null]]);
+});
+test("set password with the code of the link, and change password after checking the current one (H8)", async () => {
+  const calls = [], me = { uid: "u_ann", isAnonymous: false, email: "ann@x.nl", reauthenticateWithCredential: async (c) => { calls.push(["reauth", c.email, c.pw]); if (c.pw !== "current") throw Object.assign(new Error("bad"), { code: "auth/wrong-password" }); }, updatePassword: async (pw) => calls.push(["update", pw]) };
+  const { be, log } = load({ data: DATA, user: me }, null, "", false); await tick();
+  assert.equal(await be.checkResetCode("good"), "new@x.nl"); await assert.rejects(be.checkResetCode("old"), (e) => global.TRCore.linkIsDead(e));
+  await be.setPassword("good", "correct horse battery"); assert.deepEqual(log.confirmed, ["good", "correct horse battery"]); await assert.rejects(be.setPassword("used", "x"), (e) => global.TRCore.linkIsDead(e));
+  await assert.rejects(be.changePassword("wrong", "correct horse battery"), (e) => e.code === "auth/wrong-password"); assert.deepEqual(calls, [["reauth", "ann@x.nl", "wrong"]], "nothing changes with a wrong current password");
+  await be.changePassword("current", "correct horse battery"); assert.deepEqual(calls.slice(1), [["reauth", "ann@x.nl", "current"], ["update", "correct horse battery"]]);
+  const anon = load({ data: DATA }, null, "set=a", true); await tick(); await assert.rejects(anon.be.changePassword("a", "b"), /Not signed in/);
+});
+test("demo mode: add user, the link that the mail would hold, set password once, change password (H8)", async () => {
+  global.localStorage = fakeStorage(); global.addEventListener = () => {};
+  delete require.cache[require.resolve("../js/backend.js")]; const B = require("../js/backend.js"), mk = (q) => B.make({ firebaseConfig: {}, params: new URLSearchParams(q) });
+  const adm = mk("demo=1"), usr = mk("demo=1&role=user"); let users = null; adm.onUsers((u) => (users = u));
+  await assert.rejects(usr.addUser({ name: "X", email: "x@demo.example" }), /Only an admin/);
+  await assert.rejects(adm.addUser({ name: "Dup", email: "SAM.demo@demo.example" }), /already a user/);
+  const out = await adm.addUser({ name: "Nina", email: "nina@demo.example", role: "user" }); assert.equal(out.mailed, false); assert.ok(out.code);
+  assert.deepEqual({ ...users[out.uid], createdAt: 0 }, { email: "nina@demo.example", name: "Nina", role: "user", createdAt: 0 });
+  assert.equal(await adm.checkResetCode(out.code), "nina@demo.example"); await adm.setPassword(out.code, "correct horse battery");
+  await assert.rejects(adm.checkResetCode(out.code), (e) => global.TRCore.linkIsDead(e), "a link works once"); await assert.rejects(adm.setPassword(out.code, "x"), (e) => global.TRCore.linkIsDead(e));
+  await assert.rejects(adm.checkResetCode("nonsense"), (e) => global.TRCore.linkIsDead(e));
+  const again = await adm.resetPassword("Nina@demo.example"); assert.ok(again.code && again.code !== out.code); assert.deepEqual(await adm.resetPassword("nobody@demo.example"), {});
+  await assert.rejects(adm.changePassword("wrong", "correct horse battery"), (e) => e.code === "auth/wrong-password");
+  await adm.changePassword("demo", "correct horse battery"); await assert.rejects(adm.changePassword("demo", "another long one 1"), (e) => e.code === "auth/wrong-password"); await adm.changePassword("correct horse battery", "another long one 1");
 });
 test("demo mode: a set is created with its poll, and not over an existing one", async () => {
   global.localStorage = fakeStorage(); global.addEventListener = () => {};

@@ -983,7 +983,7 @@ Optional, and the largest item of this epic. Worth building when sets are named 
 
 Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps working without sign-in, as one made-up admin.
 
-> **Status: H1 to H7 built on 23 Nov 2026**, with tests and tried in demo mode (as admin and with `&role=user`). H1 to H5 are the release that can go live; H6 and H7 can go with it or follow. **Not live:** the rules are not published, nothing has run against the real database, and `tests/rules-checklist.md` is still empty. H8 and H9 are not built; until H8 users are added by hand.
+> **Status: the whole epic, H1 to H9, is built on 23 Nov 2026**, with tests and tried in demo mode (as admin and with `&role=user`). H1 to H5 are the release that can go live; H6 to H8 can go with it or follow. **Not live:** the rules are not published, nothing has run against the real database or the real Firebase Authentication (no mail has been sent, no account made from the page), and the log in `tests/rules-checklist.md` is still empty. Before H8 is used: the mail template and the password policy in the Firebase console (`tallyroom-setup.md`, steps 1b.5 and 1b.6).
 
 **Where it stands today** (before this epic)
 
@@ -1236,6 +1236,21 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 
 ### H8. Onboarding: invitation, first password, change password — M
 
+> **Status: built on 23 Nov 2026**, with tests (core, both backends against the stand-in for Firebase) and tried in demo mode: Add user, the link, the Set password screen with the four refused passwords of the AC, a used link with Send me a new link, and Change password with a wrong current password. **Not tried:** anything against the real Firebase Authentication. No account was made through the second connection, no mail was sent, and the link of a real mail has not opened the page. The steps in the Firebase console (mail template with the action URL, password policy) are in `tallyroom-setup.md` 1b.5 and 1b.6 and still have to be done.
+>
+> Differences from the specification below:
+> - **An address that already has an account cannot be added from the page.** Firebase refuses to make the account a second time and the page cannot look up its uid. That is the case for a user whose access was removed (H7 leaves the account). The page says so; delete the account in the console first, or add the record by hand.
+> - **If the mail fails after the account and the record are made**, the user is added and the page says to use **Send invitation again**.
+> - **"This link is no longer valid" asks for the email address**: a dead link no longer says who it was for. The answer is the same whether or not the address has an account. After a link that dies while the form is open, the address is filled in.
+> - **What is still missing is shown while typing**, as a list under the first field, with the rule in one sentence above it. The two password fields keep what was typed when something is refused.
+> - **After Set password the page signs in and replaces the address**, so the code is not left in the address bar or the history. If that sign-in fails, the sign-in screen follows.
+> - **Change password** sits next to Sign out, on the overview and on the presenter screen of a set. A new password equal to the current one is refused.
+> - **Password policy in Firebase:** the console has it under Authentication → Settings → Password policy (minimum length 6 to 30, mode Require or Notify). Whether this project shows it without the upgrade to Identity Platform could not be checked from here; the setup guide covers both cases. The page maps Firebase's refusal to "Firebase refused this password".
+> - **App Check:** the second connection starts App Check too when a site key is set. Not tried with enforcement for Authentication.
+> - **The mail carries a continue address** (the sign-in screen of the page). On this project the console refuses changes to the mail templates ("Email template updates are currently unavailable for this project", 23 Nov 2026), so the action URL cannot be set and the link opens Firebase's own page. That page then ends with **Continue** to the sign-in screen. Until Firebase lifts that, the Set password screen is not reached by a real mail, and a first or forgotten password is only held to Firebase's password policy; Change password keeps the page's rules. If Firebase refuses the continue address (domain not authorised), the mail is sent without it.
+> - **Demo:** no mail. Add user, Send invitation again and Send me a new link show the link the mail would hold; passwords are kept in the demo store (the first current password is `demo`). Setting a password in demo mode does not sign in as that person: the page stays the demo admin or user.
+> - No change to the database rules: an admin already writes `users/{uid}`.
+
 **Story.** As an admin I want to add a colleague from the page, and as a user I want to choose and change my own password, so that nobody has to go into the Firebase console or pass a password around.
 
 **Specification**
@@ -1260,6 +1275,8 @@ Added 23 Nov 2026. Applies to the Firebase backend; demo mode (`?demo=1`) keeps 
 **Depends on:** H2, H7. Independent of H5 and H6: if it turns out harder than it looks, users keep being added by hand.
 
 ### H9. Documentation — S
+
+> **Status: done on 23 Nov 2026.** README: "Who may do what" (users, sharing, admin, passwords), "Data layout" (`users`, `userSets`, the owner fields of `sets`), the files table and the demo paragraph. `tallyroom-setup.md`: step 1b rewritten (first admin by hand, the password mail with its action URL, the password policy, everyone else from the page), the usage section (My sets, Public sets, Share, Assign, Users), the upgrade steps and troubleshooting for mails, links and refused passwords; the rules block is the same text as `database.rules.json` (a test checks it). This backlog: a status note on every item of the epic, and open decision 2 closed. H4 had already done the rules block, the first admin and the upgrade steps of H3.
 
 - README: "Who may do what" and "Data layout" follow this epic. `tallyroom-setup.md`: the new rules block, the first admin, the upgrade steps of H3, the mail template and password policy of H8. This backlog: status notes per item, and open decision 2 closed.
 
@@ -1302,7 +1319,7 @@ Not planned now. Specified far enough to check that A to D do not block it.
 Choices I made to keep the items implementable. Change them here before you start the item.
 
 1. **Header versus name (A1, A3).** I gave a set two labels: a `name` for your overview ("MT offsite team B") and a `header` that the audience sees. If one label is enough, drop `name`. AGREE
-2. **Presenter rights (A1).** One shared `HOST_KEY` gives access to all sets. "In parallel in different team settings" could also mean different presenters who should not see each other's sets; that needs a key per set or real sign-in, and is a separate item. AGREE. (G1 brings real sign-in, still with all presenters seeing all sets. Epic H gives each set an owner.)
+2. **Presenter rights (A1).** One shared `HOST_KEY` gives access to all sets. "In parallel in different team settings" could also mean different presenters who should not see each other's sets; that needs a key per set or real sign-in, and is a separate item. AGREE. **CLOSED by Epic H (23 Nov 2026):** G1 brought real sign-in, and since Epic H every set has an owner, is private unless made public, and is managed only by its owner, the users it is shared with and admins.
 3. **Expiry is not enforced by the database (A7).** Good enough for workshops; real enforcement needs rules that compare `now` with `expiresAt`. AGREE. (G3 adds that enforcement.)
 4. **Decided: all purple follows the accent (A5).** Buttons, logo mark and bars, and also the faint page tint, borders and text tints. The alternative, a neutral grey page for every accent, is simpler but changes how today's purple sets look.
 5. **No mixing of consent and dilemma in one set (B1).**  AGREE
