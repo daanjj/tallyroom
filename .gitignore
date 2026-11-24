@@ -5,3 +5,6 @@
 # Real question sets and exports stay local
 *-tallyroom-*.json
 *.zip
+
+# Onboarding deck stays local
+*.pptx
