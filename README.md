@@ -16,6 +16,8 @@ There is no build step: the browser loads these files as they are.
 | `js/backend.js` | Where the data lives: Firebase, or a demo store inside the browser |
 | `js/app.js` | Screens and actions |
 | `tests/core.test.js` | Tests for `js/core.js` |
+| `tools/password-link.mjs` | For an admin, on their own computer: the link of a password mail without the mail (tallyroom-setup.md, step 1b.9). Needs a service-account key, which stays out of Git |
+| `tools/password-link.sh` | The same on a Mac: asks for the email address and puts the link on the clipboard |
 | `vendor/` | Third-party scripts, kept here so the page loads no script from another host (see below) |
 | `tests/hardening.test.js` | Tests for the script sources, the security policy and the escaping in exports |
 | `tests/fixtures/hostile-set.json` | A question set whose every text tries to inject HTML (see below) |

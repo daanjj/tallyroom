@@ -8,3 +8,8 @@
 
 # Onboarding deck stays local
 *.pptx
+
+# Admin tools: the service-account key gives full control over the Firebase project and never leaves the admin's computer
+tools/node_modules/
+tools/service-account*.json
+*-firebase-adminsdk-*.json
