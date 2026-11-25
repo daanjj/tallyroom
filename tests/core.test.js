@@ -870,6 +870,13 @@ test("the password of a new account is 32 random characters and passes the own r
   assert.equal(seen.size, 200);
   for (const edge of [() => 0, () => 0.999999999, () => 1]) assert.equal(C.randomPassword(edge).length, 32);
 });
+test("the password of a new account meets a Firebase policy that requires every kind of character", () => {
+  /* the marks Firebase counts as non-alphanumeric (v2/passwordPolicy, allowedNonAlphanumericCharacters) */
+  const marks = new Set([..."^$*.[]{}()?\"!@#%&/\\,><':;|_~`-"]);
+  const meets = p => /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p) && [...p].some(c => marks.has(c)) && [...p].every(c => /[A-Za-z0-9]/.test(c) || marks.has(c));
+  for (let i = 0; i < 2000; i++) { const p = C.randomPassword(); assert.ok(meets(p), p); }
+  for (const edge of [() => 0, () => 0.999999999, () => 1]) assert.ok(meets(C.randomPassword(edge)));
+});
 test("a new user needs a name and a valid email address that is not in the list yet; the role is user unless it is admin", () => {
   const list = { u1: { email: "Piet@Example.com", name: "Piet", role: "user" } };
   assert.deepEqual(C.newUser({ name: "  Sam   de Vries ", email: " sam@example.com ", role: "admin", uid: "x" }, list, NOW), { user: { email: "sam@example.com", name: "Sam de Vries", role: "admin", createdAt: NOW } });
@@ -883,7 +890,13 @@ test("what Firebase Authentication refused, as a sentence; and which errors mean
   const e = (code) => ({ code });
   assert.match(C.authProblem(e("auth/wrong-password")), /current password is not right/); assert.match(C.authProblem(e("auth/invalid-credential")), /current password is not right/);
   assert.match(C.authProblem(e("auth/too-many-requests")), /Too many attempts/); assert.match(C.authProblem(e("auth/network-request-failed")), /connect/);
-  assert.match(C.authProblem(e("auth/weak-password")), /refused this password/); assert.match(C.authProblem(e("auth/password-does-not-meet-requirements")), /refused this password/);
+  assert.match(C.authProblem(e("auth/weak-password")), /refused this password because it is too short/);
+  assert.equal(C.authProblem(e("auth/password-does-not-meet-requirements")), "This password does not meet the password policy of this project, set in the Firebase console");
+  const policy = { code: "auth/password-does-not-meet-requirements", message: "Firebase: Missing password requirements: [Password must contain an upper case character, Password must contain a non-alphanumeric character, Password must contain at least 14 characters, Password must contain a numeric character] (auth/password-does-not-meet-requirements)." };
+  assert.equal(C.authProblem(policy), "This password does not meet the password policy of this project. It needs an uppercase letter, a symbol such as ! ? @ # % -, at least 14 characters, a digit");
+  assert.equal(C.authProblem({ ...policy, message: "Missing password requirements: [Password must contain a lower case character, Password may not contain more than 64 characters, Something new]" }), "This password does not meet the password policy of this project. It needs a lowercase letter, at most 64 characters, Something new");
+  for (const c of ["auth/weak-password", "auth/password-does-not-meet-requirements"]) assert.match(C.authProblem({ ...policy, code: c }, { generated: true }), /password the page makes for a new account.*1b\.6/);
+  assert.match(C.authProblem(e("auth/email-already-in-use"), { generated: true }), /already has an account/);
   assert.match(C.authProblem(e("auth/email-already-in-use")), /already has an account/);
   assert.equal(C.authProblem(e("auth/expired-action-code")), null); assert.equal(C.authProblem(new Error("x")), null); assert.equal(C.authProblem(null), null);
   for (const dead of ["auth/expired-action-code", "auth/invalid-action-code", "auth/user-disabled", "auth/user-not-found"]) assert.equal(C.linkIsDead(e(dead)), true, dead);

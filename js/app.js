@@ -798,7 +798,7 @@ async function saveAddUserDlg(){ const d=S.ui.dlg, g=id=>document.getElementById
     d.busy=false; d.title=out.restored?"Access given back":"User added"; d.focus="invLink";
     d.done={ restored:!!out.restored, name:r.user.name, email:r.user.email, role:r.user.role, wantMail:d.mail, mailed:!!out.mailed, demo:!!out.code, link: out.key ? C.inviteLink(PAGE, r.user.email, out.key) : out.code ? resetUrl(out.code) : "" };
     S.ui.homeNote=out.restored ? `${r.user.name} has access again.` : `${r.user.name} is added.`; if(S.ui.dlg===d) render(); }
-  catch(e){ console.warn("add user", e&&e.code); d.busy=false; d.err=C.authProblem(e) || (isDenied(e) ? "The account is made, but the database refused the user record. Publish the rules of tallyroom-setup.md, step 1.3" : "Adding failed: "+(e&&e.message||e)); if(S.ui.dlg===d) render(); } }
+  catch(e){ console.warn("add user", e&&e.code); d.busy=false; d.err=C.authProblem(e, {generated:true}) || (isDenied(e) ? "The account is made, but the database refused the user record. Publish the rules of tallyroom-setup.md, step 1.3" : "Adding failed: "+(e&&e.message||e)); if(S.ui.dlg===d) render(); } }
 async function inviteAgain(uid){ const u=C.normUser(S.users && S.users[uid]); if(!u || !u.email || S.auth.role!=="admin") return;
   try{ const r=await S.be.resetPassword(u.email); homeSay(r && r.code ? `A new link for ${u.name}.` : `A mail with a link to choose a password is on its way to ${u.email}.`, r && r.code); render(); }
   catch(e){ alert(C.authProblem(e) || "Sending failed: "+(e&&e.message||e)); } }

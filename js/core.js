@@ -436,9 +436,13 @@ const ownsMessage = (name, n) => `${name} still owns ${n} question ${n===1?"set"
 function withOwner(meta, uid){ const m=normMeta(meta); if(!m || !normUid(uid)) return m; return normMeta({...m, owner:uid}); }
 
 /* ---- onboarding (backlog H8) ---- */
-/* the password of a new account: 32 random characters that nobody sees; the user chooses their own through the link in the mail */
-const PW_CHARS="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!#%+-=?@_";
-function randomPassword(rnd){ rnd=rnd||Math.random; const pick=s=>s[Math.floor(rnd()*s.length)%s.length]; let p=pick(PW_CHARS.slice(0,49))+pick(PW_CHARS.slice(49,57)); // a letter and a digit, so it passes the own rule
+/* the password of a new account: 32 random characters that nobody sees; the user chooses their own through the link in the mail.
+   It always holds an uppercase and a lowercase letter, a digit and a mark, so it also passes a Firebase password policy that
+   requires every kind of character; the marks are only ones Firebase counts as such (no + or =) */
+const PW_UPPER="ABCDEFGHJKLMNPQRSTUVWXYZ", PW_LOWER="abcdefghijkmnopqrstuvwxyz", PW_DIGITS="23456789", PW_MARKS="!#%-?@_";
+const PW_CHARS=PW_UPPER+PW_LOWER+PW_DIGITS+PW_MARKS;
+function randomPassword(rnd){ rnd=rnd||Math.random; const pick=s=>s[Math.floor(rnd()*s.length)%s.length];
+  let p=pick(PW_UPPER)+pick(PW_DIGITS)+pick(PW_LOWER)+pick(PW_MARKS); // a letter and a digit first, so it passes the own rule
   while(p.length<32) p+=pick(PW_CHARS); return p; }
 const emailOk = s => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(String(s||"").trim()) && String(s).trim().length<=200;
 /* what an admin types for a new user -> {user} to store, or {problem}. users = the list as it is, to refuse an address twice */
@@ -455,12 +459,27 @@ function inviteLink(page, email, key, demo){ const enc=s=>encodeURIComponent(s).
 function parseInvite(hash){ try{ const p=new URLSearchParams(String(hash||"").replace(/^#/,"")), email=(p.get("e")||"").trim(), key=p.get("k")||""; return emailOk(email) && key ? {email, key} : null; }catch(e){ return null; } }
 /* the link was used already (the password it holds is no longer the password), or the account is gone */
 const inviteIsDead = e => /wrong-password|invalid-credential|invalid-login-credentials|user-not-found|user-disabled|invalid-email/.test(String((e&&e.code)||""));
-/* what went wrong in Firebase Authentication, as a sentence; null when the code is not one of these */
-function authProblem(e){ const c=String((e&&e.code)||"");
+/* what Firebase's password policy found missing, in the page's words. Firebase lists it in the message of the error, as
+   "Missing password requirements: [Password must contain an upper case character, ...]"; [] when it does not say */
+function policyMisses(e){ const m=/requirements:\s*\[([^\]]*)\]/i.exec(String((e&&e.message)||"")); if(!m) return [];
+  return m[1].split(",").map(s=>s.trim()).filter(Boolean).map(s=>{ const n=/(\d+)/.exec(s);
+    if(/upper\s*case/i.test(s)) return "an uppercase letter";
+    if(/lower\s*case/i.test(s)) return "a lowercase letter";
+    if(/non-?alphanumeric/i.test(s)) return "a symbol such as ! ? @ # % -";
+    if(/numeric/i.test(s)) return "a digit";
+    if(/at least/i.test(s) && n) return `at least ${n[1]} characters`;
+    if(/(more than|at most|maximum)/i.test(s) && n) return `at most ${n[1]} characters`;
+    return s.replace(/^password must (contain )?/i,""); }); }
+/* what went wrong in Firebase Authentication, as a sentence; null when the code is not one of these.
+   o.generated: the password was made by the page (Add user), so nobody can choose another one */
+function authProblem(e, o){ const c=String((e&&e.code)||"");
+  if(o && o.generated && /weak-password|password-does-not-meet-requirements/.test(c)) return "Firebase's password policy asks for more than the password the page makes for a new account. Check the policy in the Firebase console (tallyroom-setup.md, step 1b.6)";
   if(/network/.test(c)) return "Could not connect. Check your connection and try again.";
   if(/too-many-requests/.test(c)) return "Too many attempts. Wait a few minutes and try again.";
   if(/wrong-password|invalid-credential|invalid-login-credentials/.test(c)) return "The current password is not right";
-  if(/weak-password|password-does-not-meet-requirements/.test(c)) return "Firebase refused this password. Choose a longer one";
+  if(/weak-password/.test(c)) return "Firebase refused this password because it is too short";
+  if(/password-does-not-meet-requirements/.test(c)){ const miss=policyMisses(e);
+    return miss.length ? "This password does not meet the password policy of this project. It needs "+miss.join(", ") : "This password does not meet the password policy of this project, set in the Firebase console"; }
   if(/email-already-in-use/.test(c)) return "This email address already has an account in Firebase Authentication that this page does not know. Delete that account in the Firebase console, or add its record by hand (tallyroom-setup.md, step 1b)";
   if(/invalid-email/.test(c)) return "Type a valid email address.";
   if(/operation-not-allowed/.test(c)) return "Email and password sign-in is switched off in the Firebase project (tallyroom-setup.md, step 1b).";
